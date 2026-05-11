@@ -26,8 +26,8 @@ class FingerprintSource < ApplicationRecord
       "ARRAY_AGG(DISTINCT destination_bssid ORDER BY destination_bssid) FILTER (WHERE destination_bssid IS NOT NULL AND destination_bssid != '') AS destination_bssids",
       "ARRAY_AGG(DISTINCT location_id ORDER BY location_id) FILTER (WHERE location_id IS NOT NULL AND location_id != '') AS location_ids",
       "ARRAY_AGG(DISTINCT sensor_id ORDER BY sensor_id) FILTER (WHERE sensor_id IS NOT NULL AND sensor_id != '') AS sensor_ids",
-      "MIN(first_occurred_at) AS first_seen",
-      "MAX(last_occurred_at) AS last_seen"
+      "MIN(observed_at) AS first_seen",
+      "MAX(observed_at) AS last_seen"
     ).group(:device_fingerprint)
   }
 
