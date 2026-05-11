@@ -1,0 +1,6 @@
+<% content_for :title, "Fingerprint Sources" %>
+<% content_for :turbo_cache_control, "no-cache" %>
+
+<%= svelte_props_tag "fingerprint-sources-svelte-root", initial: @fingerprint_sources_payload %>
+<div id="fingerprint-sources-svelte-root"></div>
+<%= svelte_bundle_tags :fingerprint_sources %>
