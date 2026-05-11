@@ -9,7 +9,8 @@ module NavHelper
     devices: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>',
     identities: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20c1-4 13-4 14 0"/></svg>',
     heatmap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>',
-    alerts: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3 20h18zM12 9v5M12 17h.01"/></svg>'
+    alerts: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3 20h18zM12 9v5M12 17h.01"/></svg>',
+    fingerprint: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5a7 7 0 0 1 11 0M5 10a9 9 0 0 1 14 0M4 14a11 11 0 0 1 5.5 4M7 16a7 7 0 0 1 3 2M9 20h2M12 16v4"/></svg>'
   }.freeze
 
   def nav_link_to(label, path, icon:)

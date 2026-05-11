@@ -50,10 +50,10 @@ class FingerprintSourcesController < ApplicationController
   private
 
   def filtered_scope
-    scope = FingerprintSource.aggregated
+    scope = FingerprintSource.with_fingerprint
     scope = scope.search(@query) if @query.present?
     scope = apply_grid_filters(scope, FILTERS)
-    scope
+    scope.aggregated
   end
 
   def fingerprint_sources_payload(entries)

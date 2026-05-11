@@ -9,9 +9,10 @@ class FingerprintSource < ApplicationRecord
     sanitized = query.to_s.strip
     return all if sanitized.blank?
 
+    safe = ActiveRecord::Base.sanitize_sql_like(sanitized)
     where(
       "device_fingerprint ILIKE :q OR source_mac ILIKE :q OR ssid ILIKE :q OR bssid ILIKE :q OR location_id ILIKE :q OR sensor_id ILIKE :q",
-      q: "%#{sanitize_sql_like(sanitized)}%"
+      q: "%#{safe}%"
     )
   }
 
@@ -69,11 +70,5 @@ class FingerprintSource < ApplicationRecord
       first_seen: first_seen,
       last_seen: last_seen
     }
-  end
-
-  private
-
-  def sanitize_sql_like(string)
-    ActiveRecord::Base.sanitize_sql_like(string)
   end
 end
