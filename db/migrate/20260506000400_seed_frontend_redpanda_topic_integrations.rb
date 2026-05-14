@@ -1,6 +1,6 @@
 class SeedFrontendRedpandaTopicIntegrations < ActiveRecord::Migration[7.2]
   Redpanda_PARAM_SCHEMA = {
-    "url" => { "type" => "string", "label" => "Redpanda URL", "placeholder" => "redpanda://127.0.0.1:4222" },
+    "url" => { "type" => "string", "label" => "Redpanda URL", "placeholder" => "127.0.0.1:9092" },
     "topic" => { "type" => "string", "label" => "Topic", "placeholder" => "wireless.audit" },
     "consumer_name" => { "type" => "string", "label" => "Consumer" }
   }.freeze

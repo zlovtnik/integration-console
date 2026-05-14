@@ -11,7 +11,7 @@ class IntegrationConfigTest < ActiveSupport::TestCase
       name: "Warehouse Sync",
       source_type: "redpanda",
       destination_type: "postgres",
-      params: { "url" => "redpanda://127.0.0.1:4222" }
+      params: { "url" => "127.0.0.1:9092" }
     )
 
     assert_equal "warehouse-sync", config.slug
