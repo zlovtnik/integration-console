@@ -39,7 +39,7 @@ class IntegrationsController < ApplicationController
   end
 
   def new
-    integration = IntegrationConfig.new(enabled: true, source_type: "nats", destination_type: "postgres")
+    integration = IntegrationConfig.new(enabled: true, source_type: "redpanda", destination_type: "postgres")
     @integration_detail_payload = integration_detail_payload(integration, mode: "new")
     render :show
   end

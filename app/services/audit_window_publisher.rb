@@ -1,12 +1,12 @@
 class AuditWindowPublisher
-  SUBJECT = "wireless.audit.config"
+  TOPIC = "wireless.audit.config"
 
-  def initialize(audit_window, publisher: Nats::Publisher.new)
+  def initialize(audit_window, publisher: Redpanda::Publisher.new)
     @audit_window = audit_window
     @publisher = publisher
   end
 
   def call
-    @publisher.publish(SUBJECT, @audit_window.payload)
+    @publisher.publish(TOPIC, @audit_window.payload)
   end
 end

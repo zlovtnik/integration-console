@@ -1,13 +1,13 @@
 class IntegrationRunPublisher
-  SUBJECT = "sync.scan.request"
+  TOPIC = "sync.scan.request"
 
-  def initialize(run, publisher: Nats::Publisher.new)
+  def initialize(run, publisher: Redpanda::Publisher.new)
     @run = run
     @publisher = publisher
   end
 
   def call
-    @publisher.publish(SUBJECT, payload)
+    @publisher.publish(TOPIC, payload)
   end
 
   private

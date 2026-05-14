@@ -8,7 +8,7 @@ gem "puma", "~> 6.4"
 gem "redis", "~> 5.2"
 gem "csv"
 gem "aws-sdk-s3", "~> 1.170", require: false
-gem "nats-pure", "~> 2.4"
+gem "rdkafka", "~> 2.4"
 gem "turbo-rails", "~> 2.0"
 gem "vite_rails", "~> 3.0"
 gem "minitest", "~> 5.25"

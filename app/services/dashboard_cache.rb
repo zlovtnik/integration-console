@@ -16,7 +16,7 @@ class DashboardCache
       [
         Sensor.maximum(:updated_at)&.to_i,
         SensorAlert.maximum(:updated_at)&.to_i,
-        NatsTrafficSample.maximum(:updated_at)&.to_i,
+        RedpandaTrafficSample.maximum(:updated_at)&.to_i,
         BacklogStatus.maximum(:updated_at)&.to_i
       ].join(":")
     )

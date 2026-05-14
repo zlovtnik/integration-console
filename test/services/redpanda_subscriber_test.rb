@@ -1,6 +1,6 @@
 require "test_helper"
 
-class NatsSubscriberTest < ActiveSupport::TestCase
+class RedpandaSubscriberTest < ActiveSupport::TestCase
   setup do
     IntegrationRun.delete_all
     IntegrationConfig.delete_all
@@ -11,27 +11,27 @@ class NatsSubscriberTest < ActiveSupport::TestCase
       super([])
     end
 
-    def subscribe(subject)
-      subscriptions << subject
+    def subscribe(topic)
+      subscriptions << topic
     end
   end
 
-  test "configured subjects come from enabled nats integration params" do
-    IntegrationConfig.create!(name: "Sync Request", source_type: "nats", destination_type: "postgres", params: { subject: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Wireless Audit", source_type: "nats", destination_type: "postgres", params: { subject: "wireless.audit" })
-    IntegrationConfig.create!(name: "Disabled Trace", source_type: "nats", destination_type: "postgres", enabled: false, params: { subject: "wifi.alert.handshake" })
+  test "configured topics come from enabled redpanda integration params" do
+    IntegrationConfig.create!(name: "Sync Request", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "postgres", params: { topic: "wireless.audit" })
+    IntegrationConfig.create!(name: "Disabled Trace", source_type: "redpanda", destination_type: "postgres", enabled: false, params: { topic: "wifi.alert.handshake" })
     IntegrationConfig.create!(name: "HTTP Sink", source_type: "http", destination_type: "postgres", params: { method: "POST" })
 
-    assert_equal ["sync.scan.request", "wireless.audit"], Nats::Subscriber.configured_subjects.sort
+    assert_equal ["sync.scan.request", "wireless.audit"], Redpanda::Subscriber.configured_topics.sort
   end
 
-  test "subscribes once per configured subject" do
-    IntegrationConfig.create!(name: "Proxy Scan", source_type: "nats", destination_type: "postgres", params: { subject: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Atheros Scan", source_type: "nats", destination_type: "postgres", params: { subject: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Wireless Audit", source_type: "nats", destination_type: "postgres", params: { subject: "wireless.audit" })
+  test "subscribes once per configured topic" do
+    IntegrationConfig.create!(name: "Proxy Scan", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Atheros Scan", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "postgres", params: { topic: "wireless.audit" })
     client = FakeClient.new
 
-    Nats::Subscriber.new(client: client).subscribe_configured
+    Redpanda::Subscriber.new(client: client).subscribe_configured
 
     assert_equal ["sync.scan.request", "wireless.audit"], client.subscriptions.sort
   end
@@ -47,10 +47,10 @@ class NatsSubscriberTest < ActiveSupport::TestCase
     }.to_json
 
     assert_difference -> { Sensor.count }, 1 do
-      Nats::Subscriber.new.handle("wireless.audit", payload)
+      Redpanda::Subscriber.new.handle("wireless.audit", payload)
     end
 
-    assert_equal 1, NatsTrafficSample.sum(:event_count)
+    assert_equal 1, RedpandaTrafficSample.sum(:event_count)
     assert_equal "online", Sensor.find_by!(sensor_id: "00:11:22:33:44:55").status
   end
 
@@ -63,7 +63,7 @@ class NatsSubscriberTest < ActiveSupport::TestCase
       observed_at: Time.current.iso8601
     }.to_json
 
-    Nats::Subscriber.new.handle("wireless.audit", payload)
+    Redpanda::Subscriber.new.handle("wireless.audit", payload)
 
     assert_equal "lab", Sensor.find_by!(sensor_id: "sensor-1").location_id
   end
@@ -83,7 +83,7 @@ class NatsSubscriberTest < ActiveSupport::TestCase
     }.to_json
 
     assert_difference -> { SensorAlert.count }, 1 do
-      Nats::Subscriber.new.handle("wifi.alert.handshake", payload)
+      Redpanda::Subscriber.new.handle("wifi.alert.handshake", payload)
     end
 
     alert = SensorAlert.last
@@ -97,7 +97,7 @@ class NatsSubscriberTest < ActiveSupport::TestCase
     assert_not alert.payload.key?("ignored_key")
   end
 
-  test "bandwidth event increments nats sample without creating sensor" do
+  test "bandwidth event increments redpanda sample without creating sensor" do
     payload = {
       sensor_id: "sensor-1",
       source_mac: "aa:bb:cc:dd:ee:01",
@@ -106,10 +106,10 @@ class NatsSubscriberTest < ActiveSupport::TestCase
     }.to_json
 
     assert_no_difference -> { Sensor.count } do
-      Nats::Subscriber.new.handle("audit.wireless.bandwidth", payload)
+      Redpanda::Subscriber.new.handle("audit.wireless.bandwidth", payload)
     end
 
-    sample = NatsTrafficSample.find_by!(subject: "audit.wireless.bandwidth", sensor_id: "sensor-1")
+    sample = RedpandaTrafficSample.find_by!(topic: "audit.wireless.bandwidth", sensor_id: "sensor-1")
     assert_equal 1, sample.event_count
   end
 end

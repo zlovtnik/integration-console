@@ -72,20 +72,20 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     assert_equal "sensor_id", payload.fetch("sortKey")
   end
 
-  test "nats samples endpoint returns recent grouped samples" do
-    NatsTrafficSample.delete_all
-    NatsTrafficSample.create!(
-      subject: "wireless.audit",
+  test "redpanda samples endpoint returns recent grouped samples" do
+    RedpandaTrafficSample.delete_all
+    RedpandaTrafficSample.create!(
+      topic: "wireless.audit",
       sensor_id: "sensor-1",
       sampled_at: Time.current,
       event_count: 2
     )
 
-    get health_nats_samples_url(format: :json)
+    get health_redpanda_samples_url(format: :json)
 
     assert_response :success
     payload = JSON.parse(response.body)
-    assert_equal "wireless.audit", payload.fetch("samples").first.fetch("subject")
+    assert_equal "wireless.audit", payload.fetch("samples").first.fetch("topic")
   end
 
   test "recent alerts endpoint returns last five alerts" do

@@ -9,9 +9,9 @@ class IntegrationConfigTest < ActiveSupport::TestCase
   test "generates and validates slug" do
     config = IntegrationConfig.create!(
       name: "Warehouse Sync",
-      source_type: "nats",
+      source_type: "redpanda",
       destination_type: "postgres",
-      params: { "url" => "nats://127.0.0.1:4222" }
+      params: { "url" => "redpanda://127.0.0.1:4222" }
     )
 
     assert_equal "warehouse-sync", config.slug

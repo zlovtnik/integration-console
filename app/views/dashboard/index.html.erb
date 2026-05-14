@@ -11,8 +11,8 @@
 <section class="grid grid-3 section-spaced">
   <div id="live-feed-panel-svelte-root"></div>
   <%= svelte_props_tag "live-feed-panel-svelte-root", { initial: { recentUrl: recent_audit_logs_path(format: :json) } } %>
-  <div id="nats-throughput-svelte-root"></div>
-  <%= svelte_props_tag "nats-throughput-svelte-root", { initial: { endpoint: health_nats_samples_path(format: :json) } } %>
+  <div id="redpanda-throughput-svelte-root"></div>
+  <%= svelte_props_tag "redpanda-throughput-svelte-root", { initial: { endpoint: health_redpanda_samples_path(format: :json) } } %>
   <div id="recent-alerts-svelte-root"></div>
   <%= svelte_props_tag "recent-alerts-svelte-root", { initial: { endpoint: health_recent_alerts_path(format: :json) } } %>
 </section>

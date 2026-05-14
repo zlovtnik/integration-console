@@ -1,8 +1,8 @@
 module IntegrationParamSchema
   SCHEMAS = {
-    "nats" => {
-      "url" => { "type" => "string", "label" => "NATS URL", "placeholder" => "nats://127.0.0.1:4222" },
-      "subject" => { "type" => "string", "label" => "Subject", "placeholder" => "wireless.audit" },
+    "redpanda" => {
+      "url" => { "type" => "string", "label" => "Redpanda URL", "placeholder" => "redpanda://127.0.0.1:4222" },
+      "topic" => { "type" => "string", "label" => "Topic", "placeholder" => "wireless.audit" },
       "consumer_name" => { "type" => "string", "label" => "Consumer" }
     },
     "postgres" => {

@@ -32,8 +32,8 @@ class BacklogController < ApplicationController
   def retry
     result = BacklogRetryService.new(params[:id]).call
     respond_to do |format|
-      format.html { redirect_to backlog_index_path, notice: "Retry published to #{result.subject}", status: :see_other }
-      format.json { render json: { notice: "Retry published to #{result.subject}" } }
+      format.html { redirect_to backlog_index_path, notice: "Retry published to #{result.topic}", status: :see_other }
+      format.json { render json: { notice: "Retry published to #{result.topic}" } }
     end
   rescue ActiveRecord::RecordNotFound
     respond_to do |format|

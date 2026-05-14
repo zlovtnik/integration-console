@@ -55,7 +55,7 @@ class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
     add_index :sync_error, :batch_id, name: "idx_sync_error_batch_id", if_not_exists: true
     add_index :sensors, :location_id, name: "idx_sensors_location_id", if_not_exists: true
     add_index :sensor_alerts, [:severity, :resolved_at], name: "idx_sensor_alerts_severity_resolved_at", if_not_exists: true
-    add_index :nats_traffic_samples, [:sensor_id, :sampled_at], name: "idx_nats_traffic_samples_sensor_sampled_at", if_not_exists: true
+    add_index :redpanda_traffic_samples, [:sensor_id, :sampled_at], name: "idx_redpanda_traffic_samples_sensor_sampled_at", if_not_exists: true
 
     reversible do |dir|
       dir.up { raise_on_duplicate_open_alerts! }

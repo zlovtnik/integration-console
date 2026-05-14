@@ -5,7 +5,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.clear
     Sensor.delete_all
     SensorAlert.delete_all
-    NatsTrafficSample.delete_all
+    RedpandaTrafficSample.delete_all
     clear_sync_tables("sync_error", "sync_batch", "sync_job", "sync_scan_ingest", "audit_backlog", "shadow_it_alerts")
     sync_connection.execute("DELETE FROM sync_cursor")
     ensure_sync_plane_health_view

@@ -8,7 +8,7 @@
 
   export let initial = {}
 
-  let integration = initial.integration || { enabled: true, source_type: "nats", destination_type: "postgres", params: {} }
+  let integration = initial.integration || { enabled: true, source_type: "redpanda", destination_type: "postgres", params: {} }
   let runs = initial.runs || []
   let schemas = initial.schemas || {}
   let activeTab = initial.mode === "new" ? "config" : "history"
@@ -143,7 +143,7 @@
       <div class="grid gap-3 md:grid-cols-2">
         <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Name</span><input class="min-h-9 rounded-md border px-3 text-sm" value={integration.name || ""} on:input={(event) => update("name", event.currentTarget.value)} /></label>
         <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Slug</span><input class="min-h-9 rounded-md border px-3 text-sm" value={integration.slug || ""} on:input={(event) => update("slug", event.currentTarget.value)} /></label>
-        <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Source</span><select class="min-h-9 rounded-md border px-3 text-sm" value={integration.source_type || "nats"} on:change={(event) => update("source_type", event.currentTarget.value)}>{#each Object.keys(schemas) as type}<option value={type}>{type}</option>{/each}</select></label>
+        <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Source</span><select class="min-h-9 rounded-md border px-3 text-sm" value={integration.source_type || "redpanda"} on:change={(event) => update("source_type", event.currentTarget.value)}>{#each Object.keys(schemas) as type}<option value={type}>{type}</option>{/each}</select></label>
         <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Destination</span><select class="min-h-9 rounded-md border px-3 text-sm" value={integration.destination_type || "postgres"} on:change={(event) => update("destination_type", event.currentTarget.value)}>{#each Object.keys(schemas) as type}<option value={type}>{type}</option>{/each}</select></label>
         <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Stream</span><input class="min-h-9 rounded-md border px-3 text-sm" value={integration.stream_name || ""} placeholder="wireless.audit" on:input={(event) => update("stream_name", event.currentTarget.value)} /></label>
         <label class="grid gap-1"><span class="text-xs font-semibold uppercase">Schedule</span><input class="min-h-9 rounded-md border px-3 text-sm" value={integration.schedule_cron || ""} placeholder="manual" on:input={(event) => update("schedule_cron", event.currentTarget.value)} /></label>

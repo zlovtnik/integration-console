@@ -1,34 +1,37 @@
 require "json"
-require "nats/client"
+require "rdkafka"
 
-module Nats
+module Redpanda
   class Subscriber
     INTEGRATION_CACHE_TTL = 30.seconds
 
-    def self.configured_subjects
+    def self.configured_topics
       IntegrationConfig.enabled
-        .where(source_type: "nats")
+        .where(source_type: "redpanda")
         .order(:slug)
-        .filter_map { |config| config.params.to_h["subject"].to_s.strip.presence }
+        .filter_map { |config| config.params.to_h["topic"].to_s.strip.presence }
         .uniq
     end
 
-    def initialize(url: ENV.fetch("SYNC_NATS_URL", "nats://127.0.0.1:4222"), client: nil, subjects: nil, run_wireless_worker: true)
-      @url = url
+    def initialize(bootstrap_servers: ENV.fetch("SYNC_REDPANDA_BOOTSTRAP_SERVERS", "127.0.0.1:9092"), client: nil, topics: nil, run_wireless_worker: true)
+      @bootstrap_servers = bootstrap_servers
       @client = client
-      @subjects = subjects
-      @integration_by_subject = nil
-      @integration_by_subject_expires_at = nil
+      @topics = topics
+      @integration_by_topic = nil
+      @integration_by_topic_expires_at = nil
       @run_wireless_worker = run_wireless_worker
       @wireless_worker = nil
     end
 
     def run_forever
       owns_client = @client.nil?
-      @client ||= NATS.connect(servers: [@url])
-      subscribe_configured
+      @client ||= build_consumer
+      topics.each { |topic| @client.subscribe(topic) }
       start_wireless_worker if @run_wireless_worker
-      sleep
+      loop do
+        message = @client.poll(1000)
+        handle(message.topic, message.payload) if message
+      end
     ensure
       @wireless_worker&.stop
       @client&.close if owns_client
@@ -36,74 +39,81 @@ module Nats
     end
 
     def subscribe_configured
-      raise ArgumentError, "NATS client is required" unless @client
+      raise ArgumentError, "Redpanda client is required" unless @client
 
-      subjects.each do |subject|
-        @client.subscribe(subject) { |message| handle(subject, message) }
-      end
+      topics.each { |topic| @client.subscribe(topic) }
     end
 
     def reset_integration_cache!
-      @integration_by_subject = nil
-      @integration_by_subject_expires_at = nil
+      @integration_by_topic = nil
+      @integration_by_topic_expires_at = nil
     end
 
-    def handle(subject, message)
+    def handle(topic, message)
       payload = decode(message)
       sensor_id = payload["sensor_id"]
-      NatsTrafficSample.increment!(subject: subject, sensor_id: sensor_id)
+      RedpandaTrafficSample.increment!(topic: topic, sensor_id: sensor_id)
 
-      if subject == "wireless.audit"
+      if topic == "wireless.audit"
         update_sensor(payload)
         ActionCable.server.broadcast("live_audit", payload)
-      elsif subject == "wifi.alert.handshake"
+      elsif topic == "wifi.alert.handshake"
         record_handshake_alert(payload)
-      elsif subject == "audit.threat.shadow_device"
+      elsif topic == "audit.threat.shadow_device"
         ActionCable.server.broadcast("sensor_alerts", { alert_type: "shadow_device", payload: payload })
       else
-        broadcast_unhandled_subject(subject, payload, sensor_id)
+        broadcast_unhandled_topic(topic, payload, sensor_id)
       end
     end
 
     private
 
-    def subjects
-      (@subjects || self.class.configured_subjects).filter_map { |subject| subject.to_s.strip.presence }.uniq
+    def build_consumer
+      Rdkafka::Config.new(
+        "bootstrap.servers" => @bootstrap_servers,
+        "group.id" => ENV.fetch("INTEGRATION_CONSOLE_REDPANDA_GROUP_ID", "integration-console"),
+        "enable.auto.commit" => true,
+        "auto.offset.reset" => "latest"
+      ).consumer
+    end
+
+    def topics
+      (@topics || self.class.configured_topics).filter_map { |topic| topic.to_s.strip.presence }.uniq
     end
 
     def decode(message)
-      JSON.parse(message.respond_to?(:data) ? message.data : message.to_s)
+      JSON.parse(message.respond_to?(:payload) ? message.payload : message.to_s)
     rescue JSON::ParserError
       { "raw" => message.to_s }
     end
 
-    def broadcast_unhandled_subject(subject, payload, sensor_id)
-      integration = integration_for_subject(subject)
+    def broadcast_unhandled_topic(topic, payload, sensor_id)
+      integration = integration_for_topic(topic)
       unless integration
-        Rails.logger.info("Unhandled NATS subject #{subject} for sensor #{sensor_id.presence || "unknown"}")
+        Rails.logger.info("Unhandled Redpanda topic #{topic} for sensor #{sensor_id.presence || "unknown"}")
         return
       end
 
-      Rails.logger.info("Forwarding unhandled NATS subject #{subject} for integration #{integration.slug}")
-      ActionCable.server.broadcast("integration:#{integration.slug}", { subject: subject, payload: payload })
+      Rails.logger.info("Forwarding unhandled Redpanda topic #{topic} for integration #{integration.slug}")
+      ActionCable.server.broadcast("integration:#{integration.slug}", { topic: topic, payload: payload })
     end
 
-    def integration_for_subject(subject)
-      integration_by_subject[subject]
+    def integration_for_topic(topic)
+      integration_by_topic[topic]
     end
 
-    def integration_by_subject
+    def integration_by_topic
       now = Time.current
-      if @integration_by_subject && @integration_by_subject_expires_at && @integration_by_subject_expires_at > now
-        return @integration_by_subject
+      if @integration_by_topic && @integration_by_topic_expires_at && @integration_by_topic_expires_at > now
+        return @integration_by_topic
       end
 
-      @integration_by_subject = IntegrationConfig.enabled.where(source_type: "nats").each_with_object({}) do |config, memo|
-        subject = config.params.to_h["subject"].to_s.strip
-        memo[subject] = config if subject.present?
+      @integration_by_topic = IntegrationConfig.enabled.where(source_type: "redpanda").each_with_object({}) do |config, memo|
+        topic = config.params.to_h["topic"].to_s.strip
+        memo[topic] = config if topic.present?
       end
-      @integration_by_subject_expires_at = now + INTEGRATION_CACHE_TTL
-      @integration_by_subject
+      @integration_by_topic_expires_at = now + INTEGRATION_CACHE_TTL
+      @integration_by_topic
     end
 
     def update_sensor(payload)

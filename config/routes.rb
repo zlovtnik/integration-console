@@ -4,7 +4,7 @@ Rails.application.routes.draw do
   get "/health/cards", to: "dashboard#cards"
   get "/health/sync_data", to: "health#sync_data"
   get "/health/sensors", to: "health#sensors"
-  get "/health/nats_samples", to: "health#nats_samples"
+  get "/health/redpanda_samples", to: "health#redpanda_samples"
   get "/health/recent_alerts", to: "health#recent_alerts"
 
   resources :audit_logs, only: %i[index show] do

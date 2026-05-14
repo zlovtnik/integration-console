@@ -1,48 +1,48 @@
 require "json"
-require "nats/client"
+require "rdkafka"
 
-module Nats
+module Redpanda
   class WirelessWorker
-    # Mapping of consumer names to their stream and subject
+    # Mapping of consumer names to their stream and topic
     CONSUMER_CONFIG = {
       "wireless-backlog-list" => {
         stream_env: "WIRELESS_BACKLOG_STREAM",
         stream_default: "WIRELESS_BACKLOG_STREAM",
-        subject: "wireless.backlog.list",
+        topic: "wireless.backlog.list",
         replies_to: "wireless.backlog.list.reply",
       },
       "wireless-backlog-save" => {
         stream_env: "WIRELESS_BACKLOG_STREAM",
         stream_default: "WIRELESS_BACKLOG_STREAM",
-        subject: "wireless.backlog.save",
+        topic: "wireless.backlog.save",
       },
       "wireless-backlog-synced" => {
         stream_env: "WIRELESS_BACKLOG_STREAM",
         stream_default: "WIRELESS_BACKLOG_STREAM",
-        subject: "wireless.backlog.synced",
+        topic: "wireless.backlog.synced",
       },
       "wireless-backlog-prune" => {
         stream_env: "WIRELESS_BACKLOG_STREAM",
         stream_default: "WIRELESS_BACKLOG_STREAM",
-        subject: "wireless.backlog.prune",
+        topic: "wireless.backlog.prune",
         replies_to: "wireless.backlog.prune.reply",
       },
       "wireless-mac-lookup" => {
         stream_env: "WIRELESS_MAC_STREAM",
         stream_default: "WIRELESS_MAC_STREAM",
-        subject: "wireless.mac.lookup",
+        topic: "wireless.mac.lookup",
         replies_to: "wireless.mac.lookup.reply",
       },
       "wireless-networks-authorized" => {
         stream_env: "WIRELESS_NETWORKS_STREAM",
         stream_default: "WIRELESS_NETWORKS_STREAM",
-        subject: "wireless.networks.authorized",
+        topic: "wireless.networks.authorized",
         replies_to: "wireless.networks.authorized.reply",
       },
       "wireless-probe-flush" => {
         stream_env: "WIRELESS_PROBE_STREAM",
         stream_default: "WIRELESS_PROBE_STREAM",
-        subject: "wireless.probe.flush",
+        topic: "wireless.probe.flush",
       },
     }.freeze
 
@@ -60,33 +60,31 @@ module Nats
       nil
     end
 
-    def initialize(url: ENV.fetch("SYNC_NATS_URL", "nats://127.0.0.1:4222"),
+    Message = Struct.new(:topic, :data, keyword_init: true) do
+      def ack; end
+      def nak; end
+    end
+
+    def initialize(bootstrap_servers: ENV.fetch("SYNC_REDPANDA_BOOTSTRAP_SERVERS", "127.0.0.1:9092"),
                    client: nil,
                    poll_interval: POLL_INTERVAL)
-      @url = url
+      @bootstrap_servers = bootstrap_servers
       @client = client
       @poll_interval = poll_interval
       @running = false
-      @js = nil
-      @pull_subs = {}
     end
 
     def run_forever
       @running = true
       owns_client = @client.nil?
-      @client ||= ::NATS.connect(servers: [@url])
-      @js = @client.jetstream
-
-      setup_pull_subscriptions
+      @client ||= build_consumer
+      CONSUMER_CONFIG.each_value { |config| @client.subscribe(config[:topic]) }
 
       Rails.logger.info("[WirelessWorker] Starting wireless worker loop with #{CONSUMER_CONFIG.size} consumers")
 
       while @running
         begin
-          CONSUMER_CONFIG.each_key do |consumer_name|
-            break unless @running
-            process_consumer(consumer_name)
-          end
+          process_next_message
         rescue => e
           Rails.logger.error("[WirelessWorker] Error in worker loop: #{e.class} #{e.message}")
           Rails.logger.error("[WirelessWorker] #{e.backtrace.first(5).join("\n")}")
@@ -96,7 +94,6 @@ module Nats
         sleep @poll_interval if @running
       end
     ensure
-      cleanup_subscriptions
       @client&.close if owns_client && @client.respond_to?(:close)
       @client = nil if owns_client
       Rails.logger.info("[WirelessWorker] Wireless worker loop stopped")
@@ -108,43 +105,29 @@ module Nats
 
     private
 
-    def setup_pull_subscriptions
-      CONSUMER_CONFIG.each do |consumer_name, config|
-        stream = ENV.fetch(config[:stream_env], config[:stream_default])
-        begin
-          sub = @js.pull_subscribe(durable: consumer_name, stream: stream)
-          @pull_subs[consumer_name] = { sub: sub, config: config }
-          Rails.logger.info("[WirelessWorker] Created pull subscription for #{consumer_name} on stream #{stream}")
-        rescue => e
-          Rails.logger.error("[WirelessWorker] Failed to create pull subscription for #{consumer_name}: #{e.class} #{e.message}")
-        end
-      end
+    def build_consumer
+      Rdkafka::Config.new(
+        "bootstrap.servers" => @bootstrap_servers,
+        "group.id" => ENV.fetch("WIRELESS_WORKER_REDPANDA_GROUP_ID", "integration-console-wireless-worker"),
+        "enable.auto.commit" => true,
+        "auto.offset.reset" => "earliest"
+      ).consumer
     end
 
-    def cleanup_subscriptions
-      @pull_subs.each_value do |entry|
-        entry[:sub]&.unsubscribe rescue nil
-      end
-      @pull_subs.clear
-    end
+    def process_next_message
+      message = @client.poll((FETCH_TIMEOUT * 1000).to_i)
+      return unless message
 
-    def process_consumer(consumer_name)
-      entry = @pull_subs[consumer_name]
-      return unless entry
+      consumer_name, config = CONSUMER_CONFIG.find { |_name, entry| entry[:topic] == message.topic }
+      return unless consumer_name
 
-      sub = entry[:sub]
-      config = entry[:config]
-
-      msgs = sub.fetch(max_msgs: 1, timeout: FETCH_TIMEOUT)
-      return if msgs.empty?
-
-      msg = msgs.first
+      msg = Message.new(topic: message.topic, data: message.payload)
       payload = decode(msg.data)
       handle_message(consumer_name, msg, payload, config)
-    rescue ::NATS::JetStream::TimeoutError, ::NATS::TimeoutError
+    rescue Rdkafka::RdkafkaError
       # No messages available, which is normal
     rescue => e
-      Rails.logger.error("[WirelessWorker] Error processing #{consumer_name}: #{e.class} #{e.message}")
+      Rails.logger.error("[WirelessWorker] Error processing Redpanda message: #{e.class} #{e.message}")
     end
 
     def handle_message(consumer_name, msg, payload, config)
@@ -180,16 +163,15 @@ module Nats
 
     def reply(msg, payload, config)
       # The Rust sensor embeds its reply inbox in the JSON payload rather than
-      # using the NATS protocol-level reply field. Re-parse the original message
+      # using the Redpanda protocol-level reply field. Re-parse the original message
       # data to find it, since handlers may build a brand-new response hash.
       original = decode(msg.data) rescue {}
-      embedded_reply = original.is_a?(Hash) ? original["reply_subject"] : nil
-      reply_subject = embedded_reply || msg.reply || config[:replies_to]
-      return unless reply_subject
+      embedded_reply = original.is_a?(Hash) ? original["reply_topic"] : nil
+      reply_topic = embedded_reply || config[:replies_to]
+      return unless reply_topic
 
       body = payload.is_a?(String) ? payload : JSON.generate(payload)
-      @client.publish(reply_subject, body)
-      @client.flush if @client.respond_to?(:flush)
+      Redpanda::Publisher.new(bootstrap_servers: @bootstrap_servers).publish(reply_topic, body)
     rescue => e
       Rails.logger.error("[WirelessWorker] Reply error: #{e.class} #{e.message}")
     end

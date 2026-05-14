@@ -9,7 +9,7 @@ Rails management interface for the wireless sensor sync plane.
 - `SYNC_DB_POOL` controls the read-side sync database connection pool. Defaults to `RAILS_MAX_THREADS` or `5`.
 - `STATEMENT_TIMEOUT` controls sync database statement timeouts in milliseconds. Defaults to `8000`.
 - `LOCK_TIMEOUT` controls sync database lock wait timeouts in milliseconds. Defaults to `2000`.
-- `SYNC_NATS_URL` points at NATS.
+- `SYNC_REDPANDA_BOOTSTRAP_SERVERS` points at Redpanda.
 - `INTEGRATION_CONSOLE_REDIS_URL` backs ActionCable broadcasts.
 - `INTEGRATION_CONSOLE_CACHE_TTL_INVENTORY` controls inventory JSON fragment cache TTL. Defaults to `60` seconds.
 - `INTEGRATION_CONSOLE_CACHE_TTL_AUDIT_RECENT` controls recent audit JSON cache TTL. Defaults to `10` seconds.
@@ -57,7 +57,7 @@ bin/dev
 Run the worker with:
 
 ```sh
-bin/rails runner 'Nats::Subscriber.new.run_forever'
+bin/rails runner 'Redpanda::Subscriber.new.run_forever'
 ```
 
 Run the heartbeat monitor periodically with:

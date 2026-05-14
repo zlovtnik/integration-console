@@ -43,7 +43,7 @@ class AuditWindowsControllerTest < ActionDispatch::IntegrationTest
 
   test "create rolls back when publishing fails" do
     publisher = Object.new
-    def publisher.call = raise "nats down"
+    def publisher.call = raise "redpanda down"
 
     assert_no_difference -> { AuditWindow.count } do
       AuditWindowPublisher.stub(:new, ->(_audit_window) { publisher }) do
@@ -67,7 +67,7 @@ class AuditWindowsControllerTest < ActionDispatch::IntegrationTest
   test "update rolls back when publishing fails" do
     audit_window = AuditWindow.create!(location_id: "lab", timezone: "America/New_York", enabled: true)
     publisher = Object.new
-    def publisher.call = raise "nats down"
+    def publisher.call = raise "redpanda down"
 
     AuditWindowPublisher.stub(:new, ->(_audit_window) { publisher }) do
       patch audit_window_url(audit_window), params: {

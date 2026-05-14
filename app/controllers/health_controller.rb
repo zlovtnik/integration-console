@@ -58,11 +58,11 @@ class HealthController < ApplicationController
     render_cached_json(payload, browser_ttl: IntegrationConsole::CacheTtl.audit_recent)
   end
 
-  def nats_samples
-    payload = Rails.cache.fetch("health:nats_samples", expires_in: IntegrationConsole::CacheTtl.audit_recent) do
+  def redpanda_samples
+    payload = Rails.cache.fetch("health:redpanda_samples", expires_in: IntegrationConsole::CacheTtl.audit_recent) do
       {
-        samples: NatsTrafficSample.recent.group(:subject).sum(:event_count).map do |subject, count|
-          { subject: subject, eventCount: count }
+        samples: RedpandaTrafficSample.recent.group(:topic).sum(:event_count).map do |topic, count|
+          { topic: topic, eventCount: count }
         end,
         fetchedAt: Time.current.iso8601
       }

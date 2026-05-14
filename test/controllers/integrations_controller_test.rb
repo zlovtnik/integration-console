@@ -7,7 +7,7 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "index renders svelte root and json payload" do
-    IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres", stream_name: "wireless.audit")
+    IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres", stream_name: "wireless.audit")
 
     get integrations_url
 
@@ -24,10 +24,10 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
     post integrations_url, params: {
       integration_config: {
         name: "Warehouse Sync",
-        source_type: "nats",
+        source_type: "redpanda",
         destination_type: "postgres",
         stream_name: "wireless.audit",
-        params: { subject: "wireless.audit" }
+        params: { topic: "wireless.audit" }
       }
     }, as: :json
 
@@ -38,7 +38,7 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "destroy soft disables integration" do
-    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres")
+    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres")
 
     delete integration_url(config), as: :json
 
@@ -46,8 +46,8 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
     assert_not config.reload.enabled
   end
 
-  test "trigger creates run and publishes nats request" do
-    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres", stream_name: "wireless.audit")
+  test "trigger creates run and publishes redpanda request" do
+    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres", stream_name: "wireless.audit")
     publisher = Object.new
     def publisher.call = true
 
@@ -68,7 +68,7 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "trigger accepts browser datetime local values" do
-    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres", stream_name: "wireless.audit")
+    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres", stream_name: "wireless.audit")
     publisher = Object.new
     def publisher.call = true
 
@@ -89,7 +89,7 @@ class IntegrationsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "replay rejects invalid date range" do
-    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres")
+    config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres")
 
     post replay_integration_url(config), params: {
       integration_run: {

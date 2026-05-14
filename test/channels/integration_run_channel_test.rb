@@ -4,7 +4,7 @@ class IntegrationRunChannelTest < ActionCable::Channel::TestCase
   setup do
     IntegrationRun.delete_all
     IntegrationConfig.delete_all
-    @config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "nats", destination_type: "postgres")
+    @config = IntegrationConfig.create!(name: "Wireless Sync", source_type: "redpanda", destination_type: "postgres")
   end
 
   test "rejects run stream without authorization path" do

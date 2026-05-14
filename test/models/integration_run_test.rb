@@ -6,10 +6,10 @@ class IntegrationRunTest < ActiveSupport::TestCase
     IntegrationConfig.delete_all
     @config = IntegrationConfig.create!(
       name: "Wireless Sync",
-      source_type: "nats",
+      source_type: "redpanda",
       destination_type: "postgres",
       stream_name: "wireless.audit",
-      params: { "subject" => "wireless.audit" }
+      params: { "topic" => "wireless.audit" }
     )
   end
 

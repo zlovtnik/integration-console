@@ -133,16 +133,16 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_07_000100) do
     t.check_constraint "triggered_by = ANY (ARRAY['schedule'::text, 'manual'::text, 'replay'::text])", name: "chk_integration_runs_triggered_by"
   end
 
-  create_table "nats_traffic_samples", force: :cascade do |t|
-    t.string "subject", null: false
+  create_table "redpanda_traffic_samples", force: :cascade do |t|
+    t.string "topic", null: false
     t.string "sensor_id"
     t.datetime "sampled_at", null: false
     t.integer "event_count", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["sampled_at"], name: "index_nats_traffic_samples_on_sampled_at"
-    t.index ["sensor_id", "sampled_at"], name: "idx_nats_traffic_samples_sensor_sampled_at"
-    t.index ["subject", "sensor_id", "sampled_at"], name: "idx_nats_samples_subject_sensor_time", unique: true
+    t.index ["sampled_at"], name: "index_redpanda_traffic_samples_on_sampled_at"
+    t.index ["sensor_id", "sampled_at"], name: "idx_redpanda_traffic_samples_sensor_sampled_at"
+    t.index ["topic", "sensor_id", "sampled_at"], name: "idx_redpanda_samples_topic_sensor_time", unique: true
   end
 
   create_table "network_clients", primary_key: ["ssid", "client_mac"], force: :cascade do |t|
