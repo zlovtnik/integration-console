@@ -17,6 +17,7 @@
   let timer = null
 
   $: hasFilters = fields.length > 0
+  $: showSearchInput = searchable && !hasFilters
   $: hasQuery = query.trim().length > 0
   $: hasActiveFilters = filters.length > 0
 
@@ -30,7 +31,7 @@
     query = ""
     if (onClearAll) {
       onClearAll()
-    } else if (searchable) {
+    } else if (showSearchInput) {
       onSearch({ q: "" })
     } else {
       onFiltersChange([], { serialized: "", apiParams: {} })
@@ -44,7 +45,7 @@
 
 <section class="grid-toolbar" aria-label="Grid controls">
   <div class="grid-toolbar__row">
-    {#if searchable}
+    {#if showSearchInput}
       <label class="grid-toolbar__search">
         <span>{label}</span>
         <input

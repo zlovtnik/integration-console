@@ -165,6 +165,35 @@ class AuditLogsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2, payload.fetch("filters").length
   end
 
+  test "index grid filters match payload-only device fingerprint" do
+    insert_sync_ingest(
+      dedupe_key: "audit-payload-fingerprint",
+      observed_at: Time.current,
+      payload: {
+        "sensor_id" => "sensor-1",
+        "device_fingerprint" => "payload-only-fp"
+      }
+    )
+    sync_connection.execute(<<~SQL.squish)
+      UPDATE sync_scan_ingest
+      SET device_fingerprint = NULL
+      WHERE dedupe_key = 'audit-payload-fingerprint'
+    SQL
+
+    filters = [
+      { field: "device_fingerprint", operator: "contains", value: "payload-only", conjunction: "AND" }
+    ].to_json
+
+    get audit_logs_url(format: :json, filters: filters)
+
+    assert_response :success
+    payload = JSON.parse(response.body)
+    assert_equal ["audit-payload-fingerprint"], payload.fetch("rows").map { |row| row["dedupe_key"] }
+    assert_equal "payload-only-fp", payload.fetch("rows").first.fetch("device_fingerprint")
+    assert_equal 1, payload.fetch("filters").length
+    assert_equal "", payload.fetch("query")
+  end
+
   test "show renders rf metadata when present" do
     insert_sync_ingest(
       dedupe_key: "audit-rf",

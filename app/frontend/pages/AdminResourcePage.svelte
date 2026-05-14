@@ -154,6 +154,13 @@
     fetchPage(true)
   }
 
+  function handleClearAll() {
+    query = ""
+    filters = []
+    currentPage = 1
+    fetchPage(true)
+  }
+
   async function fetchPage(push) {
     if (!endpoints.index) return
 
@@ -242,6 +249,7 @@
       searchable={Boolean(config.search)}
       onSearch={handleSearch}
       onFiltersChange={handleFiltersChange}
+      onClearAll={handleClearAll}
       placeholder={config.searchPlaceholder || "Search"}
     />
 

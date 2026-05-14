@@ -3,6 +3,11 @@ require "csv"
 class AuditLogsController < ApplicationController
   EXPORT_MAX_ROWS = 10_000
   EXPORT_CACHE_TTL = 5.minutes
+  TEXT_FIELD_EXPRESSIONS = %w[
+    sensor_id location_id frame_type frame_subtype ssid source_mac bssid
+    destination_bssid app_protocol src_ip dst_ip username wps_device_name
+    wps_manufacturer wps_model_name device_fingerprint
+  ].to_h { |field| [field, "COALESCE(#{field}, payload->>'#{field}')"] }.freeze
 
   around_action :with_audit_statement_timeout, only: %i[index recent]
 
@@ -31,23 +36,23 @@ class AuditLogsController < ApplicationController
 
   FILTERS = {
     "observed_at" => { column: "observed_at", type: :date },
-    "sensor_id" => "sensor_id",
-    "location_id" => "location_id",
-    "frame_type" => "frame_type",
-    "frame_subtype" => "frame_subtype",
-    "ssid" => "ssid",
-    "source_mac" => "source_mac",
-    "bssid" => "bssid",
-    "destination_bssid" => "destination_bssid",
+    "sensor_id" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("sensor_id") },
+    "location_id" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("location_id") },
+    "frame_type" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("frame_type") },
+    "frame_subtype" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("frame_subtype") },
+    "ssid" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("ssid") },
+    "source_mac" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("source_mac") },
+    "bssid" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("bssid") },
+    "destination_bssid" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("destination_bssid") },
     "signal_dbm" => { column: "signal_dbm", type: :number },
     "channel_number" => { column: "channel_number", type: :number },
-    "app_protocol" => "app_protocol",
-    "src_ip" => "src_ip",
-    "dst_ip" => "dst_ip",
+    "app_protocol" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("app_protocol") },
+    "src_ip" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("src_ip") },
+    "dst_ip" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("dst_ip") },
     "raw_len" => { column: "raw_len", type: :number },
     "frame_control_flags" => { column: "frame_control_flags", type: :number },
     "security_flags" => { column: "security_flags", type: :number },
-    "device_fingerprint" => "device_fingerprint",
+    "device_fingerprint" => { expression: TEXT_FIELD_EXPRESSIONS.fetch("device_fingerprint") },
     "handshake_captured" => { column: "handshake_captured", type: :boolean }
   }.freeze
 
@@ -131,7 +136,7 @@ class AuditLogsController < ApplicationController
 
   def filtered_scope
     scope = AuditLog.recent
-    scope = scope.search(@query) if @query.present?
+    scope = apply_grid_text_search(scope, FILTERS, @query) if @query.present?
     scope = scope.where(location_id: @location_id) if @location_id.present?
     scope = apply_grid_filters(scope, FILTERS)
     scope

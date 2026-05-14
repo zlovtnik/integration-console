@@ -4,12 +4,22 @@ class AuditLog < SyncRecord
   self.table_name = "sync_scan_ingest"
   self.primary_key = "dedupe_key"
 
+  SEARCH_EXPRESSIONS = %w[
+    sensor_id source_mac bssid destination_bssid ssid wps_device_name
+    wps_manufacturer wps_model_name device_fingerprint app_protocol src_ip
+    dst_ip username
+  ].map { |field| "LOWER(COALESCE(#{field}, payload->>'#{field}', '')) LIKE :q" }.freeze
+
   # Scopes
   scope :wireless, -> { where(stream_name: "wireless.audit") }
   scope :recent, -> { wireless.where("observed_at > ?", 24.hours.ago).order(observed_at: :desc) }
   scope :search, ->(query) {
     sanitized = query.to_s.strip
-    sanitized.blank? ? none : where("wireless_search_tsv @@ websearch_to_tsquery('simple', ?)", sanitized)
+    if sanitized.blank?
+      none
+    else
+      where(SEARCH_EXPRESSIONS.join(" OR "), q: "%#{sanitize_sql_like(sanitized.downcase)}%")
+    end
   }
 
   # Columns promoted from payload to table columns. If a running database has not

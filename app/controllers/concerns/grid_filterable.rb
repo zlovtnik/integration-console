@@ -41,6 +41,29 @@ module GridFilterable
     scope.where(sql, *binds)
   end
 
+  def apply_grid_text_search(scope, allowed_filters, query)
+    text_value = query.to_s.strip
+    return scope if text_value.blank?
+
+    clauses = []
+    binds = []
+
+    allowed_filters.each_value do |config|
+      next unless filter_type(config) == :text
+
+      column = filter_column_sql(config)
+      clause, values = text_clause(column, "contains", text_value)
+      next if clause.blank?
+
+      clauses << "(#{clause})"
+      binds.concat(values)
+    end
+
+    return scope if clauses.blank?
+
+    scope.where(clauses.join(" OR "), *binds)
+  end
+
   def parsed_grid_filters
     raw = params[:filters].to_s
     return [] if raw.blank?
@@ -52,6 +75,8 @@ module GridFilterable
   end
 
   def filter_column_sql(config)
+    return config.fetch(:expression).to_s if config.is_a?(Hash) && config.key?(:expression)
+
     column = config.is_a?(Hash) ? config.fetch(:column) : config
     column = column.to_s
     return column if column.match?(/\A[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?\z/i)

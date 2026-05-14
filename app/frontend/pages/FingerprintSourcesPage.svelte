@@ -123,7 +123,11 @@
 
   function auditLogsUrl(fp) {
     if (!endpoints.audit_logs) return "#"
-    return `${endpoints.audit_logs}?q=${encodeURIComponent(fp)}`
+    return `${endpoints.audit_logs}?${toQueryString({
+      filters: serializeFilters([
+        { field: "device_fingerprint", operator: "contains", value: fp, conjunction: "AND" }
+      ])
+    })}`
   }
 
   function joinedList(arr) {

@@ -37,6 +37,12 @@
     navigate(meta?.serialized)
   }
 
+  function handleClearAll() {
+    query = ""
+    filters = []
+    navigate("")
+  }
+
   function navigate(serializedFilters = null) {
     const url = new URL(window.location)
     if (query) {
@@ -62,6 +68,7 @@
     {fields}
     onSearch={handleSearch}
     onFiltersChange={handleFilterChange}
+    onClearAll={handleClearAll}
     onFetchValues={fetchDistinctValues}
     placeholder="Search MAC, SSID, sensor, location, reason"
   />

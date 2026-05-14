@@ -37,6 +37,14 @@ export function searchQueryForMac(mac) {
 
 export function searchUrl(baseUrl, query) {
   const url = new URL(baseUrl, window.location.origin)
-  url.searchParams.set("q", query)
+  url.searchParams.delete("q")
+  if (query) {
+    url.searchParams.set("filters", JSON.stringify([
+      { field: "source_mac", operator: "contains", value: query, conjunction: "AND" }
+    ]))
+  } else {
+    url.searchParams.delete("filters")
+  }
+  url.searchParams.delete("page")
   return url.toString()
 }

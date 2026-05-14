@@ -12,11 +12,11 @@ class FingerprintSourcesController < ApplicationController
 
   FILTERS = {
     "device_fingerprint" => "device_fingerprint",
-    "source_mac" => "source_mac",
-    "ssid" => "ssid",
-    "bssid" => "bssid",
-    "location_id" => "location_id",
-    "sensor_id" => "sensor_id",
+    "source_mac" => { expression: "source_macs::text" },
+    "ssid" => { expression: "ssids::text" },
+    "bssid" => { expression: "bssids::text" },
+    "location_id" => { expression: "location_ids::text" },
+    "sensor_id" => { expression: "sensor_ids::text" },
     "source_count" => { column: "source_count", type: :number },
     "first_seen" => { column: "first_seen", type: :date },
     "last_seen" => { column: "last_seen", type: :date }
@@ -50,10 +50,10 @@ class FingerprintSourcesController < ApplicationController
   private
 
   def filtered_scope
-    scope = FingerprintSource.with_fingerprint
-    scope = scope.search(@query) if @query.present?
+    scope = FingerprintSource.from("(#{FingerprintSource.aggregated.to_sql}) #{FingerprintSource.quoted_table_name}")
+    scope = apply_grid_text_search(scope, FILTERS, @query) if @query.present?
     scope = apply_grid_filters(scope, FILTERS)
-    scope.aggregated
+    scope
   end
 
   def fingerprint_sources_payload(entries)

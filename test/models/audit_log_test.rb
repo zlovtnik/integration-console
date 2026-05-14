@@ -269,7 +269,7 @@ class AuditLogTest < ActiveSupport::TestCase
     assert_equal Time.utc(2026, 4, 29, 10, 15), rows.first.fetch("observed_at")
   end
 
-  test "search uses wireless generated text vector" do
+  test "search matches promoted text fields" do
     insert_sync_ingest(
       dedupe_key: "audit-search",
       observed_at: Time.current,
@@ -280,6 +280,24 @@ class AuditLogTest < ActiveSupport::TestCase
     )
 
     assert_equal ["audit-search"], AuditLog.recent.search("sensor-vector").pluck(:dedupe_key)
+  end
+
+  test "search matches payload-only device fingerprint" do
+    insert_sync_ingest(
+      dedupe_key: "audit-payload-fingerprint-search",
+      observed_at: Time.current,
+      payload: {
+        "sensor_id" => "sensor-1",
+        "device_fingerprint" => "payload-fingerprint-search"
+      }
+    )
+    sync_connection.execute(<<~SQL.squish)
+      UPDATE sync_scan_ingest
+      SET device_fingerprint = NULL
+      WHERE dedupe_key = 'audit-payload-fingerprint-search'
+    SQL
+
+    assert_equal ["audit-payload-fingerprint-search"], AuditLog.recent.search("fingerprint-search").pluck(:dedupe_key)
   end
 
   test "recent scope defaults to last 24 hours but wireless can find older rows" do

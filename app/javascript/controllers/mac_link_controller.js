@@ -289,7 +289,16 @@ ${this.linksHTML()}`
 
   searchUrl(baseUrl, mac) {
     const url = new URL(baseUrl, window.location.origin)
-    url.searchParams.set("q", this.searchQuery(mac))
+    const query = this.searchQuery(mac)
+    url.searchParams.delete("q")
+    if (query) {
+      url.searchParams.set("filters", JSON.stringify([
+        { field: "source_mac", operator: "contains", value: query, conjunction: "AND" }
+      ]))
+    } else {
+      url.searchParams.delete("filters")
+    }
+    url.searchParams.delete("page")
     return url.toString()
   }
 
