@@ -7,3 +7,9 @@
 /node_modules
 /public/vite*
 /db/sync_schema.rb
+.omx/metrics.json
+.omx/logs/tmux-hook-2026-05-14.jsonl
+.omx/logs/turns-2026-05-14.jsonl
+.omx/state/hud-state.json
+.omx/state/notify-hook-state.json
+.omx/state/tmux-hook-state.json
