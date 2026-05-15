@@ -23,7 +23,7 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     s3 = Object.new
     def s3.head_bucket(bucket:) = true
 
-    Redpanda::HealthCheck.stub(:new, fake_redpanda_health(status: "ok")) do
+    Redpanda::HealthCheck.stub(:new, ->(*) { fake_redpanda_health(status: "ok") }) do
       Redis.stub(:new, redis) do
         Aws::S3::Client.stub(:new, s3) do
           get health_url(format: :json)
@@ -41,7 +41,7 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "redpanda health endpoint returns degraded payload" do
-    Redpanda::HealthCheck.stub(:new, fake_redpanda_health(status: "degraded", topic_status: "missing", lag: 1200)) do
+    Redpanda::HealthCheck.stub(:new, ->(*) { fake_redpanda_health(status: "degraded", topic_status: "missing", lag: 1200) }) do
       get health_redpanda_url(format: :json)
     end
 

@@ -20,7 +20,14 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
 
   FakeLagConsumer = Struct.new(:lag_by_topic) do
     def committed(list, _timeout_ms)
-      list
+      committed = Rdkafka::Consumer::TopicPartitionList.new
+      list.to_h.each do |topic, partitions|
+        committed.add_topic_and_partitions_with_offsets(
+          topic,
+          partitions.each_with_object({}) { |partition, memo| memo[partition.partition] = 0 }
+        )
+      end
+      committed
     end
 
     def lag(_committed, _timeout_ms)

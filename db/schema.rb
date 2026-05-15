@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_07_000100) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
   create_schema "coordinator"
 
   # These are extensions that must be enabled in order to support this database
@@ -133,18 +133,6 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_07_000100) do
     t.check_constraint "triggered_by = ANY (ARRAY['schedule'::text, 'manual'::text, 'replay'::text])", name: "chk_integration_runs_triggered_by"
   end
 
-  create_table "redpanda_traffic_samples", force: :cascade do |t|
-    t.string "topic", null: false
-    t.string "sensor_id"
-    t.datetime "sampled_at", null: false
-    t.integer "event_count", default: 0, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["sampled_at"], name: "index_redpanda_traffic_samples_on_sampled_at"
-    t.index ["sensor_id", "sampled_at"], name: "idx_redpanda_traffic_samples_sensor_sampled_at"
-    t.index ["topic", "sensor_id", "sampled_at"], name: "idx_redpanda_samples_topic_sensor_time", unique: true
-  end
-
   create_table "network_clients", primary_key: ["ssid", "client_mac"], force: :cascade do |t|
     t.text "ssid", null: false
     t.text "client_mac", null: false
@@ -156,6 +144,18 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_07_000100) do
     t.index ["client_mac"], name: "idx_network_clients_client_mac"
     t.index ["known_bssid"], name: "idx_network_clients_known_bssid", where: "(known_bssid IS NOT NULL)"
     t.index ["last_seen"], name: "idx_network_clients_last_seen", order: :desc
+  end
+
+  create_table "redpanda_traffic_samples", force: :cascade do |t|
+    t.string "topic", null: false
+    t.string "sensor_id"
+    t.datetime "sampled_at", null: false
+    t.integer "event_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["sampled_at"], name: "index_redpanda_traffic_samples_on_sampled_at"
+    t.index ["sensor_id", "sampled_at"], name: "idx_redpanda_traffic_samples_sensor_sampled_at"
+    t.index ["topic", "sensor_id", "sampled_at"], name: "idx_redpanda_samples_topic_sensor_time", unique: true
   end
 
   create_table "sensor_alerts", force: :cascade do |t|
@@ -347,6 +347,23 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_07_000100) do
     t.index ["stream_name", "observed_at"], name: "sync_scan_ingest_stream_idx"
     t.index ["wireless_search_tsv"], name: "ssi_wireless_search_tsv_idx", where: "(stream_name = 'wireless.audit'::text)", using: :gin
     t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'batched'::text, 'failed'::text])", name: "chk_sync_scan_ingest_status"
+  end
+
+  create_table "wireless_probe_observations", primary_key: ["mac_address", "ssid", "bssid"], force: :cascade do |t|
+    t.text "mac_address", null: false
+    t.text "ssid", null: false
+    t.text "bssid", null: false
+    t.integer "rssi"
+    t.integer "frequency"
+    t.text "location_id"
+    t.text "sensor_id"
+    t.timestamptz "first_seen", default: -> { "now()" }, null: false
+    t.timestamptz "last_seen", default: -> { "now()" }, null: false
+    t.integer "observation_count", default: 1, null: false
+    t.index ["last_seen"], name: "idx_probe_observations_last_seen", order: :desc
+    t.index ["location_id"], name: "idx_probe_observations_location"
+    t.index ["mac_address"], name: "idx_probe_observations_mac"
+    t.index ["sensor_id"], name: "idx_probe_observations_sensor"
   end
 
   add_foreign_key "integration_runs", "integration_configs"
