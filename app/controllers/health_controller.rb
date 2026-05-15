@@ -18,14 +18,27 @@ class HealthController < ApplicationController
   }.freeze
 
   def show
+    redpanda = Redpanda::HealthCheck.new.call
     checks = {
       redis: redis_status,
       minio: minio_status,
-      heatmap: heatmap_status
+      heatmap: heatmap_status,
+      redpanda: {
+        ok: redpanda[:status] == "ok",
+        status: redpanda[:status],
+        broker: redpanda[:broker],
+        consumerGroups: redpanda[:consumerGroups].map { |group| group.slice(:name, :status, :lag, :maxLag) }
+      }
     }
     status = checks.values.all? { |check| check[:ok] } ? "ok" : "degraded"
 
     render json: { status: status, checks: checks }, status: status == "ok" ? :ok : :service_unavailable
+  end
+
+  def redpanda
+    payload = Redpanda::HealthCheck.new.call
+
+    render json: payload, status: payload[:status] == "ok" ? :ok : :service_unavailable
   end
 
   def sync_data

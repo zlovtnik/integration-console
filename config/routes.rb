@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   get "/health/cards", to: "dashboard#cards"
   get "/health/sync_data", to: "health#sync_data"
   get "/health/sensors", to: "health#sensors"
+  get "/health/redpanda", to: "health#redpanda"
   get "/health/redpanda_samples", to: "health#redpanda_samples"
   get "/health/recent_alerts", to: "health#recent_alerts"
 

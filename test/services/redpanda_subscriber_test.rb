@@ -16,6 +16,22 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
     end
   end
 
+  FakeMetadata = Struct.new(:topics)
+
+  FakeLagConsumer = Struct.new(:lag_by_topic) do
+    def committed(list, _timeout_ms)
+      list
+    end
+
+    def lag(_committed, _timeout_ms)
+      lag_by_topic
+    end
+
+    def close
+      true
+    end
+  end
+
   test "configured topics come from enabled redpanda integration params" do
     IntegrationConfig.create!(name: "Sync Request", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
     IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "postgres", params: { topic: "wireless.audit" })
@@ -111,5 +127,38 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
 
     sample = RedpandaTrafficSample.find_by!(topic: "audit.wireless.bandwidth", sensor_id: "sensor-1")
     assert_equal 1, sample.event_count
+  end
+
+  test "redpanda health check reports topic and consumer lag ok" do
+    health = Redpanda::HealthCheck.new(
+      expected_topics: ["sync.scan.request"],
+      consumer_groups: [{ name: "zig-coordinator-scan", topics: ["sync.scan.request"] }],
+      broker_probe: ->(_servers) { true },
+      metadata_fetcher: -> { FakeMetadata.new([{ topic_name: "sync.scan.request", partitions: [{ partition_id: 0 }] }]) },
+      consumer_factory: ->(_group) { FakeLagConsumer.new({ "sync.scan.request" => { 0 => 3 } }) },
+      max_lag_messages: 10
+    )
+
+    payload = health.call
+
+    assert_equal "ok", payload.fetch(:status)
+    assert_equal "present", payload.fetch(:topics).first.fetch(:status)
+    assert_equal 3, payload.fetch(:consumerGroups).first.fetch(:lag)
+  end
+
+  test "redpanda health check degrades when lag exceeds threshold" do
+    health = Redpanda::HealthCheck.new(
+      expected_topics: ["sync.scan.request"],
+      consumer_groups: [{ name: "zig-coordinator-scan", topics: ["sync.scan.request"] }],
+      broker_probe: ->(_servers) { true },
+      metadata_fetcher: -> { FakeMetadata.new([{ topic_name: "sync.scan.request", partitions: [{ partition_id: 0 }] }]) },
+      consumer_factory: ->(_group) { FakeLagConsumer.new({ "sync.scan.request" => { 0 => 11 } }) },
+      max_lag_messages: 10
+    )
+
+    payload = health.call
+
+    assert_equal "degraded", payload.fetch(:status)
+    assert_equal "degraded", payload.fetch(:consumerGroups).first.fetch(:status)
   end
 end

@@ -23,9 +23,11 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     s3 = Object.new
     def s3.head_bucket(bucket:) = true
 
-    Redis.stub(:new, redis) do
-      Aws::S3::Client.stub(:new, s3) do
-        get health_url(format: :json)
+    Redpanda::HealthCheck.stub(:new, fake_redpanda_health(status: "ok")) do
+      Redis.stub(:new, redis) do
+        Aws::S3::Client.stub(:new, s3) do
+          get health_url(format: :json)
+        end
       end
     end
 
@@ -35,6 +37,20 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     assert payload.dig("checks", "redis", "ok")
     assert payload.dig("checks", "minio", "ok")
     assert payload.dig("checks", "heatmap", "lastRefreshedAt").present?
+    assert payload.dig("checks", "redpanda", "ok")
+  end
+
+  test "redpanda health endpoint returns degraded payload" do
+    Redpanda::HealthCheck.stub(:new, fake_redpanda_health(status: "degraded", topic_status: "missing", lag: 1200)) do
+      get health_redpanda_url(format: :json)
+    end
+
+    assert_response :service_unavailable
+    payload = JSON.parse(response.body)
+    assert_equal "degraded", payload.fetch("status")
+    assert_equal "ok", payload.dig("broker", "status")
+    assert_equal "missing", payload.fetch("topics").first.fetch("status")
+    assert_equal 1200, payload.fetch("consumerGroups").first.fetch("lag")
   end
 
   test "sync data endpoint returns async panel payload" do
@@ -105,5 +121,21 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     payload = JSON.parse(response.body)
     assert_equal 5, payload.fetch("alerts").length
     assert_equal "alert 5", payload.fetch("alerts").first.fetch("message")
+  end
+
+  private
+
+  def fake_redpanda_health(status:, topic_status: "present", lag: 0)
+    payload = {
+      status: status,
+      broker: { status: "ok", reachable: true, bootstrapServers: ["127.0.0.1:9092"] },
+      topics: [{ name: "sync.scan.request", status: topic_status, partitions: 3 }],
+      consumerGroups: [{ name: "zig-coordinator-scan", status: status == "ok" ? "ok" : "degraded", lag: lag, maxLag: 1000, topics: [] }],
+      samples: [],
+      fetchedAt: Time.current.iso8601
+    }
+    Struct.new(:payload) do
+      def call = payload
+    end.new(payload)
   end
 end
