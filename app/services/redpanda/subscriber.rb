@@ -4,6 +4,12 @@ require "rdkafka"
 module Redpanda
   class Subscriber
     INTEGRATION_CACHE_TTL = 30.seconds
+    TOPIC_PROVISIONING_BACKOFF = 5.seconds
+    TOPIC_PROVISIONING_ERROR_CODES = %i[
+      unknown_topic
+      unknown_topic_or_part
+      unknown_partition
+    ].freeze
 
     def self.configured_topics
       IntegrationConfig.enabled
@@ -13,7 +19,7 @@ module Redpanda
         .uniq
     end
 
-    def initialize(bootstrap_servers: ENV.fetch("SYNC_REDPANDA_BOOTSTRAP_SERVERS", "127.0.0.1:9092"), client: nil, topics: nil, run_wireless_worker: true)
+    def initialize(bootstrap_servers: ENV.fetch("SYNC_REDPANDA_BOOTSTRAP_SERVERS", "127.0.0.1:9092"), client: nil, topics: nil, run_wireless_worker: true, topic_provisioning_backoff: TOPIC_PROVISIONING_BACKOFF)
       @bootstrap_servers = bootstrap_servers
       @client = client
       @topics = topics
@@ -21,6 +27,8 @@ module Redpanda
       @integration_by_topic_expires_at = nil
       @run_wireless_worker = run_wireless_worker
       @wireless_worker = nil
+      @wireless_worker_thread = nil
+      @topic_provisioning_backoff = topic_provisioning_backoff
     end
 
     def run_forever
@@ -29,11 +37,12 @@ module Redpanda
       topics.each { |topic| @client.subscribe(topic) }
       start_wireless_worker if @run_wireless_worker
       loop do
-        message = @client.poll(1000)
+        message = poll_next_message
         handle(message.topic, message.payload) if message
       end
     ensure
       @wireless_worker&.stop
+      @wireless_worker_thread&.join(2)
       @client&.close if owns_client
       @client = nil if owns_client
     end
@@ -75,6 +84,20 @@ module Redpanda
         "enable.auto.commit" => true,
         "auto.offset.reset" => "latest"
       ).consumer
+    end
+
+    def poll_next_message
+      @client.poll(1000)
+    rescue Rdkafka::RdkafkaError => error
+      raise unless topic_provisioning_error?(error)
+
+      Rails.logger.warn("[Subscriber] Redpanda topic unavailable while polling: #{error}. Waiting for topic provisioning.")
+      sleep @topic_provisioning_backoff if @topic_provisioning_backoff.positive?
+      nil
+    end
+
+    def topic_provisioning_error?(error)
+      TOPIC_PROVISIONING_ERROR_CODES.include?(error.code)
     end
 
     def topics
@@ -157,8 +180,8 @@ module Redpanda
       return if @wireless_worker
       return unless @client
 
-      @wireless_worker = WirelessWorker.new(client: @client)
-      Thread.new { @wireless_worker.run_forever }
+      @wireless_worker = WirelessWorker.new(bootstrap_servers: @bootstrap_servers)
+      @wireless_worker_thread = Thread.new { @wireless_worker.run_forever }
       Rails.logger.info("[Subscriber] Wireless worker thread started")
     end
   end

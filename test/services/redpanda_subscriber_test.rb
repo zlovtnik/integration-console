@@ -16,6 +16,15 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
     end
   end
 
+  FakePollClient = Struct.new(:responses) do
+    def poll(_timeout_ms)
+      response = responses.shift
+      raise response if response.is_a?(Exception)
+
+      response
+    end
+  end
+
   FakeMetadata = Struct.new(:topics)
 
   FakeLagConsumer = Struct.new(:lag_by_topic) do
@@ -57,6 +66,42 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
     Redpanda::Subscriber.new(client: client).subscribe_configured
 
     assert_equal ["sync.scan.request", "wireless.audit"], client.subscriptions.sort
+  end
+
+  test "polling tolerates topics that are still being provisioned" do
+    client = FakePollClient.new([Rdkafka::RdkafkaError.new(3), nil])
+    subscriber = Redpanda::Subscriber.new(client: client, topic_provisioning_backoff: 0)
+
+    assert_nil subscriber.send(:poll_next_message)
+  end
+
+  test "polling raises non provisioning redpanda errors" do
+    client = FakePollClient.new([Rdkafka::RdkafkaError.new(17)])
+    subscriber = Redpanda::Subscriber.new(client: client, topic_provisioning_backoff: 0)
+
+    error = assert_raises(Rdkafka::RdkafkaError) do
+      subscriber.send(:poll_next_message)
+    end
+    assert_equal :topic_exception, error.code
+  end
+
+  test "wireless worker uses its own redpanda consumer" do
+    created_options = nil
+    worker = Object.new
+    worker.define_singleton_method(:run_forever) {}
+
+    worker_factory = lambda do |**options|
+      created_options = options
+      worker
+    end
+
+    Redpanda::WirelessWorker.stub(:new, worker_factory) do
+      subscriber = Redpanda::Subscriber.new(bootstrap_servers: "redpanda:9092", client: FakeClient.new)
+      subscriber.send(:start_wireless_worker)
+      subscriber.instance_variable_get(:@wireless_worker_thread).join(1)
+    end
+
+    assert_equal({ bootstrap_servers: "redpanda:9092" }, created_options)
   end
 
   test "wireless audit updates sensor and throughput sample" do
