@@ -23,6 +23,8 @@ COPY apps/integration-console/package.json apps/integration-console/bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY apps/integration-console ./
+RUN mkdir -p db/sql
+COPY services/zig-coordinator/schema/postgres.sql ./db/sql/coordinator_postgres.sql
 RUN bun run build
 
 EXPOSE 3000
