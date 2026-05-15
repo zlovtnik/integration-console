@@ -35,53 +35,34 @@ class HeatmapController < ApplicationController
   private
 
   def heatmap_payload
-    rows = heatmap_rows
-    total_count = rows.first&.fetch("total_count", 0).to_i
-    total_pages = [(total_count.to_f / @per_page).ceil, 1].max
-    page_rows = rows.select { |row| row["payload_kind"] == "row" }.map { |row| serialize_result(row) }
-    visual_rows = rows.select { |row| row["payload_kind"] == "visual" }.map { |row| serialize_result(row) }
-    last_refreshed_at = rows.first&.fetch("last_refreshed_at", nil)
-
-    {
-      rows: page_rows,
-      visualLocations: visual_rows,
-      totalCount: total_count,
-      totalPages: total_pages,
-      currentPage: @current_page,
-      perPage: @per_page,
-      sortKey: @sort,
-      sortDirection: @direction,
-      filters: parsed_grid_filters,
-      lastRefreshedAt: iso8601(last_refreshed_at),
-      endpoints: {
-        index: heatmap_index_path
-      }
-    }
-  end
-
-  def heatmap_rows
     configure_pagination
     configure_sort
     offset = (@current_page - 1) * @per_page
     first_rank = offset + 1
     last_rank = offset + @per_page
 
-    HeatmapQuery.new(
+    result = HeatmapQuery.new(
       sort_expression: @sort_expression,
       direction: @direction,
       first_rank: first_rank,
       last_rank: last_rank,
       filters: parsed_grid_filters
     ).execute
-  end
 
-  def serialize_result(row)
     {
-      location_id: row["location_id"],
-      event_count: row["event_count"].to_i,
-      avg_signal_dbm: row["avg_signal_dbm"]&.to_f,
-      unique_devices: row["unique_devices"].to_i,
-      last_seen_at: iso8601(row["last_seen_at"])
+      rows: result[:rows],
+      visualLocations: result[:visualLocations],
+      totalCount: result[:totalCount],
+      totalPages: result[:totalPages],
+      currentPage: @current_page,
+      perPage: @per_page,
+      sortKey: @sort,
+      sortDirection: @direction,
+      filters: parsed_grid_filters,
+      lastRefreshedAt: iso8601(result[:lastRefreshedAt]),
+      endpoints: {
+        index: heatmap_index_path
+      }
     }
   end
 

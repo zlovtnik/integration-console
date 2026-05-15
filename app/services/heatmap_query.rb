@@ -1,5 +1,6 @@
 class HeatmapQuery
   MAX_FILTERS = 10
+  VISUAL_LOCATIONS_LIMIT = 200
 
   FILTERS = {
     "location_id" => "location_id",
@@ -20,41 +21,110 @@ class HeatmapQuery
   end
 
   def execute
-    WirelessHeatmap.connection.exec_query(sql).to_a
+    rows = paginated_rows
+    visual_rows = cached_visual_rows
+    total_count = rows.first&.fetch("total_count", 0).to_i
+    total_pages = [(total_count.to_f / paginated_page_size).ceil, 1].max
+    last_refreshed_at = rows.first&.fetch("last_refreshed_at", nil)
+
+    {
+      rows: rows.map { |r| serialize_result(r) },
+      visualLocations: visual_rows,
+      totalCount: total_count,
+      totalPages: total_pages,
+      lastRefreshedAt: last_refreshed_at
+    }
   end
 
   private
 
   attr_reader :sort_expression, :direction, :first_rank, :last_rank, :filters
 
-  def sql
+  def paginated_page_size
+    last_rank - first_rank + 1
+  end
+
+  def paginated_rows
+    WirelessHeatmap.connection.exec_query(paginated_sql).to_a
+  end
+
+  def paginated_sql
     <<~SQL
-      WITH ranked AS (
+      SELECT
+        location_id,
+        event_count,
+        avg_signal_dbm,
+        unique_devices,
+        last_seen_at,
+        page_rank AS result_rank,
+        #{paginated_window_over}
+      FROM (
         SELECT
           location_id,
           event_count,
           avg_signal_dbm,
           unique_devices,
           last_seen_at,
-          row_number() OVER (ORDER BY #{sort_expression} #{direction.upcase}) AS page_rank,
-          row_number() OVER (ORDER BY event_count DESC) AS visual_rank,
-          count(*) OVER () AS total_count,
-          max(last_seen_at) OVER () AS last_refreshed_at
+          row_number() OVER (ORDER BY #{sort_expression} #{direction.upcase}) AS page_rank
         FROM mv_wireless_heatmap
         #{where_clause}
-      )
-      SELECT *
-      FROM (
-        SELECT 0 AS sort_bucket, 'row' AS payload_kind, page_rank AS result_rank, *
-        FROM ranked
-        WHERE page_rank BETWEEN #{first_rank} AND #{last_rank}
-        UNION ALL
-        SELECT 1 AS sort_bucket, 'visual' AS payload_kind, visual_rank AS result_rank, *
-        FROM ranked
-        WHERE visual_rank <= 200
-      ) payload
-      ORDER BY sort_bucket ASC, result_rank ASC
+      ) sub
+      WHERE page_rank BETWEEN #{first_rank} AND #{last_rank}
+      ORDER BY page_rank ASC
     SQL
+  end
+
+  def paginated_window_over
+    # Compute total_count and last_refreshed_at from the *filtered* set,
+    # but avoid a second full-scan by using an inline subquery.
+    "(SELECT count(*) FROM mv_wireless_heatmap #{where_clause}) AS total_count,
+     (SELECT max(last_seen_at) FROM mv_wireless_heatmap #{where_clause}) AS last_refreshed_at"
+  end
+
+  def cached_visual_rows
+    cache_key = "heatmap:visual:#{Digest::SHA1.hexdigest(filters.to_s)}"
+    Rails.cache.fetch(cache_key, expires_in: IntegrationConsole::CacheTtl.heatmap) do
+      visual_rows
+    end
+  end
+
+  def visual_rows
+    WirelessHeatmap.connection.exec_query(visual_sql).to_a.map { |r| serialize_result(r) }
+  end
+
+  def visual_sql
+    <<~SQL
+      SELECT
+        location_id,
+        event_count,
+        avg_signal_dbm,
+        unique_devices,
+        last_seen_at,
+        visual_rank AS result_rank
+      FROM (
+        SELECT
+          location_id,
+          event_count,
+          avg_signal_dbm,
+          unique_devices,
+          last_seen_at,
+          row_number() OVER (ORDER BY event_count DESC) AS visual_rank
+        FROM mv_wireless_heatmap
+        #{where_clause}
+      ) sub
+      WHERE visual_rank <= #{VISUAL_LOCATIONS_LIMIT}
+      ORDER BY visual_rank ASC
+    SQL
+  end
+
+  def serialize_result(row)
+    {
+      location_id: row["location_id"],
+      event_count: row["event_count"].to_i,
+      avg_signal_dbm: row["avg_signal_dbm"]&.to_f,
+      unique_devices: row["unique_devices"].to_i,
+      last_seen_at: row["last_seen_at"]
+    }
   end
 
   def where_clause
