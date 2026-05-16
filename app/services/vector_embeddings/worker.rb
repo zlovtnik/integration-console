@@ -23,8 +23,11 @@ module VectorEmbeddings
 
       @running = true
       logger.info("[VectorEmbeddings] starting worker model=#{config.model} dimensions=#{config.dimensions}")
+      loop_count = 0
       while @running
         processed = run_once
+        loop_count += 1
+        release_expired_leases if (loop_count % 10).zero?
         sleep POLL_INTERVAL_SECONDS if @running && processed.zero?
       end
     end
@@ -269,6 +272,13 @@ module VectorEmbeddings
       return "NULL" if value.blank?
 
       connection.quote(value)
+    end
+
+    def release_expired_leases
+      count = connection.execute(
+        "SELECT vec_release_expired_leases() AS released"
+      ).first["released"].to_i
+      logger.info("[VectorEmbeddings] released #{count} expired leases") if count > 0
     end
   end
 end
