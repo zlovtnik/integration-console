@@ -4,12 +4,24 @@ module VectorEmbeddings
   class TextBuilder
     Input = Struct.new(:text, :metadata, keyword_init: true)
 
+    # Full event fields for metadata/display — includes identity anchors.
     EVENT_FIELDS = %w[
       observed_at sensor_id location_id stream_name source_mac bssid destination_bssid ssid
       frame_type frame_subtype channel_number signal_dbm retry more_data power_save protected
       security_flags app_protocol transport_protocol src_ip dst_ip src_port dst_port dns_query_name
       mdns_name dhcp_hostname wps_device_name wps_manufacturer wps_model_name device_fingerprint
       handshake_captured
+    ].freeze
+
+    # Semantic-only subset — excludes MACs, IPs, sensor/location identity.
+    # Embedding text built from these fields produces vectors that capture
+    # behavioural pattern rather than device identity.
+    EVENT_SEMANTIC_FIELDS = %w[
+      frame_type frame_subtype app_protocol transport_protocol
+      security_flags dns_query_name mdns_name dhcp_hostname
+      wps_device_name wps_manufacturer wps_model_name device_fingerprint
+      handshake_captured protected channel_number signal_dbm
+      retry more_data power_save
     ].freeze
 
     DEVICE_FIELDS = %w[
@@ -83,11 +95,14 @@ module VectorEmbeddings
         WHERE dedupe_key = $1
       SQL
 
-      lines = ["kind: event"]
-      EVENT_FIELDS.each { |field| append_line(lines, field, row[field]) }
-      append_line(lines, "tags", normalize_json(row["tags"]))
+      # Build embedding text from semantic fields only (identity-stripped)
+      semantic_lines = ["kind: event"]
+      EVENT_SEMANTIC_FIELDS.each { |field| append_line(semantic_lines, field, row[field]) }
+      append_line(semantic_lines, "ssid", row["ssid"])
+      embedding_text = semantic_lines.join("\n")
+
       Input.new(
-        text: lines.join("\n"),
+        text: embedding_text,
         metadata: {
           source_observed_at: row["observed_at"],
           source_stream_name: row["stream_name"],
@@ -123,17 +138,32 @@ module VectorEmbeddings
         WHERE snapshot_id::text = $1
       SQL
 
-      lines = ["kind: behaviour_window"]
-      SNAPSHOT_FIELDS.each { |field| append_line(lines, field, normalize_json(row[field])) }
-      Input.new(
-        text: row["text_summary"].presence || lines.join("\n"),
-        metadata: {
-          source_observed_at: row["window_start"],
-          source_sensor_id: row["sensor_id"],
-          source_location_id: row["location_id"],
-          source_mac: row["source_mac"]
-        }
-      )
+      # Prefer identity-stripped embedding_text for embedding; fall back to
+      # text_summary (which includes MAC/sensor/location) for backward compat.
+      embedding_text = row["embedding_text"].presence || row["text_summary"].presence
+      if embedding_text
+        Input.new(
+          text: embedding_text,
+          metadata: {
+            source_observed_at: row["window_start"],
+            source_sensor_id: row["sensor_id"],
+            source_location_id: row["location_id"],
+            source_mac: row["source_mac"]
+          }
+        )
+      else
+        lines = ["kind: behaviour_window"]
+        SNAPSHOT_FIELDS.each { |field| append_line(lines, field, normalize_json(row[field])) }
+        Input.new(
+          text: lines.join("\n"),
+          metadata: {
+            source_observed_at: row["window_start"],
+            source_sensor_id: row["sensor_id"],
+            source_location_id: row["location_id"],
+            source_mac: row["source_mac"]
+          }
+        )
+      end
     end
 
     def select_one(sql, key)
