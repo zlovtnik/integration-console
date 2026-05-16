@@ -74,8 +74,7 @@ module VectorEmbeddings
         complete_job(job.fetch("job_id"), content_sha256)
       end
     rescue => e
-      fail_job(job, e)
-      logger.error("[VectorEmbeddings] job #{job["job_id"]} failed: #{e.class} #{e.message}")
+      record_failed_job(job, e)
     end
 
     def validate_dimensions!(vector)
@@ -155,6 +154,16 @@ module VectorEmbeddings
             updated_at = now()
         WHERE job_id = #{Integer(job.fetch("job_id"))}
       SQL
+    end
+
+    def record_failed_job(job, error)
+      fail_job(job, error)
+      logger.error("[VectorEmbeddings] job #{job["job_id"]} failed: #{error.class} #{error.message}")
+    rescue => failure_update_error
+      logger.error(
+        "[VectorEmbeddings] job #{job["job_id"]} failed: #{error.class} #{error.message}; " \
+        "could not update failure state: #{failure_update_error.class} #{failure_update_error.message}"
+      )
     end
 
     def mark_state(status:, started: false, finished: false, rows_processed: nil, last_error: nil)

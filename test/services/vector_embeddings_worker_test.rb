@@ -12,8 +12,9 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
   class FakeConnection
     attr_reader :queries, :statements
 
-    def initialize(jobs)
+    def initialize(jobs, raise_on_failure_update: false)
       @jobs = jobs
+      @raise_on_failure_update = raise_on_failure_update
       @queries = []
       @statements = []
     end
@@ -25,6 +26,7 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
 
     def execute(sql)
       @statements << sql
+      raise ActiveRecord::LockWaitTimeout, "lock timeout" if @raise_on_failure_update && sql.include?("status = CASE")
     end
 
     def transaction
@@ -94,6 +96,22 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
     assert_equal 1, worker.run_once
     assert connection.statements.none? { |sql| sql.include?("INSERT INTO vec_embeddings") }
     assert connection.statements.any? { |sql| sql.include?("dimension mismatch") && sql.include?("status = CASE") }
+  end
+
+  test "does not crash when failure state update is locked" do
+    job = {
+      "job_id" => 9,
+      "source_table" => "sync_scan_ingest",
+      "source_key" => "event-3",
+      "embedding_model" => "nomic-embed-text-v2-moe",
+      "embedding_kind" => "event"
+    }
+    connection = FakeConnection.new([job], raise_on_failure_update: true)
+    input = FakeInput.new(text: "kind: event", metadata: {})
+    worker = worker(connection:, input:, vector: [0.1, 0.2])
+
+    assert_equal 1, worker.run_once
+    assert connection.statements.any? { |sql| sql.include?("status = CASE") }
   end
 
   private
