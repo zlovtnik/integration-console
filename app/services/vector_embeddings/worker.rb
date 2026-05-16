@@ -38,8 +38,8 @@ module VectorEmbeddings
 
       mark_state(status: "running", started: true)
       jobs = lease_jobs
-      jobs.each { |job| process_job(job) }
-      mark_state(status: "idle", rows_processed: jobs.size, finished: true)
+      process_jobs(jobs)
+      mark_state(status: "idle", finished: true)
       jobs.size
     rescue => e
       mark_state(status: "failed", last_error: "#{e.class}: #{e.message}", finished: true) rescue nil
@@ -59,22 +59,69 @@ module VectorEmbeddings
     def lease_jobs
       connection.exec_query(<<~SQL.squish).to_a
         SELECT *
-        FROM vec_lease_embedding_jobs(#{Integer(config.batch_size)}, #{connection.quote(config.worker_name)})
+        FROM vec_lease_embedding_jobs(
+          #{Integer(config.batch_size)},
+          #{connection.quote(config.worker_name)},
+          make_interval(secs => #{Integer(config.lease_seconds)})
+        )
       SQL
     end
 
-    def process_job(job)
+    def process_jobs(jobs)
+      jobs.each_slice(request_batch_size) { |batch| process_batch(batch) }
+    end
+
+    def request_batch_size
+      [Integer(config.request_batch_size), 1].max
+    end
+
+    def process_batch(jobs)
+      prepared = []
+      prepared = prepare_jobs(jobs)
+      return if prepared.empty?
+
+      mark_state(status: "running", last_cursor: batch_cursor(prepared))
+      vectors = embed_texts(prepared.map { |item| item.fetch(:input).text })
+      raise ArgumentError, "embedding response count mismatch: expected #{prepared.length}, got #{vectors.length}" unless vectors.length == prepared.length
+
+      prepared.zip(vectors).each { |item, vector| complete_prepared_job(item, vector) }
+    rescue => e
+      prepared.each { |item| record_processed_failure(item.fetch(:job), e) }
+    end
+
+    def prepare_jobs(jobs)
+      jobs.filter_map do |job|
+        prepare_job(job)
+      rescue => e
+        record_processed_failure(job, e)
+        nil
+      end
+    end
+
+    def prepare_job(job)
       input = text_builder.build(job)
       content_sha256 = Digest::SHA256.hexdigest(input.text)
-      vector = embedding_client.embed(input.text)
+      { job:, input:, content_sha256: }
+    end
+
+    def complete_prepared_job(item, vector)
+      job = item.fetch(:job)
       validate_dimensions!(vector)
 
       connection.transaction do
-        upsert_embedding(job, input, content_sha256, vector)
-        complete_job(job.fetch("job_id"), content_sha256)
+        upsert_embedding(job, item.fetch(:input), item.fetch(:content_sha256), vector)
+        complete_job(job.fetch("job_id"), item.fetch(:content_sha256))
       end
     rescue => e
-      record_failed_job(job, e)
+      record_processed_failure(job, e)
+    else
+      record_processed_success(job)
+    end
+
+    def embed_texts(texts)
+      return embedding_client.embed_many(texts) if embedding_client.respond_to?(:embed_many)
+
+      texts.map { |text| embedding_client.embed(text) }
     end
 
     def validate_dimensions!(vector)
@@ -166,14 +213,38 @@ module VectorEmbeddings
       )
     end
 
-    def mark_state(status:, started: false, finished: false, rows_processed: nil, last_error: nil)
+    def record_processed_success(job)
+      mark_state(status: "running", rows_processed: 1, last_cursor: job_cursor(job))
+    end
+
+    def record_processed_failure(job, error)
+      record_failed_job(job, error)
+      mark_state(
+        status: "running",
+        rows_processed: 1,
+        last_cursor: job_cursor(job),
+        last_error: "#{error.class}: #{error.message}".truncate(1000)
+      )
+    end
+
+    def batch_cursor(prepared)
+      job_ids = prepared.map { |item| item.fetch(:job).fetch("job_id") }
+      "batch:#{job_ids.first}-#{job_ids.last}"
+    end
+
+    def job_cursor(job)
+      "job:#{job.fetch("job_id")}"
+    end
+
+    def mark_state(status:, started: false, finished: false, rows_processed: nil, last_error: nil, last_cursor: nil)
       connection.execute(<<~SQL.squish)
         INSERT INTO vec_worker_state (
-          worker_name, status, last_run_started_at, last_run_finished_at, rows_processed, last_error, updated_at
+          worker_name, status, last_cursor, last_run_started_at, last_run_finished_at, rows_processed, last_error, updated_at
         )
         VALUES (
           #{connection.quote(config.worker_name)},
           #{connection.quote(status)},
+          #{connection.quote(last_cursor)},
           #{started ? "now()" : "NULL"},
           #{finished ? "now()" : "NULL"},
           #{Integer(rows_processed || 0)},
@@ -182,6 +253,7 @@ module VectorEmbeddings
         )
         ON CONFLICT (worker_name) DO UPDATE SET
           status = EXCLUDED.status,
+          last_cursor = COALESCE(EXCLUDED.last_cursor, vec_worker_state.last_cursor),
           last_run_started_at = COALESCE(EXCLUDED.last_run_started_at, vec_worker_state.last_run_started_at),
           last_run_finished_at = COALESCE(EXCLUDED.last_run_finished_at, vec_worker_state.last_run_finished_at),
           rows_processed = CASE

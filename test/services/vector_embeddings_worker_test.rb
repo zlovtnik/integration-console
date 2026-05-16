@@ -51,12 +51,20 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
   end
 
   class FakeEmbeddingClient
+    attr_reader :embed_many_requests
+
     def initialize(vector)
       @vector = vector
+      @embed_many_requests = []
     end
 
     def embed(_text)
       @vector
+    end
+
+    def embed_many(texts)
+      @embed_many_requests << texts
+      texts.map { @vector }
     end
   end
 
@@ -76,9 +84,38 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
     worker = worker(connection:, input:, vector: [0.1, 0.2, 0.3])
 
     assert_equal 1, worker.run_once
-    assert connection.queries.any? { |sql| sql.include?("vec_lease_embedding_jobs(2, 'test-worker')") }
+    assert connection.queries.any? { |sql| sql.include?("vec_lease_embedding_jobs( 2, 'test-worker', make_interval(secs => 1800) )") }
     assert connection.statements.any? { |sql| sql.include?("INSERT INTO vec_embeddings") && sql.include?("ON CONFLICT") }
     assert connection.statements.any? { |sql| sql.include?("UPDATE vec_embedding_jobs") && sql.include?("status = 'completed'") }
+  end
+
+  test "embeds leased jobs in request batches and records progress per job" do
+    jobs = [
+      {
+        "job_id" => 10,
+        "source_table" => "sync_scan_ingest",
+        "source_key" => "event-10",
+        "embedding_model" => "nomic-embed-text-v2-moe",
+        "embedding_kind" => "event"
+      },
+      {
+        "job_id" => 11,
+        "source_table" => "sync_scan_ingest",
+        "source_key" => "event-11",
+        "embedding_model" => "nomic-embed-text-v2-moe",
+        "embedding_kind" => "event"
+      }
+    ]
+    connection = FakeConnection.new(jobs)
+    input = FakeInput.new(text: "kind: event", metadata: {})
+    embedding_client = FakeEmbeddingClient.new([0.1, 0.2, 0.3])
+    worker = worker(connection:, input:, embedding_client:)
+
+    assert_equal 2, worker.run_once
+    assert_equal [["kind: event", "kind: event"]], embedding_client.embed_many_requests
+    assert connection.statements.any? { |sql| sql.include?("last_cursor") && sql.include?("batch:10-11") }
+    assert connection.statements.any? { |sql| sql.include?("rows_processed") && sql.include?("job:10") }
+    assert connection.statements.any? { |sql| sql.include?("rows_processed") && sql.include?("job:11") }
   end
 
   test "rejects embeddings with unexpected dimensions" do
@@ -116,7 +153,7 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
 
   private
 
-  def worker(connection:, input:, vector:)
+  def worker(connection:, input:, vector: nil, embedding_client: nil)
     config = VectorEmbeddings::Config.new(
       enabled: true,
       provider: "ollama",
@@ -124,12 +161,14 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
       model: "nomic-embed-text-v2-moe",
       dimensions: 3,
       batch_size: 2,
+      request_batch_size: 2,
+      lease_seconds: 1800,
       worker_name: "test-worker"
     )
     VectorEmbeddings::Worker.new(
       config:,
       connection:,
-      embedding_client: FakeEmbeddingClient.new(vector),
+      embedding_client: embedding_client || FakeEmbeddingClient.new(vector),
       text_builder: FakeTextBuilder.new(input),
       logger: Logger.new(nil)
     )
