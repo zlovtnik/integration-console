@@ -1,58 +1,58 @@
 class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
   def change
-    add_column :sync_batch, :created_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
-    add_column :sync_batch, :updated_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
+    add_column :sync_batches, :created_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
+    add_column :sync_batches, :updated_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
 
-    add_check_constraint :sync_job,
+    add_check_constraint :sync_jobs,
       "status IN ('pending','running','completed','failed')",
-      name: "chk_sync_job_status",
+      name: "chk_sync_jobs_status",
       if_not_exists: true
 
-    add_check_constraint :sync_batch,
+    add_check_constraint :sync_batches,
       "status IN ('pending','processing','dispatched','completed','failed')",
-      name: "chk_sync_batch_status",
+      name: "chk_sync_batches_status",
       if_not_exists: true
 
-    add_check_constraint :audit_backlog,
+    add_check_constraint :sync_backlog,
       "status IN ('pending','synced','sync_failed','failed')",
-      name: "chk_audit_backlog_status",
+      name: "chk_sync_backlog_status",
       if_not_exists: true
 
-    add_foreign_key :sync_job,
-      :sync_cursor,
+    add_foreign_key :sync_jobs,
+      :sync_cursors,
       column: :stream_name,
       primary_key: :stream_name,
-      name: "fk_sync_job_stream_name",
+      name: "fk_sync_jobs_stream_name",
       if_not_exists: true,
       deferrable: :deferred
 
-    add_foreign_key :sync_batch,
-      :sync_job,
+    add_foreign_key :sync_batches,
+      :sync_jobs,
       column: :job_id,
       primary_key: :job_id,
-      name: "fk_sync_batch_job_id",
+      name: "fk_sync_batches_job_id",
       if_not_exists: true
 
-    add_foreign_key :sync_error,
-      :sync_job,
+    add_foreign_key :sync_errors,
+      :sync_jobs,
       column: :job_id,
       primary_key: :job_id,
-      name: "fk_sync_error_job_id",
+      name: "fk_sync_errors_job_id",
       if_not_exists: true
 
-    add_foreign_key :sync_error,
-      :sync_batch,
+    add_foreign_key :sync_errors,
+      :sync_batches,
       column: :batch_id,
       primary_key: :batch_id,
-      name: "fk_sync_error_batch_id",
+      name: "fk_sync_errors_batch_id",
       if_not_exists: true
 
-    add_index :sync_job, :stream_name, name: "idx_sync_job_stream_name", if_not_exists: true
-    add_index :sync_job, [:status, :created_at], name: "idx_sync_job_status_created_at", if_not_exists: true
-    add_index :sync_batch, [:job_id, :batch_no], name: "idx_sync_batch_job_batch_no", if_not_exists: true
-    add_index :sync_batch, :status, name: "idx_sync_batch_status", if_not_exists: true
-    add_index :sync_error, :job_id, name: "idx_sync_error_job_id", if_not_exists: true
-    add_index :sync_error, :batch_id, name: "idx_sync_error_batch_id", if_not_exists: true
+    add_index :sync_jobs, :stream_name, name: "idx_sync_jobs_stream_name", if_not_exists: true
+    add_index :sync_jobs, [:status, :created_at], name: "idx_sync_jobs_status_created_at", if_not_exists: true
+    add_index :sync_batches, [:job_id, :batch_no], name: "idx_sync_batches_job_batch_no", if_not_exists: true
+    add_index :sync_batches, :status, name: "idx_sync_batches_status", if_not_exists: true
+    add_index :sync_errors, :job_id, name: "idx_sync_errors_job_id", if_not_exists: true
+    add_index :sync_errors, :batch_id, name: "idx_sync_errors_batch_id", if_not_exists: true
     add_index :sensors, :location_id, name: "idx_sensors_location_id", if_not_exists: true
     add_index :sensor_alerts, [:severity, :resolved_at], name: "idx_sensor_alerts_severity_resolved_at", if_not_exists: true
     add_index :redpanda_traffic_samples, [:sensor_id, :sampled_at], name: "idx_redpanda_traffic_samples_sensor_sampled_at", if_not_exists: true

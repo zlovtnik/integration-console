@@ -21,7 +21,7 @@ module SyncIngestHelpers
 
   def clear_sync_tables(*tables)
     tables.each do |table|
-      ensure_shadow_it_alerts_table if table.to_s == "shadow_it_alerts"
+      ensure_wireless_shadow_alerts_table if table.to_s == "wireless_shadow_alerts"
       quoted_table = sync_connection.quote_table_name(table.to_s)
       sync_connection.execute("DELETE FROM #{quoted_table}")
     end
@@ -41,22 +41,22 @@ module SyncIngestHelpers
       "destination_bssid" => payload["destination_bssid"] || payload["bssid"]
     }.compact
 
-    sync_scan_ingest_promoted_columns.each_value do |column|
+    sync_events_promoted_columns.each_value do |column|
       next if attributes.key?(column.name)
       next unless payload.key?(column.name)
 
-      attributes[column.name] = cast_sync_scan_ingest_value(column, payload[column.name])
+      attributes[column.name] = cast_sync_events_value(column, payload[column.name])
     end
 
     columns_sql = attributes.keys.map { |name| sync_connection.quote_column_name(name) }.join(", ")
-    values_sql = attributes.map { |name, value| quote_sync_scan_ingest_value(name, value) }.join(", ")
+    values_sql = attributes.map { |name, value| quote_sync_events_value(name, value) }.join(", ")
 
-    sync_connection.execute("INSERT INTO sync_scan_ingest (#{columns_sql}) VALUES (#{values_sql})")
+    sync_connection.execute("INSERT INTO sync_events (#{columns_sql}) VALUES (#{values_sql})")
   end
 
   def insert_backlog(dedupe_key:, status:, updated_at: Time.current, stream_name: "sync.scan.request", attempt_count: 0)
     sync_connection.execute(<<~SQL.squish)
-      INSERT INTO audit_backlog
+      INSERT INTO sync_backlog
         (dedupe_key, stream_name, payload, status, attempt_count, created_at, updated_at)
       VALUES
         (#{sync_connection.quote(dedupe_key)}, #{sync_connection.quote(stream_name)}, '{}', #{sync_connection.quote(status)}, #{attempt_count.to_i}, now(), #{sync_connection.quote(updated_at)})
@@ -65,15 +65,15 @@ module SyncIngestHelpers
 
   private
 
-  def sync_scan_ingest_promoted_columns
-    @sync_scan_ingest_promoted_columns ||= sync_connection.columns("sync_scan_ingest").each_with_object({}) do |column, memo|
+  def sync_events_promoted_columns
+    @sync_events_promoted_columns ||= sync_connection.columns("sync_events").each_with_object({}) do |column, memo|
       next if SYNC_SCAN_INGEST_MANAGED_COLUMNS.include?(column.name)
 
       memo[column.name] = column
     end.freeze
   end
 
-  def cast_sync_scan_ingest_value(column, value)
+  def cast_sync_events_value(column, value)
     return if value.nil?
 
     case column.type
@@ -88,7 +88,7 @@ module SyncIngestHelpers
     end
   end
 
-  def quote_sync_scan_ingest_value(column_name, value)
+  def quote_sync_events_value(column_name, value)
     return "#{sync_connection.quote(value.to_json)}::jsonb" if column_name == "payload"
 
     sync_connection.quote(value)

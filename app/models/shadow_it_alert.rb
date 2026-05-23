@@ -1,5 +1,5 @@
 class ShadowItAlert < SyncRecord
-  self.table_name = "v_shadow_it_alerts"
+  self.table_name = "v_wireless_shadow_alerts"
   self.primary_key = "alert_id"
 
   scope :recent, -> { order(last_occurred_at: :desc) }

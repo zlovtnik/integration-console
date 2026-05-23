@@ -17,7 +17,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
   enable_extension "pg_trgm"
   enable_extension "plpgsql"
 
-  create_table "audit_backlog", primary_key: "dedupe_key", id: :text, force: :cascade do |t|
+  create_table "sync_backlog", primary_key: "dedupe_key", id: :text, force: :cascade do |t|
     t.text "stream_name", null: false
     t.text "payload", null: false
     t.text "status", default: "pending", null: false
@@ -25,8 +25,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.text "last_error"
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "updated_at", default: -> { "now()" }, null: false
-    t.index ["status", "updated_at"], name: "audit_backlog_status_idx"
-    t.check_constraint "status = ANY (ARRAY['pending'::text, 'synced'::text, 'sync_failed'::text, 'failed'::text])", name: "chk_audit_backlog_status"
+    t.index ["status", "updated_at"], name: "sync_backlog_status_idx"
+    t.check_constraint "status = ANY (ARRAY['pending'::text, 'synced'::text, 'sync_failed'::text, 'failed'::text])", name: "chk_sync_backlog_status"
   end
 
   create_table "audit_windows", force: :cascade do |t|
@@ -40,7 +40,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.datetime "updated_at", null: false
   end
 
-  create_table "authorized_wireless_networks", force: :cascade do |t|
+  create_table "wireless_authorized_networks", force: :cascade do |t|
     t.text "ssid"
     t.text "bssid"
     t.text "location_id"
@@ -50,8 +50,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "psk_ciphertext"
-    t.index "COALESCE(lower(ssid), ''::text), COALESCE(lower(bssid), ''::text), COALESCE(location_id, ''::text)", name: "authorized_wireless_networks_match_idx", unique: true
-    t.index ["enabled", "location_id"], name: "authorized_wireless_networks_enabled_idx"
+    t.index "COALESCE(lower(ssid), ''::text), COALESCE(lower(bssid), ''::text), COALESCE(location_id, ''::text)", name: "wireless_authorized_networks_match_idx", unique: true
+    t.index ["enabled", "location_id"], name: "wireless_authorized_networks_enabled_idx"
     t.check_constraint "NULLIF(TRIM(BOTH FROM COALESCE(ssid, ''::text)), ''::text) IS NOT NULL OR NULLIF(TRIM(BOTH FROM COALESCE(bssid, ''::text)), ''::text) IS NOT NULL", name: "authorized_wireless_network_identity_chk"
   end
 
@@ -133,7 +133,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.check_constraint "triggered_by = ANY (ARRAY['schedule'::text, 'manual'::text, 'replay'::text])", name: "chk_integration_runs_triggered_by"
   end
 
-  create_table "network_clients", primary_key: ["ssid", "client_mac"], force: :cascade do |t|
+  create_table "wireless_clients", primary_key: ["ssid", "client_mac"], force: :cascade do |t|
     t.text "ssid", null: false
     t.text "client_mac", null: false
     t.text "known_bssid"
@@ -141,9 +141,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.timestamptz "last_seen", default: -> { "now()" }, null: false
     t.integer "probe_count", default: 1, null: false
     t.text "location_id"
-    t.index ["client_mac"], name: "idx_network_clients_client_mac"
-    t.index ["known_bssid"], name: "idx_network_clients_known_bssid", where: "(known_bssid IS NOT NULL)"
-    t.index ["last_seen"], name: "idx_network_clients_last_seen", order: :desc
+    t.index ["client_mac"], name: "idx_wireless_clients_client_mac"
+    t.index ["known_bssid"], name: "idx_wireless_clients_known_bssid", where: "(known_bssid IS NOT NULL)"
+    t.index ["last_seen"], name: "idx_wireless_clients_last_seen", order: :desc
   end
 
   create_table "redpanda_traffic_samples", force: :cascade do |t|
@@ -181,7 +181,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.datetime "updated_at", null: false
   end
 
-  create_table "shadow_it_alerts", primary_key: "source_mac", id: :text, force: :cascade do |t|
+  create_table "wireless_shadow_alerts", primary_key: "source_mac", id: :text, force: :cascade do |t|
     t.timestamptz "first_occurred_at", null: false
     t.timestamptz "last_occurred_at", null: false
     t.bigint "occurrence_count", default: 1, null: false
@@ -195,11 +195,11 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.timestamptz "resolved_at"
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "updated_at", default: -> { "now()" }, null: false
-    t.index ["last_occurred_at"], name: "shadow_it_alerts_open_idx", order: :desc, where: "(resolved_at IS NULL)"
-    t.check_constraint "source_mac ~ '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'::text", name: "shadow_it_alerts_source_mac_format_chk"
+    t.index ["last_occurred_at"], name: "wireless_shadow_alerts_open_idx", order: :desc, where: "(resolved_at IS NULL)"
+    t.check_constraint "source_mac ~ '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'::text", name: "wireless_shadow_alerts_source_mac_format_chk"
   end
 
-  create_table "sync_batch", primary_key: "batch_id", id: :uuid, default: nil, force: :cascade do |t|
+  create_table "sync_batches", primary_key: "batch_id", id: :uuid, default: nil, force: :cascade do |t|
     t.uuid "job_id", null: false
     t.integer "batch_no", null: false
     t.text "payload_ref", null: false
@@ -213,40 +213,40 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.text "cursor_end", null: false
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "updated_at", default: -> { "now()" }, null: false
-    t.index ["dedupe_key"], name: "sync_batch_dedupe_idx", unique: true
-    t.index ["job_id", "batch_no"], name: "idx_sync_batch_job_batch_no"
-    t.index ["status"], name: "idx_sync_batch_status"
-    t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'dispatched'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_batch_status"
+    t.index ["dedupe_key"], name: "sync_batches_dedupe_idx", unique: true
+    t.index ["job_id", "batch_no"], name: "idx_sync_batches_job_batch_no"
+    t.index ["status"], name: "idx_sync_batches_status"
+    t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'dispatched'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_batches_status"
   end
 
-  create_table "sync_cursor", primary_key: "stream_name", id: :text, force: :cascade do |t|
+  create_table "sync_cursors", primary_key: "stream_name", id: :text, force: :cascade do |t|
     t.text "cursor_value", null: false
     t.timestamptz "updated_at", default: -> { "now()" }, null: false
   end
 
-  create_table "sync_error", force: :cascade do |t|
+  create_table "sync_errors", force: :cascade do |t|
     t.uuid "job_id"
     t.uuid "batch_id"
     t.text "error_class", null: false
     t.text "error_text", null: false
     t.timestamptz "created_at", default: -> { "now()" }, null: false
-    t.index ["batch_id"], name: "idx_sync_error_batch_id"
-    t.index ["job_id"], name: "idx_sync_error_job_id"
+    t.index ["batch_id"], name: "idx_sync_errors_batch_id"
+    t.index ["job_id"], name: "idx_sync_errors_job_id"
   end
 
-  create_table "sync_job", primary_key: "job_id", id: :uuid, default: nil, force: :cascade do |t|
+  create_table "sync_jobs", primary_key: "job_id", id: :uuid, default: nil, force: :cascade do |t|
     t.text "stream_name", null: false
     t.text "status", null: false
     t.integer "attempt_count", default: 0, null: false
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "started_at"
     t.timestamptz "finished_at"
-    t.index ["status", "created_at"], name: "idx_sync_job_status_created_at"
-    t.index ["stream_name"], name: "idx_sync_job_stream_name"
-    t.check_constraint "status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_job_status"
+    t.index ["status", "created_at"], name: "idx_sync_jobs_status_created_at"
+    t.index ["stream_name"], name: "idx_sync_jobs_stream_name"
+    t.check_constraint "status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_jobs_status"
   end
 
-  create_table "sync_scan_ingest", primary_key: "dedupe_key", id: :text, force: :cascade do |t|
+  create_table "sync_events", primary_key: "dedupe_key", id: :text, force: :cascade do |t|
     t.text "stream_name", null: false
     t.timestamptz "observed_at", null: false
     t.text "payload_ref", null: false
@@ -343,10 +343,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.index ["signal_dbm", "observed_at"], name: "ssi_wireless_signal_idx", order: { observed_at: :desc }, where: "((stream_name = 'wireless.audit'::text) AND (signal_dbm IS NOT NULL))"
     t.index ["src_ip"], name: "ssi_wireless_src_ip_idx", where: "((stream_name = 'wireless.audit'::text) AND (src_ip IS NOT NULL))"
     t.index ["ssid", "observed_at"], name: "ssi_wireless_ssid_idx", order: { observed_at: :desc }, where: "(stream_name = 'wireless.audit'::text)"
-    t.index ["status", "observed_at"], name: "sync_scan_ingest_status_idx"
-    t.index ["stream_name", "observed_at"], name: "sync_scan_ingest_stream_idx"
+    t.index ["status", "observed_at"], name: "sync_events_status_idx"
+    t.index ["stream_name", "observed_at"], name: "sync_events_stream_idx"
     t.index ["wireless_search_tsv"], name: "ssi_wireless_search_tsv_idx", where: "(stream_name = 'wireless.audit'::text)", using: :gin
-    t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'batched'::text, 'failed'::text])", name: "chk_sync_scan_ingest_status"
+    t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'batched'::text, 'failed'::text])", name: "chk_sync_events_status"
   end
 
   create_table "wireless_probe_observations", primary_key: ["mac_address", "ssid", "bssid"], force: :cascade do |t|
@@ -367,8 +367,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
   end
 
   add_foreign_key "integration_runs", "integration_configs"
-  add_foreign_key "sync_batch", "sync_job", column: "job_id", primary_key: "job_id", name: "fk_sync_batch_job_id"
-  add_foreign_key "sync_error", "sync_batch", column: "batch_id", primary_key: "batch_id", name: "fk_sync_error_batch_id"
-  add_foreign_key "sync_error", "sync_job", column: "job_id", primary_key: "job_id", name: "fk_sync_error_job_id"
-  add_foreign_key "sync_job", "sync_cursor", column: "stream_name", primary_key: "stream_name", name: "fk_sync_job_stream_name", deferrable: :deferred
+  add_foreign_key "sync_batches", "sync_jobs", column: "job_id", primary_key: "job_id", name: "fk_sync_batches_job_id"
+  add_foreign_key "sync_errors", "sync_batches", column: "batch_id", primary_key: "batch_id", name: "fk_sync_errors_batch_id"
+  add_foreign_key "sync_errors", "sync_jobs", column: "job_id", primary_key: "job_id", name: "fk_sync_errors_job_id"
+  add_foreign_key "sync_jobs", "sync_cursors", column: "stream_name", primary_key: "stream_name", name: "fk_sync_jobs_stream_name", deferrable: :deferred
 end

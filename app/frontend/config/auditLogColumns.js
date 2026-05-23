@@ -30,7 +30,7 @@ export function buildAuditLogColumns({ endpoints = {}, macOptions = {}, fullMacs
     masked: !fullMacs,
     auditLogsUrl: macOptions.auditLogsUrl || endpoints.index || "/audit_logs",
     identitiesUrl: macOptions.identitiesUrl || "/identities",
-    shadowItUrl: macOptions.shadowItUrl || "/shadow_it_alerts",
+    shadowItUrl: macOptions.shadowItUrl || "/wireless_shadow_alerts",
     inventoryUrl: macOptions.inventoryUrl || "/identities/inventory.json",
     summaryUrl: macOptions.macSummaryUrl || "/identities/mac_summary.json",
     recentAuditLogsUrl: macOptions.recentAuditLogsUrl || "/audit_logs/recent.json"

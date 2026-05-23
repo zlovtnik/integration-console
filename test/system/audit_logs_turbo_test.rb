@@ -2,7 +2,7 @@ require "application_system_test_case"
 
 class AuditLogsTurboTest < ApplicationSystemTestCase
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
 
     insert_sync_ingest(
       dedupe_key: "audit-turbo-remount",

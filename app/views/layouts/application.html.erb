@@ -25,14 +25,14 @@
           <%= nav_link_to "Integrations", integrations_path, icon: :integration %>
           <%= nav_link_to "Backlog", backlog_index_path, icon: :backlog %>
           <%= nav_link_to "Audit Windows", audit_windows_path, icon: :windows %>
-          <%= nav_link_to "Authorized Wireless", authorized_wireless_networks_path, icon: :wireless %>
+          <%= nav_link_to "Authorized Wireless", wireless_authorized_networks_path, icon: :wireless %>
           <%= nav_link_to "MAC Identifiers", devices_path, icon: :devices %>
           <%= nav_link_to "Identities", identities_path, icon: :identities %>
-          <%= nav_link_to "Network Clients", network_clients_path, icon: :wireless %>
+          <%= nav_link_to "Network Clients", wireless_clients_path, icon: :wireless %>
           <%= nav_link_to "Fingerprint Sources", fingerprint_sources_path, icon: :fingerprint %>
           <%= nav_link_to "Heatmap", heatmap_index_path, icon: :heatmap %>
           <%= nav_link_to "Alerts", alerts_path, icon: :alerts %>
-          <%= nav_link_to "Shadow IT", shadow_it_alerts_path, icon: :alerts %>
+          <%= nav_link_to "Shadow IT", wireless_shadow_alerts_path, icon: :alerts %>
         </nav>
       </aside>
       <div class="sidebar-overlay" data-sidebar-target="overlay" data-action="click->sidebar#close"></div>

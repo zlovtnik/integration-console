@@ -23,18 +23,18 @@ class NetworkClientsController < ApplicationController
 
   def index
     @query = params[:q].to_s.strip
-    @network_clients = filtered_scope
-    @network_clients = apply_sql_sort(@network_clients, SORTS, default_sort: :last_seen)
-    @network_clients = paginate(@network_clients)
+    @wireless_clients = filtered_scope
+    @wireless_clients = apply_sql_sort(@wireless_clients, SORTS, default_sort: :last_seen)
+    @wireless_clients = paginate(@wireless_clients)
 
     respond_to do |format|
       format.html {
-        raw_entries = @network_clients.to_a
-        @network_clients_payload = network_clients_payload(raw_entries)
+        raw_entries = @wireless_clients.to_a
+        @wireless_clients_payload = wireless_clients_payload(raw_entries)
       }
       format.json {
         render json: {
-          rows: @network_clients.as_json(only: [:ssid, :client_mac, :known_bssid, :first_seen, :last_seen, :probe_count]),
+          rows: @wireless_clients.as_json(only: [:ssid, :client_mac, :known_bssid, :first_seen, :last_seen, :probe_count]),
           totalCount: @total_count,
           currentPage: @current_page,
           perPage: @per_page,
@@ -55,7 +55,7 @@ class NetworkClientsController < ApplicationController
     scope
   end
 
-  def network_clients_payload(entries)
+  def wireless_clients_payload(entries)
     {
       rows: entries.map { |entry| entry.as_json(only: [:ssid, :client_mac, :known_bssid, :first_seen, :last_seen, :probe_count]) },
       totalCount: @total_count,
@@ -66,7 +66,7 @@ class NetworkClientsController < ApplicationController
       query: @query,
       filters: parsed_grid_filters,
       endpoints: {
-        index: network_clients_path
+        index: wireless_clients_path
       }
     }
   end

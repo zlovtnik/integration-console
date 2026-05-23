@@ -71,7 +71,7 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
   test "leases jobs and upserts completed embeddings" do
     job = {
       "job_id" => 7,
-      "source_table" => "sync_scan_ingest",
+      "source_table" => "sync_events",
       "source_key" => "event-1",
       "embedding_model" => "nomic-embed-text-v2-moe",
       "embedding_kind" => "event"
@@ -93,14 +93,14 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
     jobs = [
       {
         "job_id" => 10,
-        "source_table" => "sync_scan_ingest",
+        "source_table" => "sync_events",
         "source_key" => "event-10",
         "embedding_model" => "nomic-embed-text-v2-moe",
         "embedding_kind" => "event"
       },
       {
         "job_id" => 11,
-        "source_table" => "sync_scan_ingest",
+        "source_table" => "sync_events",
         "source_key" => "event-11",
         "embedding_model" => "nomic-embed-text-v2-moe",
         "embedding_kind" => "event"
@@ -121,7 +121,7 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
   test "rejects embeddings with unexpected dimensions" do
     job = {
       "job_id" => 8,
-      "source_table" => "sync_scan_ingest",
+      "source_table" => "sync_events",
       "source_key" => "event-2",
       "embedding_model" => "nomic-embed-text-v2-moe",
       "embedding_kind" => "event"
@@ -138,7 +138,7 @@ class VectorEmbeddingsWorkerTest < ActiveSupport::TestCase
   test "does not crash when failure state update is locked" do
     job = {
       "job_id" => 9,
-      "source_table" => "sync_scan_ingest",
+      "source_table" => "sync_events",
       "source_key" => "event-3",
       "embedding_model" => "nomic-embed-text-v2-moe",
       "embedding_kind" => "event"

@@ -1,27 +1,27 @@
 class AddWirelessSecurityFields < ActiveRecord::Migration[7.2]
   def change
-    add_column :sync_scan_ingest, :security_flags, :integer, null: false, default: 0, if_not_exists: true
-    add_column :sync_scan_ingest, :wps_device_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :wps_manufacturer, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :wps_model_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :device_fingerprint, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :handshake_captured, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :security_flags, :integer, null: false, default: 0, if_not_exists: true
+    add_column :sync_events, :wps_device_name, :text, if_not_exists: true
+    add_column :sync_events, :wps_manufacturer, :text, if_not_exists: true
+    add_column :sync_events, :wps_model_name, :text, if_not_exists: true
+    add_column :sync_events, :device_fingerprint, :text, if_not_exists: true
+    add_column :sync_events, :handshake_captured, :boolean, null: false, default: false, if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       [:device_fingerprint, :observed_at],
       order: { observed_at: :desc },
       where: "stream_name = 'wireless.audit' AND device_fingerprint IS NOT NULL",
       name: "ssi_wireless_device_fingerprint_idx",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       [:security_flags, :observed_at],
       order: { observed_at: :desc },
       where: "stream_name = 'wireless.audit' AND security_flags <> 0",
       name: "ssi_wireless_security_flags_idx",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       :observed_at,
       order: { observed_at: :desc },
       where: "stream_name = 'wireless.audit' AND handshake_captured",
@@ -120,7 +120,7 @@ class AddWirelessSecurityFields < ActiveRecord::Migration[7.2]
         COALESCE(d_src.username, d_bssid.username) AS registered_username,
         COALESCE(d_src.os_hint, d_bssid.os_hint) AS os_hint,
         COALESCE(d_src.hostname, d_bssid.hostname) AS hostname
-      FROM sync_scan_ingest ssi
+      FROM sync_events ssi
       LEFT JOIN devices d_src
         ON lower(d_src.mac_hint) = lower(ssi.payload->>'source_mac')
       LEFT JOIN devices d_bssid

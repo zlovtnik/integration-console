@@ -5,7 +5,7 @@
 
 <%= svelte_props_tag("shadow-it-alerts-svelte-root", initial: { filters: parsed_grid_filters }) %>
 <div id="shadow-it-alerts-svelte-root"></div>
-<%= svelte_bundle_tags(:shadow_it_alerts) %>
+<%= svelte_bundle_tags(:wireless_shadow_alerts) %>
 
 <div
   class="data-table-wrap table-wrap"
@@ -15,7 +15,7 @@
   data-mac-link-recent-audit-logs-url-value="<%= recent_audit_logs_path %>"
   data-mac-link-audit-logs-url-value="<%= audit_logs_path %>"
   data-mac-link-identities-url-value="<%= identities_path %>"
-  data-mac-link-shadow-it-url-value="<%= shadow_it_alerts_path %>"
+  data-mac-link-shadow-it-url-value="<%= wireless_shadow_alerts_path %>"
 >
   <table class="data-table">
     <thead>
@@ -32,8 +32,8 @@
       </tr>
     </thead>
     <tbody>
-      <% if @shadow_it_alerts.any? %>
-        <% @shadow_it_alerts.each do |alert| %>
+      <% if @wireless_shadow_alerts.any? %>
+        <% @wireless_shadow_alerts.each do |alert| %>
           <tr>
             <td><%= alert.last_occurred_at %></td>
             <td><%= display_mac(alert.source_mac) %></td>

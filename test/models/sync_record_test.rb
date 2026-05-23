@@ -2,7 +2,7 @@ require "test_helper"
 
 class SyncRecordTest < ActiveSupport::TestCase
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
   end
 
   test "sync models are read only" do

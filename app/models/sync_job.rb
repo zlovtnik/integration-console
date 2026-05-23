@@ -1,5 +1,5 @@
 class SyncJob < SyncRecord
-  self.table_name = "sync_job"
+  self.table_name = "sync_jobs"
   self.primary_key = "job_id"
 
   has_many :sync_batches, foreign_key: :job_id, primary_key: :job_id

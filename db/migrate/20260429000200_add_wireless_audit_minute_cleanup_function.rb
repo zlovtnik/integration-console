@@ -22,7 +22,7 @@ class AddWirelessAuditMinuteCleanupFunction < ActiveRecord::Migration[7.2]
 
         SELECT min(observed_at), max(observed_at)
         INTO v_first_observed_at, v_last_observed_at
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
           AND (p_from IS NULL OR observed_at >= p_from)
           AND (p_to IS NULL OR observed_at < p_to);
@@ -51,12 +51,12 @@ class AddWirelessAuditMinuteCleanupFunction < ActiveRecord::Migration[7.2]
             dedupe_key,
             (date_trunc('minute', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS minute_observed_at,
             updated_at AS orig_updated_at
-          FROM sync_scan_ingest
+          FROM sync_events
           WHERE stream_name = 'wireless.audit'
             AND observed_at >= v_window_start
             AND observed_at < v_window_end;
 
-          UPDATE sync_scan_ingest target
+          UPDATE sync_events target
           SET observed_at = wireless_audit_cleanup_scope.minute_observed_at,
               updated_at = now()
           FROM wireless_audit_cleanup_scope
@@ -89,13 +89,13 @@ class AddWirelessAuditMinuteCleanupFunction < ActiveRecord::Migration[7.2]
                   lower(COALESCE(target.device_fingerprint, target.payload->>'device_fingerprint', ''))
                 ORDER BY wireless_audit_cleanup_scope.orig_updated_at DESC NULLS LAST, target.created_at DESC NULLS LAST, target.dedupe_key DESC
               ) AS duplicate_rank
-            FROM sync_scan_ingest target
+            FROM sync_events target
             JOIN wireless_audit_cleanup_scope
               ON target.dedupe_key = wireless_audit_cleanup_scope.dedupe_key
             WHERE target.stream_name = 'wireless.audit'
           ),
           deleted AS (
-            DELETE FROM sync_scan_ingest target
+            DELETE FROM sync_events target
             USING ranked
             WHERE target.dedupe_key = ranked.dedupe_key
               AND ranked.duplicate_rank > 1

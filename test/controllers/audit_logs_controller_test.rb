@@ -5,7 +5,7 @@ require "json"
 
 class AuditLogsControllerTest < ActionDispatch::IntegrationTest
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
     ensure_wireless_audit_search_vector
   end
 
@@ -99,7 +99,7 @@ class AuditLogsControllerTest < ActionDispatch::IntegrationTest
       payload: payload
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET ssid = NULL,
           source_mac = NULL,
           bssid = NULL,
@@ -175,7 +175,7 @@ class AuditLogsControllerTest < ActionDispatch::IntegrationTest
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET device_fingerprint = NULL
       WHERE dedupe_key = 'audit-payload-fingerprint'
     SQL

@@ -22,7 +22,7 @@
   filters = next.filters || []
 
   async function fetchDistinctValues(fieldKey) {
-    const response = await fetch(`/shadow_it_alerts/distinct_values?field=${fieldKey}`)
+    const response = await fetch(`/wireless_shadow_alerts/distinct_values?field=${fieldKey}`)
     if (!response.ok) return []
     return await response.json()
   }

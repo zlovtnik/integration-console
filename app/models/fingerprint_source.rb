@@ -1,5 +1,5 @@
 class FingerprintSource < ApplicationRecord
-  self.table_name = "sync_scan_ingest"
+  self.table_name = "sync_events_expanded"
   self.primary_key = "device_fingerprint"
 
   FINGERPRINT_SQL = "COALESCE(device_fingerprint, payload->>'device_fingerprint')".freeze

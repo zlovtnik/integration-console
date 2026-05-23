@@ -4,7 +4,7 @@ class AddWirelessAuditCoveringIndex < ActiveRecord::Migration[7.2]
   def up
     execute <<~SQL
       CREATE INDEX CONCURRENTLY IF NOT EXISTS ssi_wireless_audit_cover_idx
-        ON sync_scan_ingest (observed_at DESC)
+        ON sync_events (observed_at DESC)
         INCLUDE (
           dedupe_key, sensor_id, location_id, frame_subtype,
           source_mac, bssid, destination_bssid, ssid,

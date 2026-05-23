@@ -1,80 +1,80 @@
 class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
   def change
-    add_column :sync_scan_ingest, :schema_version, :integer, null: false, default: 1, if_not_exists: true
-    add_column :sync_scan_ingest, :frame_type, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :fragment_number, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :channel_number, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :signal_status, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :adjacent_mac_hint, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :qos_tid, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :qos_eosp, :boolean, if_not_exists: true
-    add_column :sync_scan_ingest, :qos_ack_policy, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :qos_ack_policy_label, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :qos_amsdu, :boolean, if_not_exists: true
-    add_column :sync_scan_ingest, :llc_oui, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ethertype, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :ethertype_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :src_ip, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :dst_ip, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ip_ttl, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :ip_protocol, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :ip_protocol_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :src_port, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :dst_port, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :transport_protocol, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :transport_length, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :transport_checksum, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :app_protocol, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ssdp_message_type, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ssdp_st, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ssdp_mx, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ssdp_usn, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :dhcp_requested_ip, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :dhcp_hostname, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :dhcp_vendor_class, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :dns_query_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :mdns_name, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :session_key, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :retransmit_key, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :frame_fingerprint, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :payload_visibility, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :tsft_delta_us, :bigint, if_not_exists: true
-    add_column :sync_scan_ingest, :wall_clock_delta_ms, :bigint, if_not_exists: true
-    add_column :sync_scan_ingest, :large_frame, :boolean, null: false, default: false, if_not_exists: true
-    add_column :sync_scan_ingest, :mixed_encryption, :boolean, if_not_exists: true
-    add_column :sync_scan_ingest, :dedupe_or_replay_suspect, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :schema_version, :integer, null: false, default: 1, if_not_exists: true
+    add_column :sync_events, :frame_type, :text, if_not_exists: true
+    add_column :sync_events, :fragment_number, :integer, if_not_exists: true
+    add_column :sync_events, :channel_number, :integer, if_not_exists: true
+    add_column :sync_events, :signal_status, :text, if_not_exists: true
+    add_column :sync_events, :adjacent_mac_hint, :text, if_not_exists: true
+    add_column :sync_events, :qos_tid, :integer, if_not_exists: true
+    add_column :sync_events, :qos_eosp, :boolean, if_not_exists: true
+    add_column :sync_events, :qos_ack_policy, :integer, if_not_exists: true
+    add_column :sync_events, :qos_ack_policy_label, :text, if_not_exists: true
+    add_column :sync_events, :qos_amsdu, :boolean, if_not_exists: true
+    add_column :sync_events, :llc_oui, :text, if_not_exists: true
+    add_column :sync_events, :ethertype, :integer, if_not_exists: true
+    add_column :sync_events, :ethertype_name, :text, if_not_exists: true
+    add_column :sync_events, :src_ip, :text, if_not_exists: true
+    add_column :sync_events, :dst_ip, :text, if_not_exists: true
+    add_column :sync_events, :ip_ttl, :integer, if_not_exists: true
+    add_column :sync_events, :ip_protocol, :integer, if_not_exists: true
+    add_column :sync_events, :ip_protocol_name, :text, if_not_exists: true
+    add_column :sync_events, :src_port, :integer, if_not_exists: true
+    add_column :sync_events, :dst_port, :integer, if_not_exists: true
+    add_column :sync_events, :transport_protocol, :text, if_not_exists: true
+    add_column :sync_events, :transport_length, :integer, if_not_exists: true
+    add_column :sync_events, :transport_checksum, :integer, if_not_exists: true
+    add_column :sync_events, :app_protocol, :text, if_not_exists: true
+    add_column :sync_events, :ssdp_message_type, :text, if_not_exists: true
+    add_column :sync_events, :ssdp_st, :text, if_not_exists: true
+    add_column :sync_events, :ssdp_mx, :text, if_not_exists: true
+    add_column :sync_events, :ssdp_usn, :text, if_not_exists: true
+    add_column :sync_events, :dhcp_requested_ip, :text, if_not_exists: true
+    add_column :sync_events, :dhcp_hostname, :text, if_not_exists: true
+    add_column :sync_events, :dhcp_vendor_class, :text, if_not_exists: true
+    add_column :sync_events, :dns_query_name, :text, if_not_exists: true
+    add_column :sync_events, :mdns_name, :text, if_not_exists: true
+    add_column :sync_events, :session_key, :text, if_not_exists: true
+    add_column :sync_events, :retransmit_key, :text, if_not_exists: true
+    add_column :sync_events, :frame_fingerprint, :text, if_not_exists: true
+    add_column :sync_events, :payload_visibility, :text, if_not_exists: true
+    add_column :sync_events, :tsft_delta_us, :bigint, if_not_exists: true
+    add_column :sync_events, :wall_clock_delta_ms, :bigint, if_not_exists: true
+    add_column :sync_events, :large_frame, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :mixed_encryption, :boolean, if_not_exists: true
+    add_column :sync_events, :dedupe_or_replay_suspect, :boolean, null: false, default: false, if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       [:schema_version, :observed_at],
       name: "ssi_wireless_schema_version_idx",
       where: "stream_name = 'wireless.audit'",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       [:session_key, :observed_at],
       name: "ssi_wireless_session_key_idx",
       where: "stream_name = 'wireless.audit' AND session_key IS NOT NULL",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       [:app_protocol, :observed_at],
       name: "ssi_wireless_app_protocol_idx",
       where: "stream_name = 'wireless.audit' AND app_protocol IS NOT NULL",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       :frame_fingerprint,
       name: "ssi_wireless_frame_fingerprint_idx",
       where: "stream_name = 'wireless.audit' AND frame_fingerprint IS NOT NULL",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       :src_ip,
       name: "ssi_wireless_src_ip_idx",
       where: "stream_name = 'wireless.audit' AND src_ip IS NOT NULL",
       if_not_exists: true
 
-    add_index :sync_scan_ingest,
+    add_index :sync_events,
       :dst_ip,
       name: "ssi_wireless_dst_ip_idx",
       where: "stream_name = 'wireless.audit' AND dst_ip IS NOT NULL",
@@ -162,7 +162,7 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
         COALESCE(d_src.username, d_bssid.username) AS registered_username,
         COALESCE(d_src.os_hint, d_bssid.os_hint) AS os_hint,
         COALESCE(d_src.hostname, d_bssid.hostname, ssi.dhcp_hostname, ssi.payload->>'dhcp_hostname') AS hostname
-      FROM sync_scan_ingest ssi
+      FROM sync_events ssi
       LEFT JOIN devices d_src
         ON lower(d_src.mac_hint) = lower(COALESCE(ssi.source_mac, ssi.payload->>'source_mac'))
       LEFT JOIN devices d_bssid
@@ -189,7 +189,7 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
           COALESCE(ssi.large_frame, FALSE) AS large_frame,
           COALESCE(ssi.dedupe_or_replay_suspect, FALSE) AS dedupe_or_replay_suspect,
           NULLIF(ssi.payload->>'tsft', '')::bigint AS tsft
-        FROM sync_scan_ingest ssi
+        FROM sync_events ssi
         WHERE ssi.stream_name = 'wireless.audit'
       )
       SELECT
@@ -252,7 +252,7 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
           COALESCE(app_protocol, payload->>'app_protocol') AS app_protocol,
           COALESCE(dns_query_name, payload->>'dns_query_name') AS dns_query_name,
           COALESCE(protected, FALSE) AS protected
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
       ) inventory
       WHERE source_mac IS NOT NULL
@@ -331,7 +331,7 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
         COALESCE(d_src.username, d_bssid.username) AS registered_username,
         COALESCE(d_src.os_hint, d_bssid.os_hint) AS os_hint,
         COALESCE(d_src.hostname, d_bssid.hostname) AS hostname
-      FROM sync_scan_ingest ssi
+      FROM sync_events ssi
       LEFT JOIN devices d_src
         ON lower(d_src.mac_hint) = lower(COALESCE(ssi.source_mac, ssi.payload->>'source_mac'))
       LEFT JOIN devices d_bssid

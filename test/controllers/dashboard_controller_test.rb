@@ -6,8 +6,8 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     Sensor.delete_all
     SensorAlert.delete_all
     RedpandaTrafficSample.delete_all
-    clear_sync_tables("sync_error", "sync_batch", "sync_job", "sync_scan_ingest", "audit_backlog", "shadow_it_alerts")
-    sync_connection.execute("DELETE FROM sync_cursor")
+    clear_sync_tables("sync_errors", "sync_batches", "sync_jobs", "sync_events", "sync_backlog", "wireless_shadow_alerts")
+    sync_connection.execute("DELETE FROM sync_cursors")
     ensure_sync_plane_health_view
   end
 
@@ -75,11 +75,11 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     completed_job_id = SecureRandom.uuid
     running_job_id = SecureRandom.uuid
     orphaned_job_id = SecureRandom.uuid
-    insert_sync_job(completed_job_id, status: "running", created_at: 10.minutes.ago)
-    insert_sync_job(running_job_id, status: "running", created_at: 1.minute.ago)
-    insert_sync_job(orphaned_job_id, status: "running", created_at: 10.minutes.ago)
-    insert_sync_batch(completed_job_id, status: "completed", dedupe_key: "completed-batch")
-    insert_sync_batch(running_job_id, status: "dispatched", dedupe_key: "running-batch")
+    insert_sync_jobs(completed_job_id, status: "running", created_at: 10.minutes.ago)
+    insert_sync_jobs(running_job_id, status: "running", created_at: 1.minute.ago)
+    insert_sync_jobs(orphaned_job_id, status: "running", created_at: 10.minutes.ago)
+    insert_sync_batches(completed_job_id, status: "completed", dedupe_key: "completed-batch")
+    insert_sync_batches(running_job_id, status: "dispatched", dedupe_key: "running-batch")
 
     get root_url(format: :json)
 
@@ -87,7 +87,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     counts = JSON.parse(response.body).fetch("counts")
     assert_equal 1, counts.fetch("wireless_events_24h")
     assert_equal 1, counts.fetch("pending_ingest")
-    assert_equal 1, counts.fetch("open_shadow_it_alerts")
+    assert_equal 1, counts.fetch("open_wireless_shadow_alerts")
     assert_equal 1, counts.fetch("job_orphans")
     assert_equal 1, counts.fetch("job_effective_running")
     assert_equal 1, counts.fetch("job_effective_completed")
@@ -115,7 +115,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
 
   def insert_sync_cursor(stream_name)
     sync_connection.execute(<<~SQL.squish)
-      INSERT INTO sync_cursor (stream_name, cursor_value, updated_at)
+      INSERT INTO sync_cursors (stream_name, cursor_value, updated_at)
       VALUES (#{sync_connection.quote(stream_name)}, '0', now())
       ON CONFLICT (stream_name) DO UPDATE
         SET cursor_value = excluded.cursor_value,
@@ -123,9 +123,9 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     SQL
   end
 
-  def insert_sync_job(job_id, status:, created_at:)
+  def insert_sync_jobs(job_id, status:, created_at:)
     sync_connection.execute(<<~SQL.squish)
-      INSERT INTO sync_job (job_id, stream_name, status, attempt_count, created_at, started_at)
+      INSERT INTO sync_jobs (job_id, stream_name, status, attempt_count, created_at, started_at)
       VALUES (
         #{sync_connection.quote(job_id)}::uuid,
         'wireless.audit',
@@ -137,9 +137,9 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     SQL
   end
 
-  def insert_sync_batch(job_id, status:, dedupe_key:)
+  def insert_sync_batches(job_id, status:, dedupe_key:)
     sync_connection.execute(<<~SQL.squish)
-      INSERT INTO sync_batch (
+      INSERT INTO sync_batches (
         batch_id,
         job_id,
         batch_no,
@@ -168,7 +168,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
 
   def insert_shadow_it_alert
     sync_connection.execute(<<~SQL.squish)
-      INSERT INTO shadow_it_alerts (
+      INSERT INTO wireless_shadow_alerts (
         source_mac,
         first_occurred_at,
         last_occurred_at,

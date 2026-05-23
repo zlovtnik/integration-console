@@ -8,14 +8,14 @@ class CreateSyncPlaneHealthView < ActiveRecord::Migration[7.2]
         SELECT
           status,
           count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         GROUP BY status
       ),
       wireless_ingest_status AS (
         SELECT
           status,
           count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
         GROUP BY status
       ),
@@ -23,13 +23,13 @@ class CreateSyncPlaneHealthView < ActiveRecord::Migration[7.2]
         SELECT
           count(*) FILTER (WHERE stream_name = 'wireless.audit' AND observed_at >= now() - interval '24 hours')::bigint AS wireless_events_24h_count,
           max(observed_at) FILTER (WHERE stream_name = 'wireless.audit') AS wireless_last_observed_at
-        FROM sync_scan_ingest
+        FROM sync_events
       ),
       batch_status AS (
         SELECT
           status,
           count(*)::bigint AS row_count
-        FROM sync_batch
+        FROM sync_batches
         GROUP BY status
       ),
       job_batch_rollup AS (
@@ -41,8 +41,8 @@ class CreateSyncPlaneHealthView < ActiveRecord::Migration[7.2]
           count(batch.batch_id) FILTER (WHERE batch.status IN ('pending', 'processing', 'dispatched'))::bigint AS open_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'failed')::bigint AS failed_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'completed')::bigint AS completed_batch_count
-        FROM sync_job job
-        LEFT JOIN sync_batch batch ON batch.job_id = job.job_id
+        FROM sync_jobs job
+        LEFT JOIN sync_batches batch ON batch.job_id = job.job_id
         GROUP BY job.job_id, job.status, job.created_at
       ),
       job_effective_status AS (
@@ -71,14 +71,14 @@ class CreateSyncPlaneHealthView < ActiveRecord::Migration[7.2]
         SELECT
           status,
           count(*)::bigint AS row_count
-        FROM audit_backlog
+        FROM sync_backlog
         GROUP BY status
       ),
       shadow_status AS (
         SELECT
           count(*) FILTER (WHERE resolved_at IS NULL)::bigint AS open_alert_count,
           max(observed_at) FILTER (WHERE resolved_at IS NULL) AS last_open_alert_at
-        FROM shadow_it_alerts
+        FROM wireless_shadow_alerts
       )
       SELECT
         now() AS measured_at,
@@ -114,8 +114,8 @@ class CreateSyncPlaneHealthView < ActiveRecord::Migration[7.2]
         coalesce((SELECT sum(row_count) FROM backlog_status WHERE status IN ('sync_failed', 'failed')), 0)::bigint AS backlog_failed_count,
         coalesce((SELECT open_alert_count FROM shadow_status), 0)::bigint AS open_shadow_it_alert_count,
         (SELECT last_open_alert_at FROM shadow_status) AS last_shadow_it_alert_at,
-        (SELECT cursor_value FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
-        (SELECT updated_at FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
+        (SELECT cursor_value FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
+        (SELECT updated_at FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
     SQL
   end
 

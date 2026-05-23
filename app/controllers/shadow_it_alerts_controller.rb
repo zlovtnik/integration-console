@@ -27,11 +27,11 @@ class ShadowItAlertsController < ApplicationController
 
   def index
     @query = params[:q].to_s.strip
-    @shadow_it_alerts = ShadowItAlert.recent
-    @shadow_it_alerts = @shadow_it_alerts.search(@query) if @query.present?
-    @shadow_it_alerts = apply_grid_filters(@shadow_it_alerts, FILTERS)
-    @shadow_it_alerts = apply_sort(@shadow_it_alerts, SORTS, default_sort: :last_occurred_at)
-    @shadow_it_alerts = paginate(@shadow_it_alerts)
+    @wireless_shadow_alerts = ShadowItAlert.recent
+    @wireless_shadow_alerts = @wireless_shadow_alerts.search(@query) if @query.present?
+    @wireless_shadow_alerts = apply_grid_filters(@wireless_shadow_alerts, FILTERS)
+    @wireless_shadow_alerts = apply_sort(@wireless_shadow_alerts, SORTS, default_sort: :last_occurred_at)
+    @wireless_shadow_alerts = paginate(@wireless_shadow_alerts)
   end
 
   def distinct_values
@@ -39,7 +39,7 @@ class ShadowItAlertsController < ApplicationController
     allowed_fields = %w[source_mac destination_bssid ssid sensor_id location_id reason]
     
     if allowed_fields.include?(field)
-      values = Rails.cache.fetch("shadow_it_alerts:distinct:#{field}", expires_in: 60.seconds) do
+      values = Rails.cache.fetch("wireless_shadow_alerts:distinct:#{field}", expires_in: 60.seconds) do
         ShadowItAlert.where.not(field => nil).distinct.order(field).limit(100).pluck(field)
       end
       render json: values
