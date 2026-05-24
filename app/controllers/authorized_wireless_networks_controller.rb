@@ -111,9 +111,9 @@ class AuthorizedWirelessNetworksController < ApplicationController
       notes: network.notes,
       match_label: network.match_label,
       updated_at: network.updated_at&.iso8601,
-      edit_url: network.persisted? ? edit_authorized_wireless_network_path(network) : nil,
-      update_url: network.persisted? ? authorized_wireless_network_path(network) : nil,
-      delete_url: network.persisted? ? authorized_wireless_network_path(network) : nil
+      edit_url: network.persisted? ? edit_wireless_authorized_network_path(network) : nil,
+      update_url: network.persisted? ? wireless_authorized_network_path(network) : nil,
+      delete_url: network.persisted? ? wireless_authorized_network_path(network) : nil
     }
   end
 end

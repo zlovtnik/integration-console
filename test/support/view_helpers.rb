@@ -144,7 +144,16 @@ module ViewHelpers
       )
     SQL
 
-    return if last_occurred_present
+    view_present = sync_connection.select_value(<<~SQL.squish)
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.views
+        WHERE table_schema = 'public'
+          AND table_name = 'v_wireless_shadow_alerts'
+      )
+    SQL
+
+    return if last_occurred_present && view_present
 
     sync_connection.execute("DROP VIEW IF EXISTS v_wireless_shadow_alerts")
     sync_connection.execute("DROP TABLE IF EXISTS wireless_shadow_alerts CASCADE")

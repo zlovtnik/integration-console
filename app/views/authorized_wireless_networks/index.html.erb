@@ -8,7 +8,7 @@
 <noscript>
   <h1>Authorized Wireless</h1>
 
-  <p><%= link_to "New authorized network", new_authorized_wireless_network_path %></p>
+  <p><%= link_to "New authorized network", new_wireless_authorized_network_path %></p>
 
   <div class="data-table-wrap table-wrap">
     <table class="data-table">
@@ -34,8 +34,8 @@
               <td><%= network.label %></td>
               <td><%= network.updated_at %></td>
               <td>
-                <%= link_to "Edit", edit_authorized_wireless_network_path(network) %>
-                <%= button_to "Remove", authorized_wireless_network_path(network), method: :delete, form: { data: { turbo_confirm: "Remove #{network.match_label}?" } } %>
+                <%= link_to "Edit", edit_wireless_authorized_network_path(network) %>
+                <%= button_to "Remove", wireless_authorized_network_path(network), method: :delete, form: { data: { turbo_confirm: "Remove #{network.match_label}?" } } %>
               </td>
             </tr>
           <% end %>

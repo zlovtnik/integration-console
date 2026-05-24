@@ -1,7 +1,7 @@
 require "base64"
 
 class AuditLog < SyncRecord
-  self.table_name = "sync_events_expanded"
+  self.table_name = "sync_scan_ingest"
   self.primary_key = "dedupe_key"
 
   SEARCH_EXPRESSIONS = %w[

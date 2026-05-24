@@ -30,10 +30,10 @@ class PromoteWirelessAuditSearchColumns < ActiveRecord::Migration[7.2]
   def down
     execute "DROP VIEW IF EXISTS v_wireless_audit_with_devices"
 
-    add_column :sync_events, :sensor_id, :text, if_not_exists: true
-    add_column :sync_events, :location_id, :text, if_not_exists: true
-    add_column :sync_events, :frame_subtype, :text, if_not_exists: true
-    add_column :sync_events, :username, :text, if_not_exists: true
+    remove_column :sync_events, :sensor_id, :text, if_exists: true
+    remove_column :sync_events, :location_id, :text, if_exists: true
+    remove_column :sync_events, :frame_subtype, :text, if_exists: true
+    remove_column :sync_events, :username, :text, if_exists: true
 
     refresh_legacy_wireless_audit_view
   end
@@ -62,7 +62,7 @@ class PromoteWirelessAuditSearchColumns < ActiveRecord::Migration[7.2]
         COALESCE(ssi.bssid, ssi.payload->>'bssid') AS bssid,
         COALESCE(ssi.destination_bssid, ssi.bssid, ssi.payload->>'destination_bssid', ssi.payload->>'bssid') AS destination_bssid,
         COALESCE(ssi.ssid, ssi.payload->>'ssid') AS ssid,
-        COALESCE(ssi.frame_subtype, ssi.payload->>'frame_subtype') AS frame_subtype,
+        ssi.payload->>'frame_subtype' AS frame_subtype,
         COALESCE(ssi.signal_dbm::text, ssi.payload->>'signal_dbm') AS signal_dbm,
         ssi.payload->>'noise_dbm' AS noise_dbm,
         ssi.payload->>'frequency_mhz' AS frequency_mhz,
@@ -91,10 +91,10 @@ class PromoteWirelessAuditSearchColumns < ActiveRecord::Migration[7.2]
         COALESCE(ssi.retry::text, ssi.payload->>'retry') AS retry,
         COALESCE(ssi.power_save::text, ssi.payload->>'power_save') AS power_save,
         COALESCE(ssi.protected::text, ssi.payload->>'protected') AS protected,
-        COALESCE(ssi.location_id, ssi.payload->>'location_id') AS location_id,
-        COALESCE(ssi.sensor_id, ssi.payload->>'sensor_id') AS sensor_id,
+        ssi.payload->>'location_id' AS location_id,
+        ssi.payload->>'sensor_id' AS sensor_id,
         ssi.payload->>'identity_source' AS identity_source,
-        COALESCE(ssi.username, ssi.payload->>'username') AS username,
+        ssi.payload->>'username' AS username,
         ssi.payload->'tags' AS tags,
         ssi.security_flags,
         ssi.wps_device_name,

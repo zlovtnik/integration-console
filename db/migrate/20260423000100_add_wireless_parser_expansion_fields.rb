@@ -88,10 +88,13 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
         refresh_wireless_anomalies_view
       end
       dir.down do
-        execute "DROP VIEW IF EXISTS v_wireless_anomalies"
-        execute "DROP VIEW IF EXISTS v_wireless_session_timeline"
-        execute "DROP VIEW IF EXISTS v_wireless_device_inventory"
+        execute "DROP VIEW IF EXISTS v_wireless_anomalies CASCADE"
+        execute "DROP VIEW IF EXISTS v_wireless_session_timeline CASCADE"
+        execute "DROP VIEW IF EXISTS v_wireless_device_inventory CASCADE"
         refresh_legacy_wireless_audit_view
+        refresh_legacy_wireless_session_timeline_view
+        refresh_legacy_wireless_device_inventory_view
+        refresh_legacy_wireless_anomalies_view
       end
     end
   end
@@ -337,6 +340,122 @@ class AddWirelessParserExpansionFields < ActiveRecord::Migration[7.2]
       LEFT JOIN devices d_bssid
         ON lower(d_bssid.mac_hint) = lower(COALESCE(ssi.bssid, ssi.payload->>'bssid'))
       WHERE ssi.stream_name = 'wireless.audit'
+    SQL
+  end
+
+  def refresh_legacy_wireless_session_timeline_view
+    execute <<~SQL
+      DROP VIEW IF EXISTS v_wireless_session_timeline CASCADE;
+      CREATE OR REPLACE VIEW v_wireless_session_timeline AS
+      WITH base AS (
+        SELECT
+          ssi.dedupe_key,
+          ssi.observed_at,
+          ssi.payload->>'session_key' AS session_key,
+          ssi.payload->>'retransmit_key' AS retransmit_key,
+          ssi.payload->>'frame_fingerprint' AS frame_fingerprint,
+          COALESCE(ssi.source_mac, ssi.payload->>'source_mac') AS source_mac,
+          COALESCE(ssi.destination_bssid, ssi.bssid, ssi.payload->>'destination_bssid', ssi.payload->>'bssid') AS destination_bssid,
+          COALESCE(ssi.ssid, ssi.payload->>'ssid') AS ssid,
+          COALESCE(NULLIF(ssi.payload->>'protected', '')::boolean, FALSE) AS protected,
+          COALESCE(NULLIF(ssi.payload->>'large_frame', '')::boolean, FALSE) AS large_frame,
+          COALESCE(NULLIF(ssi.payload->>'dedupe_or_replay_suspect', '')::boolean, FALSE) AS dedupe_or_replay_suspect,
+          NULLIF(ssi.payload->>'tsft', '')::bigint AS tsft
+        FROM sync_events ssi
+        WHERE ssi.stream_name = 'wireless.audit'
+      )
+      SELECT
+        dedupe_key,
+        observed_at,
+        session_key,
+        retransmit_key,
+        frame_fingerprint,
+        source_mac,
+        destination_bssid,
+        ssid,
+        protected,
+        large_frame,
+        dedupe_or_replay_suspect,
+        tsft,
+        CASE
+          WHEN lag(tsft) OVER session_window IS NOT NULL AND tsft IS NOT NULL
+            THEN tsft - lag(tsft) OVER session_window
+        END AS tsft_delta_us,
+        CASE
+          WHEN lag(observed_at) OVER session_window IS NOT NULL
+            THEN ROUND(EXTRACT(EPOCH FROM (observed_at - lag(observed_at) OVER session_window)) * 1000)
+        END AS wall_clock_delta_ms,
+        (COUNT(CASE WHEN protected THEN 'protected' ELSE 'open' END) OVER session_partition) > 1 AS mixed_encryption
+      FROM base
+      WINDOW
+        session_partition AS (PARTITION BY session_key),
+        session_window AS (PARTITION BY session_key ORDER BY observed_at)
+    SQL
+  end
+
+  def refresh_legacy_wireless_device_inventory_view
+    execute <<~SQL
+      DROP VIEW IF EXISTS v_wireless_device_inventory CASCADE;
+      CREATE OR REPLACE VIEW v_wireless_device_inventory AS
+      SELECT
+        md5(COALESCE(lower(source_mac), '') || '|' || COALESCE(location_id, '')) AS inventory_key,
+        lower(source_mac) AS source_mac,
+        max(location_id) AS location_id,
+        min(observed_at) AS first_seen,
+        max(observed_at) AS last_seen,
+        max(ssid) AS ssid,
+        max(destination_bssid) AS destination_bssid,
+        string_agg(DISTINCT src_ip, ', ') FILTER (WHERE src_ip IS NOT NULL) AS ip_addresses,
+        string_agg(DISTINCT hostname, ', ') FILTER (WHERE hostname IS NOT NULL) AS hostnames,
+        string_agg(DISTINCT app_protocol, ', ') FILTER (WHERE app_protocol IS NOT NULL) AS services,
+        string_agg(DISTINCT dns_query_name, ', ') FILTER (WHERE dns_query_name IS NOT NULL) AS dns_names,
+        count(*) AS frame_count,
+        sum(CASE WHEN protected THEN 1 ELSE 0 END) AS protected_frame_count,
+        sum(CASE WHEN NOT protected THEN 1 ELSE 0 END) AS open_frame_count
+      FROM (
+        SELECT
+          observed_at,
+          COALESCE(source_mac, payload->>'source_mac') AS source_mac,
+          payload->>'location_id' AS location_id,
+          COALESCE(ssid, payload->>'ssid') AS ssid,
+          COALESCE(destination_bssid, bssid, payload->>'destination_bssid', payload->>'bssid') AS destination_bssid,
+          payload->>'src_ip' AS src_ip,
+          COALESCE(payload->>'dhcp_hostname', payload->>'mdns_name') AS hostname,
+          payload->>'app_protocol' AS app_protocol,
+          payload->>'dns_query_name' AS dns_query_name,
+          COALESCE(NULLIF(payload->>'protected','')::boolean, FALSE) AS protected
+        FROM sync_events
+        WHERE stream_name = 'wireless.audit'
+      ) inventory
+      WHERE source_mac IS NOT NULL
+      GROUP BY lower(source_mac), location_id
+    SQL
+  end
+
+  def refresh_legacy_wireless_anomalies_view
+    execute <<~SQL
+      CREATE OR REPLACE VIEW v_wireless_anomalies AS
+      SELECT
+        timeline.dedupe_key,
+        timeline.observed_at,
+        timeline.session_key,
+        timeline.source_mac,
+        timeline.destination_bssid,
+        timeline.ssid,
+        timeline.tsft_delta_us,
+        timeline.wall_clock_delta_ms,
+        timeline.mixed_encryption,
+        timeline.large_frame,
+        timeline.dedupe_or_replay_suspect,
+        ARRAY_REMOVE(ARRAY[
+          CASE WHEN timeline.large_frame THEN 'large_frame' END,
+          CASE WHEN timeline.mixed_encryption THEN 'mixed_encryption' END,
+          CASE WHEN timeline.dedupe_or_replay_suspect THEN 'dedupe_or_replay_suspect' END
+        ], NULL) AS reasons
+      FROM v_wireless_session_timeline timeline
+      WHERE timeline.large_frame
+         OR timeline.mixed_encryption
+         OR timeline.dedupe_or_replay_suspect
     SQL
   end
 end

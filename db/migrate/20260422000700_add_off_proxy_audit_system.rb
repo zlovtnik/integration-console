@@ -74,6 +74,11 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
         refresh_wireless_audit_view
         refresh_shadow_alerts_view
       end
+
+      dir.down do
+        execute "DROP VIEW IF EXISTS v_wireless_audit_with_devices CASCADE"
+        execute "DROP VIEW IF EXISTS v_wireless_shadow_alerts CASCADE"
+      end
     end
   end
 

@@ -32,7 +32,7 @@ Rails.application.routes.draw do
     end
     get :batches, to: "integration_run_batches#index"
   end
-  resources :wireless_authorized_networks
+  resources :wireless_authorized_networks, controller: "authorized_wireless_networks"
   resources :devices
   resources :identities, only: :index do
     get :inventory, on: :collection
@@ -41,10 +41,10 @@ Rails.application.routes.draw do
   end
   resources :heatmap, only: :index
   resources :alerts, only: :index
-  resources :wireless_shadow_alerts, only: :index do
+  resources :wireless_shadow_alerts, only: :index, controller: "shadow_it_alerts" do
     get :distinct_values, on: :collection
   end
-  resources :wireless_clients, only: :index
+  resources :wireless_clients, only: :index, controller: "network_clients"
   resources :fingerprint_sources, only: :index
 
   mount ActionCable.server => "/cable"

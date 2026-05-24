@@ -1,5 +1,20 @@
 class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
   def up
+    execute <<~SQL
+      INSERT INTO sync_cursors (stream_name, cursor_value, updated_at)
+      SELECT
+        'vec_embeddings.sync_events.wireless.audit',
+        cursor_value,
+        updated_at
+      FROM sync_cursors
+      WHERE stream_name IN ('vec_embeddings.sync_events.wireless.audit', 'vec_embeddings.wireless.audit')
+      ORDER BY cursor_value::timestamptz DESC
+      LIMIT 1
+      ON CONFLICT (stream_name) DO UPDATE SET
+        cursor_value = greatest(sync_cursors.cursor_value::timestamptz, excluded.cursor_value::timestamptz)::text,
+        updated_at = greatest(sync_cursors.updated_at, excluded.updated_at);
+    SQL
+
     execute enqueue_function_sql
   end
 
@@ -24,7 +39,9 @@ class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
           select coalesce(
             (select cursor_value::timestamptz
                from sync_cursors
-              where stream_name = 'vec_embeddings.sync_events.wireless.audit'),
+              where stream_name IN ('vec_embeddings.sync_events.wireless.audit', 'vec_embeddings.wireless.audit')
+              order by cursor_value::timestamptz desc
+              limit 1),
             timestamptz '1970-01-01 00:00:00+00'
           ) as last_cursor
         ),
@@ -38,7 +55,7 @@ class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
           from sync_events source
           cross join cursor_state cursor_state
           left join vec_embeddings existing
-            on existing.source_table = 'sync_events'
+            on existing.source_table IN ('sync_events', 'wireless.audit')
            and existing.source_key = source.dedupe_key
            and existing.embedding_model = p_model
            and existing.embedding_kind = 'event'
