@@ -7,6 +7,10 @@ class AuditLogTest < ActiveSupport::TestCase
     ensure_wireless_audit_search_vector
   end
 
+  test "uses sync_events table for audit logs" do
+    assert_equal "sync_events", AuditLog.table_name
+  end
+
   test "raw_frame returns payload value" do
     raw_frame = Base64.strict_encode64([0x00, 0x01, 0x41, 0xff].pack("C*"))
     insert_sync_ingest(
