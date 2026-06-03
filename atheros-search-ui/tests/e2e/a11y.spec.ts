@@ -61,6 +61,7 @@ test('keyboard path covers skip link, search, and filter drawer', async ({
   await page
     .getByRole('combobox', { name: 'Search wireless events' })
     .fill('probe');
+  await page.waitForSelector('#suggestion-0');
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#search-input')).toHaveAttribute(
     'aria-activedescendant',

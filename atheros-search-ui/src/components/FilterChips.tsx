@@ -12,7 +12,11 @@ function removeListItem(
   items: string[] | undefined,
   value: string,
 ): string[] | undefined {
-  const next = (items ?? []).filter((item) => item !== value);
+  if (!items) return undefined;
+  const idx = items.indexOf(value);
+  if (idx === -1) return items;
+  const next = [...items];
+  next.splice(idx, 1);
   return next.length > 0 ? next : undefined;
 }
 

@@ -30,7 +30,7 @@ function joinList(value: string[] | undefined): string {
 }
 
 function clampTopK(value: number): number {
-  return Math.max(1, Math.min(200, value));
+  return Math.max(1, Math.min(200, Math.round(value)));
 }
 
 const DRAWER_MEDIA = '(max-width: 1119px)';
