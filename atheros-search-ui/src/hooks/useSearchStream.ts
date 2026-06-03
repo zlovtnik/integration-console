@@ -76,13 +76,19 @@ export function useSearchStream() {
     });
 
     try {
+      // Combine the user abort signal with a 10s client-side timeout
+      const timeoutSignal = AbortSignal.timeout(10_000);
+      const combinedSignal = AbortSignal.any
+        ? AbortSignal.any([current.signal, timeoutSignal])
+        : current.signal;
+
       const response = await fetch(`${env.apiBase}/v1/search/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(request),
-        signal: current.signal,
+        signal: combinedSignal,
       });
 
       if (!response.ok) {
@@ -122,7 +128,9 @@ export function useSearchStream() {
         }
       }
     } catch (streamError) {
-      if (
+      if (streamError instanceof Error && streamError.name === 'TimeoutError') {
+        setError('Search request timed out. Please try again.');
+      } else if (
         !(streamError instanceof Error && streamError.name === 'AbortError')
       ) {
         setError(mapError(streamError));
