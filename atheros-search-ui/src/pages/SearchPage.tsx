@@ -1,5 +1,12 @@
 import { useNavigate, useSearchParams } from '@solidjs/router';
-import { createEffect, createMemo, createSignal, For, onMount, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onMount,
+  Show,
+} from 'solid-js';
 import { Filter, Play, Search as SearchIcon, Square } from 'lucide-solid';
 import { ApiError, api } from '~/api/client';
 import { FilterChips } from '~/components/FilterChips';
@@ -37,11 +44,17 @@ import {
 
 function describeError(errorValue: unknown): string {
   if (errorValue instanceof ApiError && errorValue.status === 401) {
-    return 'Invalid or missing API token - set VITE_API_TOKEN.';
+    return 'Search API authentication failed - check backend credentials or session state.';
   }
-  if (errorValue instanceof ApiError) return errorValue.message || `API returned ${errorValue.status}.`;
-  if ((errorValue as Error).name === 'AbortError') return 'Search timed out - try a more specific query.';
-  return (errorValue as Error).message || 'Cannot reach atheros-search - check API_BASE or service health.';
+  if (errorValue instanceof ApiError)
+    return errorValue.message || `API returned ${errorValue.status}.`;
+  if (errorValue instanceof Error && errorValue.name === 'AbortError') {
+    return 'Search timed out - try a more specific query.';
+  }
+  return (
+    (errorValue instanceof Error && errorValue.message) ||
+    'Cannot reach atheros-search - check API_BASE or service health.'
+  );
 }
 
 export default function SearchPage() {
@@ -76,9 +89,12 @@ export default function SearchPage() {
 
   const resultMeta = createMemo(() => {
     if (loading()) return 'Searching...';
-    if (streaming()) return `Streaming ${results().length} result${results().length === 1 ? '' : 's'}`;
+    if (streaming())
+      return `Streaming ${results().length} result${results().length === 1 ? '' : 's'}`;
     if (results().length > 0) {
-      const modeLabel = meta.mode_used?.replace('SEARCH_MODE_', '').toLowerCase() ?? mode().replace('SEARCH_MODE_', '').toLowerCase();
+      const modeLabel =
+        meta.mode_used?.replace('SEARCH_MODE_', '').toLowerCase() ??
+        mode().replace('SEARCH_MODE_', '').toLowerCase();
       const timing = lastSearchMs() === null ? '' : ` · ${lastSearchMs()} ms`;
       return `${results().length} result${results().length === 1 ? '' : 's'} · ${modeLabel}${timing}`;
     }
@@ -87,7 +103,10 @@ export default function SearchPage() {
   });
 
   const skeletons = createMemo(() =>
-    Array.from({ length: Math.max(3, Math.min(topK(), 8)) }, (_, index) => index),
+    Array.from(
+      { length: Math.max(3, Math.min(topK(), 8)) },
+      (_, index) => index,
+    ),
   );
 
   async function runSearch() {
@@ -102,35 +121,42 @@ export default function SearchPage() {
     setSearched(true);
     setLastSearchMs(null);
     setActiveResultIndex(-1);
+    abortController?.abort();
+    abortController = null;
+    streamSearch.cancel();
     const startedAt = performance.now();
 
     if (useStream()) {
-      await streamSearch.stream(request);
+      await streamSearch.stream(request, describeError);
       setLastSearchMs(Math.round(performance.now() - startedAt));
       return;
     }
 
-    abortController?.abort();
     abortController = new AbortController();
+    const currentController = abortController;
     setLoading(true);
     setError(null);
 
     try {
-      const response = await api.search(request, abortController.signal);
+      const response = await api.search(request, currentController.signal);
       setResults(response.results ?? []);
       setMeta(response);
     } catch (searchError) {
       setResults([]);
       setError(describeError(searchError));
     } finally {
-      setLoading(false);
-      setLastSearchMs(Math.round(performance.now() - startedAt));
+      if (abortController === currentController) {
+        abortController = null;
+        setLoading(false);
+        setLastSearchMs(Math.round(performance.now() - startedAt));
+      }
     }
   }
 
   function cancelSearch() {
     streamSearch.cancel();
     abortController?.abort();
+    abortController = null;
     setLoading(false);
   }
 
@@ -140,7 +166,9 @@ export default function SearchPage() {
 
   function focusResult(index: number) {
     const explainLinks = Array.from(
-      document.querySelectorAll<HTMLElement>('.result-card:not(.skeleton-card) .card-actions a'),
+      document.querySelectorAll<HTMLElement>(
+        '.result-card:not(.skeleton-card) .card-actions a',
+      ),
     );
     if (explainLinks.length === 0) return;
     const next = Math.max(0, Math.min(index, explainLinks.length - 1));
@@ -156,7 +184,9 @@ export default function SearchPage() {
     }
     const sourceKey = active?.dataset.sourceKey;
     if (!sourceKey) return;
-    navigate(`/explain/${encodeURIComponent(sourceKey)}?query=${encodeURIComponent(query())}&kind=${encodeURIComponent(kind())}`);
+    navigate(
+      `/explain/${encodeURIComponent(sourceKey)}?query=${encodeURIComponent(query())}&kind=${encodeURIComponent(kind())}`,
+    );
   }
 
   useKeyboardShortcuts({
@@ -169,7 +199,8 @@ export default function SearchPage() {
       else if (query()) setQuery('');
     },
     nextResult: () => focusResult(activeResultIndex() + 1),
-    prevResult: () => focusResult(activeResultIndex() <= 0 ? 0 : activeResultIndex() - 1),
+    prevResult: () =>
+      focusResult(activeResultIndex() <= 0 ? 0 : activeResultIndex() - 1),
     openFocusedResult,
     showHelp: () => setShortcutsOpen(true),
   });
@@ -185,7 +216,9 @@ export default function SearchPage() {
               <h1 id="page-title" class="display">
                 Search
               </h1>
-              <p class="caption">wireless events, devices, behaviours, sequences</p>
+              <p class="caption">
+                wireless events, devices, behaviours, sequences
+              </p>
             </div>
             <button
               type="button"
@@ -208,18 +241,31 @@ export default function SearchPage() {
                 <input
                   type="checkbox"
                   checked={useStream()}
-                  onChange={(event) => setUseStream(event.currentTarget.checked)}
+                  onChange={(event) =>
+                    setUseStream(event.currentTarget.checked)
+                  }
                 />
                 <span>Live</span>
               </label>
-              <button type="button" class="btn btn-primary" onClick={() => void runSearch()}>
+              <button
+                type="button"
+                class="btn btn-primary"
+                onClick={() => void runSearch()}
+              >
                 <SearchIcon size={16} aria-hidden="true" />
                 <span>Search</span>
               </button>
               <Show when={loading() || streaming()}>
-                <button type="button" class="btn btn-secondary" onClick={cancelSearch}>
-                  <Show when={streaming()} fallback={<Square size={16} aria-hidden="true" />}>
-                    <Play size={16} aria-hidden="true" />
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onClick={cancelSearch}
+                >
+                  <Show
+                    when={streaming()}
+                    fallback={<Play size={16} aria-hidden="true" />}
+                  >
+                    <Square size={16} aria-hidden="true" />
                   </Show>
                   <span>Cancel</span>
                 </button>
@@ -230,11 +276,17 @@ export default function SearchPage() {
 
           <Show when={meta.fallback_reason}>
             <div class="state-banner state-banner--warn" role="status">
-              Embedding backend unavailable - showing keyword results only. {meta.fallback_reason}
+              Embedding backend unavailable - showing keyword results only.{' '}
+              {meta.fallback_reason}
             </div>
           </Show>
 
-          <h2 id="results-heading" aria-live="polite" aria-atomic="true" class="results-meta">
+          <h2
+            id="results-heading"
+            aria-live="polite"
+            aria-atomic="true"
+            class="results-meta"
+          >
             {resultMeta()}
           </h2>
 
@@ -254,18 +306,30 @@ export default function SearchPage() {
                             <div class="empty-state">
                               <Show
                                 when={searched()}
-                                fallback={<p>Start searching with a query or MAC address.</p>}
+                                fallback={
+                                  <p>
+                                    Start searching with a query or MAC address.
+                                  </p>
+                                }
                               >
                                 <p>No results for "{query()}".</p>
                               </Show>
                             </div>
                           }
                         >
-                          <ol aria-labelledby="results-heading" role="list" class="result-list">
+                          <ol
+                            aria-labelledby="results-heading"
+                            role="list"
+                            class="result-list"
+                          >
                             <For each={results()}>
                               {(result) => (
                                 <li>
-                                  <ResultCard result={result} queryText={query()} kind={kind()} />
+                                  <ResultCard
+                                    result={result}
+                                    queryText={query()}
+                                    kind={kind()}
+                                  />
                                 </li>
                               )}
                             </For>
@@ -281,13 +345,24 @@ export default function SearchPage() {
                     </Show>
                   }
                 >
-                  <ol aria-labelledby="results-heading" role="list" class="result-list">
+                  <ol
+                    aria-labelledby="results-heading"
+                    role="list"
+                    class="result-list"
+                  >
                     <For each={skeletons()}>
                       {(_, index) => (
                         <li>
-                          <Show when={results()[index()]} fallback={<SkeletonCard />}>
+                          <Show
+                            when={results()[index()]}
+                            fallback={<SkeletonCard />}
+                          >
                             {(result) => (
-                              <ResultCard result={result()} queryText={query()} kind={kind()} />
+                              <ResultCard
+                                result={result()}
+                                queryText={query()}
+                                kind={kind()}
+                              />
                             )}
                           </Show>
                         </li>
@@ -305,7 +380,10 @@ export default function SearchPage() {
         </section>
       </main>
 
-      <ShortcutsModal open={shortcutsOpen()} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsModal
+        open={shortcutsOpen()}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </div>
   );
 }

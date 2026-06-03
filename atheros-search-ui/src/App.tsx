@@ -11,7 +11,7 @@ export default function App() {
     <Router root={AppShell}>
       <Route path="/" component={SearchPage} />
       <Route path="/explain/:sourceKey" component={ExplainPage} />
-      <Route path="**" component={NotFoundPage} />
+      <Route path="*" component={NotFoundPage} />
     </Router>
   );
 }

@@ -6,6 +6,9 @@ COPY . .
 RUN bun run build
 
 FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+RUN touch /run/nginx.pid \
+  && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /run /var/run /var/log/nginx
+COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 8080
+USER nginx

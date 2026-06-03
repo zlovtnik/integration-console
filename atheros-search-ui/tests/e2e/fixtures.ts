@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
+import type { SearchResult } from '~/api/types';
 
-export const mockResult = {
+export const mockResult: SearchResult = {
   source_key: 'event:lab:001',
   source_table: 'wireless_probe_observations',
   source_mac: 'aa:bb:cc:dd:ee:ff',
@@ -67,7 +68,11 @@ export async function mockApi(page: Page) {
       threat_boost: 0.07,
       boost_reasons: ['open_shadow_alert'],
       sequence_log_prob: -3.14,
-      sequence_tokens: ['probe_request', 'deauthentication', 'association_request'],
+      sequence_tokens: [
+        'probe_request',
+        'deauthentication',
+        'association_request',
+      ],
       detail_json: mockResult.detail_json,
     }),
   );

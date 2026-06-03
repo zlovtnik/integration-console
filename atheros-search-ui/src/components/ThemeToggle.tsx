@@ -1,4 +1,4 @@
-import { createSignal, Match, onMount, Switch } from 'solid-js';
+import { createSignal, Match, onCleanup, onMount, Switch } from 'solid-js';
 import { Monitor, Moon, Sun } from 'lucide-solid';
 
 type Theme = 'dark' | 'light' | 'system';
@@ -18,9 +18,21 @@ export function ThemeToggle() {
 
   onMount(() => {
     const stored = localStorage.getItem('theme') as Theme | null;
-    const initial = stored === 'light' || stored === 'system' || stored === 'dark' ? stored : 'dark';
+    const initial =
+      stored === 'light' || stored === 'system' || stored === 'dark'
+        ? stored
+        : 'dark';
     setTheme(initial);
     applyTheme(initial);
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handlePreferenceChange = () => {
+      if (theme() === 'system') applyTheme('system');
+    };
+    mediaQuery.addEventListener('change', handlePreferenceChange);
+    onCleanup(() =>
+      mediaQuery.removeEventListener('change', handlePreferenceChange),
+    );
   });
 
   function cycle() {
@@ -38,7 +50,13 @@ export function ThemeToggle() {
     })[theme()];
 
   return (
-    <button type="button" class="icon-btn" onClick={cycle} aria-label={label()} title={label()}>
+    <button
+      type="button"
+      class="icon-btn"
+      onClick={cycle}
+      aria-label={label()}
+      title={label()}
+    >
       <Switch>
         <Match when={theme() === 'dark'}>
           <Moon size={18} aria-hidden="true" />

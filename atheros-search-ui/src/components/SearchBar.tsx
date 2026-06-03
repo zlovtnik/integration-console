@@ -21,11 +21,25 @@ export function SearchBar(props: { onSubmit: () => void }) {
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveIndex((index) => Math.min(index + 1, suggestions().length - 1));
+      const wasOpen = open();
+      const count = suggestions().length;
+      setOpen(true);
+      if (count > 0) {
+        setActiveIndex((index) =>
+          wasOpen ? Math.min(index + 1, count - 1) : 0,
+        );
+      }
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setActiveIndex((index) => Math.max(index - 1, -1));
+      const wasOpen = open();
+      const count = suggestions().length;
+      setOpen(true);
+      if (count > 0) {
+        setActiveIndex((index) =>
+          wasOpen && index >= 0 ? Math.max(index - 1, 0) : count - 1,
+        );
+      }
     }
     if (event.key === 'Enter') {
       if (activeIndex() >= 0) {
@@ -51,8 +65,12 @@ export function SearchBar(props: { onSubmit: () => void }) {
         type="search"
         role="combobox"
         aria-expanded={open()}
-        aria-controls="search-listbox"
-        aria-activedescendant={activeIndex() >= 0 ? `suggestion-${activeIndex()}` : undefined}
+        aria-controls={
+          open() && suggestions().length > 0 ? 'search-listbox' : undefined
+        }
+        aria-activedescendant={
+          activeIndex() >= 0 ? `suggestion-${activeIndex()}` : undefined
+        }
         aria-autocomplete="list"
         autocomplete="off"
         spellcheck={false}
@@ -82,7 +100,12 @@ export function SearchBar(props: { onSubmit: () => void }) {
         </button>
       </Show>
       <Show when={open() && suggestions().length > 0}>
-        <ul id="search-listbox" role="listbox" aria-label="Search suggestions" class="suggestions-list">
+        <ul
+          id="search-listbox"
+          role="listbox"
+          aria-label="Search suggestions"
+          class="suggestions-list"
+        >
           <For each={suggestions()}>
             {(suggestion, index) => (
               <li

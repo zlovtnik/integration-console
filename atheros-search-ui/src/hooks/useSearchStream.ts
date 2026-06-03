@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { ApiError } from '~/api/client';
 import { env } from '~/env';
 import {
   clearResults,
@@ -15,6 +16,8 @@ type StreamEnvelope = {
   meta?: Partial<SearchResponse>;
   done?: boolean;
 };
+
+type ErrorMapper = (error: unknown) => string;
 
 function isSearchResult(value: unknown): value is SearchResult {
   return (
@@ -33,12 +36,34 @@ function readStreamLine(line: string): SearchResult | StreamEnvelope | null {
   }
 }
 
+function defaultErrorMapper(error: unknown): string {
+  return (
+    (error instanceof Error && error.message) ||
+    'Cannot reach atheros-search - check API_BASE or service health.'
+  );
+}
+
 export function useSearchStream() {
   let abortCtrl: AbortController | null = null;
 
-  async function stream(request: SearchRequest) {
+  function applyParsed(parsed: SearchResult | StreamEnvelope): boolean {
+    if (isSearchResult(parsed)) {
+      setResults((items) => [...items, parsed]);
+      return false;
+    }
+
+    if (parsed.result) setResults((items) => [...items, parsed.result!]);
+    if (parsed.meta) setMeta(parsed.meta);
+    return Boolean(parsed.done);
+  }
+
+  async function stream(
+    request: SearchRequest,
+    mapError: ErrorMapper = defaultErrorMapper,
+  ) {
     abortCtrl?.abort();
     abortCtrl = new AbortController();
+    const current = abortCtrl;
     const initialMeta: Partial<SearchResponse> = { fallback_reason: '' };
     if (request.mode) initialMeta.mode_used = request.mode;
 
@@ -55,21 +80,36 @@ export function useSearchStream() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(env.apiToken ? { Authorization: `Bearer ${env.apiToken}` } : {}),
         },
         body: JSON.stringify(request),
-        signal: abortCtrl.signal,
+        signal: current.signal,
       });
 
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      if (!response.body) throw new Error('Streaming response body was empty.');
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new ApiError(response.status, body || response.statusText);
+      }
+      if (!response.body) {
+        throw new ApiError(
+          response.status,
+          'Streaming response body was empty.',
+        );
+      }
 
-      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
       let buffer = '';
+      let shouldStop = false;
 
-      while (true) {
+      while (!shouldStop) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          const parsed = readStreamLine(buffer.trim());
+          if (parsed) shouldStop = applyParsed(parsed);
+          break;
+        }
+
         buffer += value;
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
@@ -77,22 +117,21 @@ export function useSearchStream() {
         for (const line of lines) {
           const parsed = readStreamLine(line.trim());
           if (!parsed) continue;
-
-          if (isSearchResult(parsed)) {
-            setResults((items) => [...items, parsed]);
-          } else {
-            if (parsed.result) setResults((items) => [...items, parsed.result!]);
-            if (parsed.meta) setMeta(parsed.meta);
-            if (parsed.done) break;
-          }
+          shouldStop = applyParsed(parsed);
+          if (shouldStop) break;
         }
       }
     } catch (streamError) {
-      if ((streamError as Error).name !== 'AbortError') {
-        setError((streamError as Error).message);
+      if (
+        !(streamError instanceof Error && streamError.name === 'AbortError')
+      ) {
+        setError(mapError(streamError));
       }
     } finally {
-      setStreaming(false);
+      if (abortCtrl === current) {
+        abortCtrl = null;
+        setStreaming(false);
+      }
     }
   }
 

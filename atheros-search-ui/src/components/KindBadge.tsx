@@ -1,3 +1,5 @@
 export function KindBadge(props: { kind: string }) {
-  return <span class={`badge badge--${props.kind.toLowerCase()}`}>{props.kind.replace(/^SEARCH_KIND_/, '').toLowerCase()}</span>;
+  const kindKey = () => props.kind.replace(/^SEARCH_KIND_/, '').toLowerCase();
+
+  return <span class={`badge badge--${kindKey()}`}>{kindKey()}</span>;
 }

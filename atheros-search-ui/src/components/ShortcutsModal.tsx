@@ -13,10 +13,24 @@ const SHORTCUTS = [
 
 export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
   let dialogRef: HTMLDivElement | undefined;
+  let lastFocused: HTMLElement | null = null;
+
+  function restoreFocus() {
+    const target = lastFocused;
+    lastFocused = null;
+    if (!target?.isConnected) return;
+
+    queueMicrotask(() => target.focus());
+  }
 
   createEffect(() => {
     if (props.open) {
-      queueMicrotask(() => dialogRef?.querySelector<HTMLElement>('button')?.focus());
+      lastFocused = document.activeElement as HTMLElement | null;
+      queueMicrotask(() =>
+        dialogRef?.querySelector<HTMLElement>('button')?.focus(),
+      );
+    } else {
+      restoreFocus();
     }
   });
 
@@ -25,7 +39,9 @@ export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
     if (event.key !== 'Tab' || !dialogRef) return;
 
     const focusable = Array.from(
-      dialogRef.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+      dialogRef.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
     );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -46,7 +62,10 @@ export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
   }
 
   onMount(() => window.addEventListener('keydown', handleGlobalKeyDown));
-  onCleanup(() => window.removeEventListener('keydown', handleGlobalKeyDown));
+  onCleanup(() => {
+    window.removeEventListener('keydown', handleGlobalKeyDown);
+    restoreFocus();
+  });
 
   return (
     <Show when={props.open}>
@@ -62,7 +81,12 @@ export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
             <h2 id="shortcuts-title" class="heading-2">
               Commands
             </h2>
-            <button type="button" class="icon-btn" aria-label="Close" onClick={() => props.onClose()}>
+            <button
+              type="button"
+              class="icon-btn"
+              aria-label="Close"
+              onClick={() => props.onClose()}
+            >
               <X size={18} aria-hidden="true" />
             </button>
           </div>

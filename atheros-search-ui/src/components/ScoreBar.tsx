@@ -4,14 +4,22 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(value, 1));
 }
 
-export function ScoreBar(props: { result: Pick<SearchResult, 'score' | 'cosine_similarity' | 'keyword_rank' | 'threat_boost'> }) {
+export function ScoreBar(props: {
+  result: Pick<
+    SearchResult,
+    'score' | 'cosine_similarity' | 'keyword_rank' | 'threat_boost'
+  >;
+}) {
   const scorePercent = () => clamp(props.result.score) * 100;
   const segmentTotal = () =>
     Math.max(
-      props.result.cosine_similarity + props.result.keyword_rank + props.result.threat_boost,
+      Math.max(0, props.result.cosine_similarity) +
+        Math.max(0, props.result.keyword_rank) +
+        Math.max(0, props.result.threat_boost),
       0.001,
     );
-  const segmentWidth = (value: number) => `${Math.max(0, (value / segmentTotal()) * 100)}%`;
+  const segmentWidth = (value: number) =>
+    `${(Math.max(0, value) / segmentTotal()) * 100}%`;
   const label = () => `Score ${scorePercent().toFixed(1)}%`;
 
   return (
@@ -25,9 +33,20 @@ export function ScoreBar(props: { result: Pick<SearchResult, 'score' | 'cosine_s
     >
       <div class="score-track" aria-hidden="true">
         <div class="score-bar" style={{ width: `${scorePercent()}%` }}>
-          <span class="score-seg score-seg--dense" style={{ 'flex-basis': segmentWidth(props.result.cosine_similarity) }} />
-          <span class="score-seg score-seg--sparse" style={{ 'flex-basis': segmentWidth(props.result.keyword_rank) }} />
-          <span class="score-seg score-seg--threat" style={{ 'flex-basis': segmentWidth(props.result.threat_boost) }} />
+          <span
+            class="score-seg score-seg--dense"
+            style={{
+              'flex-basis': segmentWidth(props.result.cosine_similarity),
+            }}
+          />
+          <span
+            class="score-seg score-seg--sparse"
+            style={{ 'flex-basis': segmentWidth(props.result.keyword_rank) }}
+          />
+          <span
+            class="score-seg score-seg--threat"
+            style={{ 'flex-basis': segmentWidth(props.result.threat_boost) }}
+          />
         </div>
       </div>
       <span class="score-label mono" aria-hidden="true">

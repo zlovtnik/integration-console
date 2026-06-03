@@ -22,8 +22,13 @@ async function request<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (env.apiToken) headers.set('Authorization', `Bearer ${env.apiToken}`);
+  if (
+    init.body !== undefined &&
+    init.body !== null &&
+    !headers.has('Content-Type')
+  ) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const requestInit: RequestInit = {
     ...init,
@@ -50,7 +55,12 @@ export const api = {
       signal,
     ),
 
-  explain: (sourceKey: string, query: string, kind: string, signal?: AbortSignal) => {
+  explain: (
+    sourceKey: string,
+    query: string,
+    kind: string,
+    signal?: AbortSignal,
+  ) => {
     const encodedKey = encodeURIComponent(sourceKey);
     const encodedQuery = encodeURIComponent(query);
     const encodedKind = encodeURIComponent(kind);
@@ -68,5 +78,6 @@ export const api = {
       signal,
     ),
 
-  healthz: (signal?: AbortSignal) => request<{ status: string }>('/healthz', {}, signal),
+  healthz: (signal?: AbortSignal) =>
+    request<{ status: string }>('/healthz', {}, signal),
 };
