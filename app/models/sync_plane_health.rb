@@ -3,15 +3,15 @@ class SyncPlaneHealth < SyncRecord
   self.primary_key = nil
 
   IMPORTANT_RELATIONS = {
-    "sync_scan_ingest" => "Wireless audit events",
-    "sync_job" => "Coordinator jobs",
-    "sync_batch" => "Oracle load batches",
-    "audit_backlog" => "Sensor publish backlog",
-    "shadow_it_alerts" => "Shadow IT alerts",
-    "sync_cursor" => "Stream cursors",
-    "sync_error" => "Sync errors",
+    "sync_events" => "Wireless audit events",
+    "sync_jobs" => "Coordinator jobs",
+    "sync_batches" => "Oracle load batches",
+    "sync_backlog" => "Sensor publish backlog",
+    "wireless_shadow_alerts" => "Shadow IT alerts",
+    "sync_cursors" => "Stream cursors",
+    "sync_errors" => "Sync errors",
     "devices" => "Registered MAC identifiers",
-    "authorized_wireless_networks" => "Allowed wireless networks"
+    "wireless_authorized_networks" => "Allowed wireless networks"
   }.freeze
 
   DEFAULT_ATTRIBUTES = {

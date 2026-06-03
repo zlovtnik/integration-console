@@ -8,7 +8,7 @@ module HeatmapHelpers
         avg(COALESCE(signal_dbm, CASE WHEN payload->>'signal_dbm' ~ '^-?[0-9]+$' THEN (payload->>'signal_dbm')::integer END)) AS avg_signal_dbm,
         count(DISTINCT lower(COALESCE(source_mac, payload->>'source_mac'))) AS unique_devices,
         max(observed_at) AS last_seen_at
-      FROM sync_scan_ingest
+      FROM sync_events
       WHERE stream_name = 'wireless.audit'
         AND COALESCE(location_id, payload->>'location_id') IS NOT NULL
       GROUP BY COALESCE(location_id, payload->>'location_id')
@@ -27,7 +27,7 @@ module HeatmapHelpers
   def ensure_wireless_audit_search_vector
     sync_connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     sync_connection.execute(<<~SQL)
-      ALTER TABLE sync_scan_ingest
+      ALTER TABLE sync_events
       ADD COLUMN IF NOT EXISTS wireless_search_tsv tsvector
       GENERATED ALWAYS AS (
         to_tsvector(

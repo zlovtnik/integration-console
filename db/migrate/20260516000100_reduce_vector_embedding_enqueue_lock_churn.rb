@@ -1,5 +1,20 @@
 class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
   def up
+    execute <<~SQL
+      INSERT INTO sync_cursors (stream_name, cursor_value, updated_at)
+      SELECT
+        'vec_embeddings.sync_events.wireless.audit',
+        cursor_value,
+        updated_at
+      FROM sync_cursors
+      WHERE stream_name IN ('vec_embeddings.sync_events.wireless.audit', 'vec_embeddings.wireless.audit')
+      ORDER BY cursor_value::timestamptz DESC
+      LIMIT 1
+      ON CONFLICT (stream_name) DO UPDATE SET
+        cursor_value = greatest(sync_cursors.cursor_value::timestamptz, excluded.cursor_value::timestamptz)::text,
+        updated_at = greatest(sync_cursors.updated_at, excluded.updated_at);
+    SQL
+
     execute enqueue_function_sql
   end
 
@@ -23,22 +38,24 @@ class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
         with cursor_state as (
           select coalesce(
             (select cursor_value::timestamptz
-               from sync_cursor
-              where stream_name = 'vec_embeddings.sync_scan_ingest.wireless.audit'),
+               from sync_cursors
+              where stream_name IN ('vec_embeddings.sync_events.wireless.audit', 'vec_embeddings.wireless.audit')
+              order by cursor_value::timestamptz desc
+              limit 1),
             timestamptz '1970-01-01 00:00:00+00'
           ) as last_cursor
         ),
         event_jobs as (
           select
-            'sync_scan_ingest'::text as source_table,
+            'sync_events'::text as source_table,
             dedupe_key::text as source_key,
             p_model as embedding_model,
             'event'::text as embedding_kind,
             10 as priority
-          from sync_scan_ingest source
+          from sync_events source
           cross join cursor_state cursor_state
           left join vec_embeddings existing
-            on existing.source_table = 'sync_scan_ingest'
+            on existing.source_table IN ('sync_events', 'wireless.audit')
            and existing.source_key = source.dedupe_key
            and existing.embedding_model = p_model
            and existing.embedding_kind = 'event'
@@ -108,15 +125,15 @@ class ReduceVectorEmbeddingEnqueueLockChurn < ActiveRecord::Migration[7.2]
         )
         select count(*) into v_count from inserted;
 
-        insert into sync_cursor (stream_name, cursor_value, updated_at)
+        insert into sync_cursors (stream_name, cursor_value, updated_at)
         select
-          'vec_embeddings.sync_scan_ingest.wireless.audit',
+          'vec_embeddings.sync_events.wireless.audit',
           coalesce(max(updated_at)::text, now()::text),
           now()
-        from sync_scan_ingest
+        from sync_events
         where stream_name = 'wireless.audit'
         on conflict (stream_name) do update set
-          cursor_value = greatest(sync_cursor.cursor_value::timestamptz, excluded.cursor_value::timestamptz)::text,
+          cursor_value = greatest(sync_cursors.cursor_value::timestamptz, excluded.cursor_value::timestamptz)::text,
           updated_at = now();
 
         return v_count;

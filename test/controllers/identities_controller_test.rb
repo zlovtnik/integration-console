@@ -2,7 +2,7 @@ require "test_helper"
 
 class IdentitiesControllerTest < ActionDispatch::IntegrationTest
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
     Device.delete_all
     ensure_wireless_audit_views
   end

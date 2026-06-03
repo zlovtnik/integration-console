@@ -102,13 +102,13 @@ class DashboardController < ApplicationController
         },
         {
           label: "Open Shadow IT",
-          value: counts[:open_shadow_it_alerts],
+          value: counts[:open_wireless_shadow_alerts],
           subValue: counts[:last_shadow_it_alert_at]&.to_fs(:db),
-          status: counts[:open_shadow_it_alerts].positive? ? "alert" : "ok",
-          trend: counts[:open_shadow_it_alerts].positive? ? "up" : "flat",
+          status: counts[:open_wireless_shadow_alerts].positive? ? "alert" : "ok",
+          trend: counts[:open_wireless_shadow_alerts].positive? ? "up" : "flat",
           trendLabel: "unresolved",
           icon: "alert",
-          sparkline: [counts[:open_shadow_it_alerts]]
+          sparkline: [counts[:open_wireless_shadow_alerts]]
         },
         {
           label: "Job Orphans",
@@ -142,7 +142,7 @@ class DashboardController < ApplicationController
       pending_ingest: sync_health.ingest_pending_count.to_i,
       processing_ingest: sync_health.ingest_processing_count.to_i,
       failed_ingest: sync_health.ingest_failed_count.to_i,
-      open_shadow_it_alerts: sync_health.open_shadow_it_alert_count.to_i,
+      open_wireless_shadow_alerts: sync_health.open_shadow_it_alert_count.to_i,
       last_shadow_it_alert_at: sync_health.last_shadow_it_alert_at,
       job_orphans: sync_health.job_orphaned_count.to_i,
       job_effective_running: sync_health.job_effective_running_count.to_i,
@@ -182,42 +182,42 @@ class DashboardController < ApplicationController
     [
       {
         label: "Wireless ingest",
-        source: "sync_scan_ingest",
+        source: "sync_events",
         value: sync_health.wireless_ingest_total_count.to_i,
         detail: "#{sync_health.wireless_ingest_pending_count.to_i} pending, #{sync_health.wireless_ingest_processing_count.to_i} processing, #{sync_health.wireless_ingest_failed_count.to_i} failed",
         last_seen: sync_health.wireless_last_observed_at
       },
       {
         label: "Oracle batches",
-        source: "sync_batch",
+        source: "sync_batches",
         value: sync_health.batch_total_count.to_i,
         detail: "#{sync_health.batch_pending_count.to_i} pending, #{sync_health.batch_dispatched_count.to_i} dispatched, #{sync_health.batch_failed_count.to_i} failed",
         last_seen: nil
       },
       {
         label: "Coordinator jobs",
-        source: "sync_job + sync_batch",
+        source: "sync_jobs + sync_batches",
         value: sync_health.job_total_count.to_i,
         detail: "#{sync_health.job_effective_running_count.to_i} running, #{sync_health.job_effective_completed_count.to_i} completed, #{sync_health.job_orphaned_count.to_i} orphaned",
         last_seen: nil
       },
       {
         label: "Sensor backlog",
-        source: "audit_backlog",
+        source: "sync_backlog",
         value: sync_health.backlog_pending_count.to_i,
         detail: "#{sync_health.backlog_failed_count.to_i} failed",
         last_seen: nil
       },
       {
         label: "Shadow IT",
-        source: "shadow_it_alerts",
+        source: "wireless_shadow_alerts",
         value: sync_health.open_shadow_it_alert_count.to_i,
         detail: "open alerts",
         last_seen: sync_health.last_shadow_it_alert_at
       },
       {
         label: "Wireless cursor",
-        source: "sync_cursor",
+        source: "sync_cursors",
         value: sync_health.wireless_cursor_value.presence || "unset",
         detail: "stream wireless.audit",
         last_seen: sync_health.wireless_cursor_updated_at

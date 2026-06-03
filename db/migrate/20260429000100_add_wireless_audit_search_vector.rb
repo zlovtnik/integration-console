@@ -24,20 +24,20 @@ class AddWirelessAuditSearchVector < ActiveRecord::Migration[7.2]
 
   def up
     execute <<~SQL
-      ALTER TABLE sync_scan_ingest
+      ALTER TABLE sync_events
       ADD COLUMN IF NOT EXISTS wireless_search_tsv tsvector
       GENERATED ALWAYS AS (#{SEARCH_VECTOR_SQL}) STORED
     SQL
 
     execute <<~SQL
       CREATE INDEX CONCURRENTLY IF NOT EXISTS ssi_wireless_search_tsv_idx
-        ON sync_scan_ingest USING gin (wireless_search_tsv)
+        ON sync_events USING gin (wireless_search_tsv)
         WHERE stream_name = 'wireless.audit'
     SQL
 
     execute <<~SQL
       CREATE INDEX CONCURRENTLY IF NOT EXISTS ssi_wireless_common_search_idx
-        ON sync_scan_ingest USING gin (
+        ON sync_events USING gin (
           (
             lower(COALESCE(sensor_id, '')) || ' ' ||
             lower(COALESCE(source_mac, '')) || ' ' ||
@@ -51,6 +51,6 @@ class AddWirelessAuditSearchVector < ActiveRecord::Migration[7.2]
   def down
     execute "DROP INDEX CONCURRENTLY IF EXISTS ssi_wireless_common_search_idx"
     execute "DROP INDEX CONCURRENTLY IF EXISTS ssi_wireless_search_tsv_idx"
-    remove_column :sync_scan_ingest, :wireless_search_tsv, if_exists: true
+    remove_column :sync_events, :wireless_search_tsv, if_exists: true
   end
 end

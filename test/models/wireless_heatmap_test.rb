@@ -52,7 +52,7 @@ class WirelessHeatmapTest < ActiveSupport::TestCase
   end
 
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
     ensure_wireless_heatmap_materialized_view
   end
 

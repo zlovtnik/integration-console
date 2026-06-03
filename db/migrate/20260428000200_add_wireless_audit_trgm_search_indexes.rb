@@ -7,7 +7,7 @@ class AddWirelessAuditTrgmSearchIndexes < ActiveRecord::Migration[7.2]
     trgm_indexes.each do |index_name, (expression, predicate)|
       execute <<~SQL
         CREATE INDEX CONCURRENTLY IF NOT EXISTS #{index_name}
-          ON sync_scan_ingest USING gin (#{expression} gin_trgm_ops)
+          ON sync_events USING gin (#{expression} gin_trgm_ops)
           WHERE stream_name = 'wireless.audit' AND #{predicate}
       SQL
     end

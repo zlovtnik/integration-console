@@ -1,18 +1,18 @@
 class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
   def change
-    add_column :sync_scan_ingest, :source_mac, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :bssid, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :destination_bssid, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :ssid, :text, if_not_exists: true
-    add_column :sync_scan_ingest, :signal_dbm, :integer, if_not_exists: true
-    add_column :sync_scan_ingest, :raw_len, :integer, null: false, default: 0, if_not_exists: true
-    add_column :sync_scan_ingest, :frame_control_flags, :integer, null: false, default: 0, if_not_exists: true
-    add_column :sync_scan_ingest, :more_data, :boolean, null: false, default: false, if_not_exists: true
-    add_column :sync_scan_ingest, :retry, :boolean, null: false, default: false, if_not_exists: true
-    add_column :sync_scan_ingest, :power_save, :boolean, null: false, default: false, if_not_exists: true
-    add_column :sync_scan_ingest, :protected, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :source_mac, :text, if_not_exists: true
+    add_column :sync_events, :bssid, :text, if_not_exists: true
+    add_column :sync_events, :destination_bssid, :text, if_not_exists: true
+    add_column :sync_events, :ssid, :text, if_not_exists: true
+    add_column :sync_events, :signal_dbm, :integer, if_not_exists: true
+    add_column :sync_events, :raw_len, :integer, null: false, default: 0, if_not_exists: true
+    add_column :sync_events, :frame_control_flags, :integer, null: false, default: 0, if_not_exists: true
+    add_column :sync_events, :more_data, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :retry, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :power_save, :boolean, null: false, default: false, if_not_exists: true
+    add_column :sync_events, :protected, :boolean, null: false, default: false, if_not_exists: true
 
-    create_table :authorized_wireless_networks, if_not_exists: true do |t|
+    create_table :wireless_authorized_networks, if_not_exists: true do |t|
       t.text :ssid
       t.text :bssid
       t.text :location_id
@@ -23,23 +23,23 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
       t.timestamps
     end
 
-    add_check_constraint :authorized_wireless_networks,
+    add_check_constraint :wireless_authorized_networks,
       "NULLIF(TRIM(COALESCE(ssid, '')), '') IS NOT NULL OR NULLIF(TRIM(COALESCE(bssid, '')), '') IS NOT NULL",
       name: "authorized_wireless_network_identity_chk",
       if_not_exists: true
 
-    add_index :authorized_wireless_networks,
+    add_index :wireless_authorized_networks,
       "COALESCE(lower(ssid), ''), COALESCE(lower(bssid), ''), COALESCE(location_id, '')",
       unique: true,
-      name: "authorized_wireless_networks_match_idx",
+      name: "wireless_authorized_networks_match_idx",
       if_not_exists: true
 
-    add_index :authorized_wireless_networks,
+    add_index :wireless_authorized_networks,
       [:enabled, :location_id],
-      name: "authorized_wireless_networks_enabled_idx",
+      name: "wireless_authorized_networks_enabled_idx",
       if_not_exists: true
 
-    create_table :shadow_it_alerts, primary_key: :alert_id, if_not_exists: true do |t|
+    create_table :wireless_shadow_alerts, primary_key: :alert_id, if_not_exists: true do |t|
       t.text :dedupe_key, null: false
       t.timestamptz :observed_at, null: false
       t.text :source_mac, null: false
@@ -55,24 +55,29 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
       t.timestamptz :updated_at, null: false, default: -> { "now()" }
     end
 
-    ensure_legacy_shadow_it_alerts_projection
+    ensure_legacy_wireless_shadow_alerts_projection
 
-    add_index :shadow_it_alerts, :dedupe_key, unique: true, if_not_exists: true
-    add_index :shadow_it_alerts,
+    add_index :wireless_shadow_alerts, :dedupe_key, unique: true, if_not_exists: true
+    add_index :wireless_shadow_alerts,
       :observed_at,
       order: { observed_at: :desc },
       where: "resolved_at IS NULL",
-      name: "shadow_it_alerts_open_idx",
+      name: "wireless_shadow_alerts_open_idx",
       if_not_exists: true
-    add_index :shadow_it_alerts,
+    add_index :wireless_shadow_alerts,
       "lower(source_mac), observed_at DESC",
-      name: "shadow_it_alerts_source_idx",
+      name: "wireless_shadow_alerts_source_idx",
       if_not_exists: true
 
     reversible do |dir|
       dir.up do
         refresh_wireless_audit_view
         refresh_shadow_alerts_view
+      end
+
+      dir.down do
+        execute "DROP VIEW IF EXISTS v_wireless_audit_with_devices CASCADE"
+        execute "DROP VIEW IF EXISTS v_wireless_shadow_alerts CASCADE"
       end
     end
   end
@@ -124,7 +129,7 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
         COALESCE(d_src.username, d_bssid.username) AS registered_username,
         COALESCE(d_src.os_hint, d_bssid.os_hint) AS os_hint,
         COALESCE(d_src.hostname, d_bssid.hostname) AS hostname
-      FROM sync_scan_ingest ssi
+      FROM sync_events ssi
       LEFT JOIN devices d_src
         ON lower(d_src.mac_hint) = lower(COALESCE(ssi.source_mac, ssi.payload->>'source_mac'))
       LEFT JOIN devices d_bssid
@@ -135,9 +140,9 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
 
   def refresh_shadow_alerts_view
     execute <<~SQL
-      DROP VIEW IF EXISTS v_shadow_it_alerts CASCADE;
+      DROP VIEW IF EXISTS v_wireless_shadow_alerts CASCADE;
 
-      CREATE OR REPLACE VIEW v_shadow_it_alerts AS
+      CREATE OR REPLACE VIEW v_wireless_shadow_alerts AS
       SELECT
         alert_id,
         dedupe_key,
@@ -153,15 +158,15 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
         resolved_at,
         created_at,
         updated_at
-      FROM shadow_it_alerts
+      FROM wireless_shadow_alerts
       ORDER BY observed_at DESC
     SQL
   end
 
-  def ensure_legacy_shadow_it_alerts_projection
-    add_column :shadow_it_alerts, :alert_id, :text, if_not_exists: true
-    add_column :shadow_it_alerts, :dedupe_key, :text, if_not_exists: true
-    add_column :shadow_it_alerts, :observed_at, :timestamptz, if_not_exists: true
+  def ensure_legacy_wireless_shadow_alerts_projection
+    add_column :wireless_shadow_alerts, :alert_id, :text, if_not_exists: true
+    add_column :wireless_shadow_alerts, :dedupe_key, :text, if_not_exists: true
+    add_column :wireless_shadow_alerts, :observed_at, :timestamptz, if_not_exists: true
 
     execute <<~SQL
       DO $$
@@ -170,10 +175,10 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
           SELECT 1
           FROM information_schema.columns
           WHERE table_schema = 'public'
-            AND table_name = 'shadow_it_alerts'
+            AND table_name = 'wireless_shadow_alerts'
             AND column_name = 'last_occurred_at'
         ) THEN
-          UPDATE shadow_it_alerts
+          UPDATE wireless_shadow_alerts
           SET
             alert_id = COALESCE(alert_id, source_mac),
             dedupe_key = COALESCE(dedupe_key, source_mac),
@@ -182,7 +187,7 @@ class AddOffProxyAuditSystem < ActiveRecord::Migration[7.2]
              OR dedupe_key IS NULL
              OR observed_at IS NULL;
         ELSE
-          UPDATE shadow_it_alerts
+          UPDATE wireless_shadow_alerts
           SET
             alert_id = COALESCE(alert_id, source_mac),
             dedupe_key = COALESCE(dedupe_key, source_mac),

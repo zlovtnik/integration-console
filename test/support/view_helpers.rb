@@ -8,7 +8,7 @@ module ViewHelpers
       CREATE OR REPLACE VIEW v_wireless_device_inventory AS
       WITH recent_ingest AS MATERIALIZED (
         SELECT *
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
           AND COALESCE(source_mac, payload->>'source_mac') IS NOT NULL
         ORDER BY observed_at DESC
@@ -134,22 +134,31 @@ module ViewHelpers
     SQL
   end
 
-  def ensure_shadow_it_alerts_table
+  def ensure_wireless_shadow_alerts_table
     last_occurred_present = sync_connection.select_value(<<~SQL.squish)
       SELECT EXISTS (
         SELECT 1
         FROM information_schema.columns
-        WHERE table_name = 'shadow_it_alerts'
+        WHERE table_name = 'wireless_shadow_alerts'
           AND column_name = 'last_occurred_at'
       )
     SQL
 
-    return if last_occurred_present
+    view_present = sync_connection.select_value(<<~SQL.squish)
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.views
+        WHERE table_schema = 'public'
+          AND table_name = 'v_wireless_shadow_alerts'
+      )
+    SQL
 
-    sync_connection.execute("DROP VIEW IF EXISTS v_shadow_it_alerts")
-    sync_connection.execute("DROP TABLE IF EXISTS shadow_it_alerts CASCADE")
+    return if last_occurred_present && view_present
+
+    sync_connection.execute("DROP VIEW IF EXISTS v_wireless_shadow_alerts")
+    sync_connection.execute("DROP TABLE IF EXISTS wireless_shadow_alerts CASCADE")
     sync_connection.execute(<<~SQL)
-      CREATE TABLE shadow_it_alerts (
+      CREATE TABLE wireless_shadow_alerts (
         source_mac text PRIMARY KEY,
         first_occurred_at timestamptz NOT NULL,
         last_occurred_at timestamptz NOT NULL,
@@ -167,7 +176,7 @@ module ViewHelpers
       )
     SQL
     sync_connection.execute(<<~SQL)
-      CREATE OR REPLACE VIEW v_shadow_it_alerts AS
+      CREATE OR REPLACE VIEW v_wireless_shadow_alerts AS
       SELECT
         source_mac AS alert_id,
         source_mac AS dedupe_key,
@@ -186,7 +195,7 @@ module ViewHelpers
         resolved_at,
         created_at,
         updated_at
-      FROM shadow_it_alerts
+      FROM wireless_shadow_alerts
       ORDER BY last_occurred_at DESC
     SQL
   end
@@ -198,12 +207,12 @@ module ViewHelpers
       CREATE OR REPLACE VIEW v_sync_plane_health AS
       WITH ingest_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         GROUP BY status
       ),
       wireless_ingest_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
         GROUP BY status
       ),
@@ -211,11 +220,11 @@ module ViewHelpers
         SELECT
           count(*) FILTER (WHERE stream_name = 'wireless.audit' AND observed_at >= now() - interval '24 hours')::bigint AS wireless_events_24h_count,
           max(observed_at) FILTER (WHERE stream_name = 'wireless.audit') AS wireless_last_observed_at
-        FROM sync_scan_ingest
+        FROM sync_events
       ),
       batch_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_batch
+        FROM sync_batches
         GROUP BY status
       ),
       job_batch_rollup AS (
@@ -227,8 +236,8 @@ module ViewHelpers
           count(batch.batch_id) FILTER (WHERE batch.status IN ('pending', 'processing', 'dispatched'))::bigint AS open_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'failed')::bigint AS failed_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'completed')::bigint AS completed_batch_count
-        FROM sync_job job
-        LEFT JOIN sync_batch batch ON batch.job_id = job.job_id
+        FROM sync_jobs job
+        LEFT JOIN sync_batches batch ON batch.job_id = job.job_id
         GROUP BY job.job_id, job.status, job.created_at
       ),
       job_effective_status AS (
@@ -255,14 +264,14 @@ module ViewHelpers
       ),
       backlog_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM audit_backlog
+        FROM sync_backlog
         GROUP BY status
       ),
       shadow_status AS (
         SELECT
           count(*) FILTER (WHERE resolved_at IS NULL)::bigint AS open_alert_count,
           max(last_occurred_at) FILTER (WHERE resolved_at IS NULL) AS last_open_alert_at
-        FROM shadow_it_alerts
+        FROM wireless_shadow_alerts
       )
       SELECT
         now() AS measured_at,
@@ -298,8 +307,8 @@ module ViewHelpers
         coalesce((SELECT sum(row_count) FROM backlog_status WHERE status IN ('sync_failed', 'failed')), 0)::bigint AS backlog_failed_count,
         coalesce((SELECT open_alert_count FROM shadow_status), 0)::bigint AS open_shadow_it_alert_count,
         (SELECT last_open_alert_at FROM shadow_status) AS last_shadow_it_alert_at,
-        (SELECT cursor_value FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
-        (SELECT updated_at FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
+        (SELECT cursor_value FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
+        (SELECT updated_at FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
     SQL
   end
 
@@ -326,7 +335,7 @@ module ViewHelpers
 
         SELECT min(observed_at), max(observed_at)
         INTO v_first_observed_at, v_last_observed_at
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
           AND (p_from IS NULL OR observed_at >= p_from)
           AND (p_to IS NULL OR observed_at < p_to);
@@ -355,12 +364,12 @@ module ViewHelpers
             dedupe_key,
             (date_trunc('minute', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS minute_observed_at,
             updated_at AS orig_updated_at
-          FROM sync_scan_ingest
+          FROM sync_events
           WHERE stream_name = 'wireless.audit'
             AND observed_at >= v_window_start
             AND observed_at < v_window_end;
 
-          UPDATE sync_scan_ingest target
+          UPDATE sync_events target
           SET observed_at = wireless_audit_cleanup_scope.minute_observed_at,
               updated_at = now()
           FROM wireless_audit_cleanup_scope
@@ -393,13 +402,13 @@ module ViewHelpers
                   lower(COALESCE(target.device_fingerprint, target.payload->>'device_fingerprint', ''))
                 ORDER BY wireless_audit_cleanup_scope.orig_updated_at DESC NULLS LAST, target.created_at DESC NULLS LAST, target.dedupe_key DESC
               ) AS duplicate_rank
-            FROM sync_scan_ingest target
+            FROM sync_events target
             JOIN wireless_audit_cleanup_scope
               ON target.dedupe_key = wireless_audit_cleanup_scope.dedupe_key
             WHERE target.stream_name = 'wireless.audit'
           ),
           deleted AS (
-            DELETE FROM sync_scan_ingest target
+            DELETE FROM sync_events target
             USING ranked
             WHERE target.dedupe_key = ranked.dedupe_key
               AND ranked.duplicate_rank > 1

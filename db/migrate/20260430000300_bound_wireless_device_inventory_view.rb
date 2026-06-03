@@ -16,7 +16,7 @@ class BoundWirelessDeviceInventoryView < ActiveRecord::Migration[7.2]
       CREATE OR REPLACE VIEW v_wireless_device_inventory AS
       WITH recent_ingest AS MATERIALIZED (
         SELECT *
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
           AND COALESCE(source_mac, payload->>'source_mac') IS NOT NULL
         ORDER BY observed_at DESC

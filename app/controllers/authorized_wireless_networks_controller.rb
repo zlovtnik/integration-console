@@ -18,9 +18,9 @@ class AuthorizedWirelessNetworksController < ApplicationController
   }.freeze
 
   def index
-    @authorized_wireless_networks = apply_grid_filters(AuthorizedWirelessNetwork.ordered, FILTERS)
-    @authorized_wireless_networks = apply_sort(@authorized_wireless_networks, SORTS, default_sort: :ssid, default_direction: :asc)
-    @authorized_wireless_page_payload = authorized_wireless_page_payload(rows: @authorized_wireless_networks, mode: "index")
+    @wireless_authorized_networks = apply_grid_filters(AuthorizedWirelessNetwork.ordered, FILTERS)
+    @wireless_authorized_networks = apply_sort(@wireless_authorized_networks, SORTS, default_sort: :ssid, default_direction: :asc)
+    @authorized_wireless_page_payload = authorized_wireless_page_payload(rows: @wireless_authorized_networks, mode: "index")
 
     respond_to do |format|
       format.html
@@ -37,8 +37,8 @@ class AuthorizedWirelessNetworksController < ApplicationController
     @authorized_wireless_network = AuthorizedWirelessNetwork.new(authorized_wireless_network_params)
     if @authorized_wireless_network.save
       respond_to do |format|
-        format.html { redirect_to authorized_wireless_networks_path, notice: "Authorized wireless network saved", status: :see_other }
-        format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: authorized_wireless_networks_path }, status: :created }
+        format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network saved", status: :see_other }
+        format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: wireless_authorized_networks_path }, status: :created }
       end
     else
       render_authorized_wireless_errors(:new)
@@ -54,8 +54,8 @@ class AuthorizedWirelessNetworksController < ApplicationController
     @authorized_wireless_network = AuthorizedWirelessNetwork.find(params[:id])
     if @authorized_wireless_network.update(authorized_wireless_network_params)
       respond_to do |format|
-        format.html { redirect_to authorized_wireless_networks_path, notice: "Authorized wireless network updated", status: :see_other }
-        format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: authorized_wireless_networks_path } }
+        format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network updated", status: :see_other }
+        format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: wireless_authorized_networks_path } }
       end
     else
       render_authorized_wireless_errors(:edit)
@@ -65,7 +65,7 @@ class AuthorizedWirelessNetworksController < ApplicationController
   def destroy
     AuthorizedWirelessNetwork.find(params[:id]).destroy!
     respond_to do |format|
-      format.html { redirect_to authorized_wireless_networks_path, notice: "Authorized wireless network removed", status: :see_other }
+      format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network removed", status: :see_other }
       format.json { head :no_content }
     end
   end
@@ -94,8 +94,8 @@ class AuthorizedWirelessNetworksController < ApplicationController
       sortDirection: @direction || "asc",
       filters: parsed_grid_filters,
       endpoints: {
-        index: authorized_wireless_networks_path,
-        create: authorized_wireless_networks_path
+        index: wireless_authorized_networks_path,
+        create: wireless_authorized_networks_path
       }
     }
   end
@@ -111,9 +111,9 @@ class AuthorizedWirelessNetworksController < ApplicationController
       notes: network.notes,
       match_label: network.match_label,
       updated_at: network.updated_at&.iso8601,
-      edit_url: network.persisted? ? edit_authorized_wireless_network_path(network) : nil,
-      update_url: network.persisted? ? authorized_wireless_network_path(network) : nil,
-      delete_url: network.persisted? ? authorized_wireless_network_path(network) : nil
+      edit_url: network.persisted? ? edit_wireless_authorized_network_path(network) : nil,
+      update_url: network.persisted? ? wireless_authorized_network_path(network) : nil,
+      delete_url: network.persisted? ? wireless_authorized_network_path(network) : nil
     }
   end
 end

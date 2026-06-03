@@ -8,7 +8,7 @@
 <noscript>
   <h1>Authorized Wireless</h1>
 
-  <p><%= link_to "New authorized network", new_authorized_wireless_network_path %></p>
+  <p><%= link_to "New authorized network", new_wireless_authorized_network_path %></p>
 
   <div class="data-table-wrap table-wrap">
     <table class="data-table">
@@ -24,8 +24,8 @@
         </tr>
       </thead>
       <tbody>
-        <% if @authorized_wireless_networks.any? %>
-          <% @authorized_wireless_networks.each do |network| %>
+        <% if @wireless_authorized_networks.any? %>
+          <% @wireless_authorized_networks.each do |network| %>
             <tr>
               <td><%= network.enabled ? "yes" : "no" %></td>
               <td><%= network.location_id || "any" %></td>
@@ -34,8 +34,8 @@
               <td><%= network.label %></td>
               <td><%= network.updated_at %></td>
               <td>
-                <%= link_to "Edit", edit_authorized_wireless_network_path(network) %>
-                <%= button_to "Remove", authorized_wireless_network_path(network), method: :delete, form: { data: { turbo_confirm: "Remove #{network.match_label}?" } } %>
+                <%= link_to "Edit", edit_wireless_authorized_network_path(network) %>
+                <%= button_to "Remove", wireless_authorized_network_path(network), method: :delete, form: { data: { turbo_confirm: "Remove #{network.match_label}?" } } %>
               </td>
             </tr>
           <% end %>

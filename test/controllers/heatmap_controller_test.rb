@@ -2,7 +2,7 @@ require "test_helper"
 
 class HeatmapControllerTest < ActionDispatch::IntegrationTest
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
     ensure_wireless_heatmap_materialized_view
   end
 

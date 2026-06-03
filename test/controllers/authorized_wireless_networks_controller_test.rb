@@ -8,7 +8,7 @@ class AuthorizedWirelessNetworksControllerTest < ActionDispatch::IntegrationTest
   test "index renders configured networks" do
     AuthorizedWirelessNetwork.create!(ssid: "CorpWiFi", bssid: "10:20:30:40:50:60", location_id: "lab")
 
-    get authorized_wireless_networks_url
+    get wireless_authorized_networks_url
 
     assert_response :success
     assert_includes response.body, "CorpWiFi"
@@ -19,7 +19,7 @@ class AuthorizedWirelessNetworksControllerTest < ActionDispatch::IntegrationTest
   test "index returns json payload for svelte page" do
     AuthorizedWirelessNetwork.create!(ssid: "CorpWiFi", bssid: "10:20:30:40:50:60", location_id: "lab")
 
-    get authorized_wireless_networks_url(format: :json)
+    get wireless_authorized_networks_url(format: :json)
 
     assert_response :success
     json = JSON.parse(response.body)
@@ -28,7 +28,7 @@ class AuthorizedWirelessNetworksControllerTest < ActionDispatch::IntegrationTest
 
   test "create saves authorized network" do
     assert_difference("AuthorizedWirelessNetwork.count", 1) do
-      post authorized_wireless_networks_url, params: {
+      post wireless_authorized_networks_url, params: {
         authorized_wireless_network: {
           ssid: "CorpWiFi",
           bssid: "10:20:30:40:50:60",
@@ -38,7 +38,7 @@ class AuthorizedWirelessNetworksControllerTest < ActionDispatch::IntegrationTest
       }
     end
 
-    assert_redirected_to authorized_wireless_networks_path
+    assert_redirected_to wireless_authorized_networks_path
     assert_response :see_other
   end
 end

@@ -1,27 +1,27 @@
 class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
   def up
     execute "DROP VIEW IF EXISTS v_sync_plane_health"
-    execute "DROP VIEW IF EXISTS v_shadow_it_alerts"
+    execute "DROP VIEW IF EXISTS v_wireless_shadow_alerts"
     execute "DROP VIEW IF EXISTS v_wireless_audit_with_devices"
     execute "DROP VIEW IF EXISTS v_wireless_device_inventory"
 
-    execute "DROP TABLE IF EXISTS shadow_it_alerts CASCADE"
+    execute "DROP TABLE IF EXISTS wireless_shadow_alerts CASCADE"
     execute "DROP TABLE IF EXISTS devices CASCADE"
 
     create_devices_table
-    create_shadow_it_alerts_table
+    create_wireless_shadow_alerts_table
     refresh_wireless_identity_views
-    refresh_shadow_it_alerts_view
+    refresh_wireless_shadow_alerts_view
     refresh_sync_plane_health_view
   end
 
   def down
     execute "DROP VIEW IF EXISTS v_sync_plane_health"
-    execute "DROP VIEW IF EXISTS v_shadow_it_alerts"
+    execute "DROP VIEW IF EXISTS v_wireless_shadow_alerts"
     execute "DROP VIEW IF EXISTS v_wireless_audit_with_devices"
     execute "DROP VIEW IF EXISTS v_wireless_device_inventory"
 
-    execute "DROP TABLE IF EXISTS shadow_it_alerts CASCADE"
+    execute "DROP TABLE IF EXISTS wireless_shadow_alerts CASCADE"
     execute "DROP TABLE IF EXISTS devices CASCADE"
 
     create_table :devices, primary_key: :device_id, id: :text do |t|
@@ -41,7 +41,7 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
     add_index :devices, :wg_pubkey, name: "devices_wg_pubkey_idx"
     add_index :devices, [:username, :last_seen], order: { last_seen: :desc }, name: "devices_username_idx"
 
-    create_table :shadow_it_alerts, primary_key: :alert_id do |t|
+    create_table :wireless_shadow_alerts, primary_key: :alert_id do |t|
       t.text :dedupe_key, null: false
       t.timestamptz :observed_at, null: false
       t.text :source_mac, null: false
@@ -57,9 +57,9 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
       t.timestamptz :updated_at, null: false, default: -> { "now()" }
     end
 
-    add_index :shadow_it_alerts, :dedupe_key, unique: true
-    add_index :shadow_it_alerts, :observed_at, order: { observed_at: :desc }, where: "resolved_at IS NULL", name: "shadow_it_alerts_open_idx"
-    add_index :shadow_it_alerts, "lower(source_mac), observed_at DESC", name: "shadow_it_alerts_source_idx"
+    add_index :wireless_shadow_alerts, :dedupe_key, unique: true
+    add_index :wireless_shadow_alerts, :observed_at, order: { observed_at: :desc }, where: "resolved_at IS NULL", name: "wireless_shadow_alerts_open_idx"
+    add_index :wireless_shadow_alerts, "lower(source_mac), observed_at DESC", name: "wireless_shadow_alerts_source_idx"
   end
 
   private
@@ -87,8 +87,8 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
     add_index :devices, [:username, :last_seen], order: { last_seen: :desc }, name: "devices_username_idx"
   end
 
-  def create_shadow_it_alerts_table
-    create_table :shadow_it_alerts, id: false do |t|
+  def create_wireless_shadow_alerts_table
+    create_table :wireless_shadow_alerts, id: false do |t|
       t.text :source_mac, null: false
       t.timestamptz :first_occurred_at, null: false
       t.timestamptz :last_occurred_at, null: false
@@ -105,11 +105,11 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
       t.timestamptz :updated_at, null: false, default: -> { "now()" }
     end
 
-    execute "ALTER TABLE shadow_it_alerts ADD CONSTRAINT shadow_it_alerts_pk PRIMARY KEY (source_mac)"
-    add_check_constraint :shadow_it_alerts,
+    execute "ALTER TABLE wireless_shadow_alerts ADD CONSTRAINT wireless_shadow_alerts_pk PRIMARY KEY (source_mac)"
+    add_check_constraint :wireless_shadow_alerts,
       "source_mac ~ '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'",
-      name: "shadow_it_alerts_source_mac_format_chk"
-    add_index :shadow_it_alerts, :last_occurred_at, order: { last_occurred_at: :desc }, where: "resolved_at IS NULL", name: "shadow_it_alerts_open_idx"
+      name: "wireless_shadow_alerts_source_mac_format_chk"
+    add_index :wireless_shadow_alerts, :last_occurred_at, order: { last_occurred_at: :desc }, where: "resolved_at IS NULL", name: "wireless_shadow_alerts_open_idx"
   end
 
   def refresh_wireless_identity_views
@@ -137,7 +137,7 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
           ssi.wps_manufacturer,
           ssi.wps_model_name,
           ssi.device_fingerprint
-        FROM sync_scan_ingest ssi
+        FROM sync_events ssi
         WHERE ssi.stream_name = 'wireless.audit'
           AND COALESCE(ssi.source_mac, ssi.payload->>'source_mac') IS NOT NULL
       ),
@@ -203,9 +203,9 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
 
   end
 
-  def refresh_shadow_it_alerts_view
+  def refresh_wireless_shadow_alerts_view
     execute <<~SQL
-      CREATE OR REPLACE VIEW v_shadow_it_alerts AS
+      CREATE OR REPLACE VIEW v_wireless_shadow_alerts AS
       SELECT
         source_mac AS alert_id,
         source_mac AS dedupe_key,
@@ -224,7 +224,7 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
         resolved_at,
         created_at,
         updated_at
-      FROM shadow_it_alerts
+      FROM wireless_shadow_alerts
       ORDER BY last_occurred_at DESC
     SQL
   end
@@ -234,12 +234,12 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
       CREATE OR REPLACE VIEW v_sync_plane_health AS
       WITH ingest_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         GROUP BY status
       ),
       wireless_ingest_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_scan_ingest
+        FROM sync_events
         WHERE stream_name = 'wireless.audit'
         GROUP BY status
       ),
@@ -247,11 +247,11 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
         SELECT
           count(*) FILTER (WHERE stream_name = 'wireless.audit' AND observed_at >= now() - interval '24 hours')::bigint AS wireless_events_24h_count,
           max(observed_at) FILTER (WHERE stream_name = 'wireless.audit') AS wireless_last_observed_at
-        FROM sync_scan_ingest
+        FROM sync_events
       ),
       batch_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM sync_batch
+        FROM sync_batches
         GROUP BY status
       ),
       job_batch_rollup AS (
@@ -263,8 +263,8 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
           count(batch.batch_id) FILTER (WHERE batch.status IN ('pending', 'processing', 'dispatched'))::bigint AS open_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'failed')::bigint AS failed_batch_count,
           count(batch.batch_id) FILTER (WHERE batch.status = 'completed')::bigint AS completed_batch_count
-        FROM sync_job job
-        LEFT JOIN sync_batch batch ON batch.job_id = job.job_id
+        FROM sync_jobs job
+        LEFT JOIN sync_batches batch ON batch.job_id = job.job_id
         GROUP BY job.job_id, job.status, job.created_at
       ),
       job_effective_status AS (
@@ -291,14 +291,14 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
       ),
       backlog_status AS (
         SELECT status, count(*)::bigint AS row_count
-        FROM audit_backlog
+        FROM sync_backlog
         GROUP BY status
       ),
       shadow_status AS (
         SELECT
           count(*) FILTER (WHERE resolved_at IS NULL)::bigint AS open_alert_count,
           max(last_occurred_at) FILTER (WHERE resolved_at IS NULL) AS last_open_alert_at
-        FROM shadow_it_alerts
+        FROM wireless_shadow_alerts
       )
       SELECT
         now() AS measured_at,
@@ -334,8 +334,8 @@ class MacKeyedIdentityAndShadowIt < ActiveRecord::Migration[7.2]
         coalesce((SELECT sum(row_count) FROM backlog_status WHERE status IN ('sync_failed', 'failed')), 0)::bigint AS backlog_failed_count,
         coalesce((SELECT open_alert_count FROM shadow_status), 0)::bigint AS open_shadow_it_alert_count,
         (SELECT last_open_alert_at FROM shadow_status) AS last_shadow_it_alert_at,
-        (SELECT cursor_value FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
-        (SELECT updated_at FROM sync_cursor WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
+        (SELECT cursor_value FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_value,
+        (SELECT updated_at FROM sync_cursors WHERE stream_name = 'wireless.audit') AS wireless_cursor_updated_at
     SQL
   end
 end

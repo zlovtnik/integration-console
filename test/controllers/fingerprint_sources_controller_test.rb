@@ -3,7 +3,7 @@ require "json"
 
 class FingerprintSourcesControllerTest < ActionDispatch::IntegrationTest
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
   end
 
   test "index includes fingerprints stored only in payload" do
@@ -28,7 +28,7 @@ class FingerprintSourcesControllerTest < ActionDispatch::IntegrationTest
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET device_fingerprint = NULL
       WHERE dedupe_key IN ('fingerprint-source-1', 'fingerprint-source-2')
     SQL
@@ -62,7 +62,7 @@ class FingerprintSourcesControllerTest < ActionDispatch::IntegrationTest
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET device_fingerprint = NULL
       WHERE dedupe_key IN ('fingerprint-match', 'fingerprint-miss')
     SQL

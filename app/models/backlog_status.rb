@@ -1,5 +1,5 @@
 class BacklogStatus < SyncRecord
-  self.table_name = "audit_backlog"
+  self.table_name = "sync_backlog"
   self.primary_key = "dedupe_key"
 
   scope :pending, -> { where(status: "pending") }

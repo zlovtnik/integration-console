@@ -2,7 +2,7 @@ require "test_helper"
 
 class BacklogStatusTest < ActiveSupport::TestCase
   setup do
-    clear_sync_tables("audit_backlog")
+    clear_sync_tables("sync_backlog")
   end
 
   test "failed scope includes sync failed and failed statuses" do

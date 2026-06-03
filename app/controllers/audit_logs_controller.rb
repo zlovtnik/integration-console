@@ -260,7 +260,7 @@ class AuditLogsController < ApplicationController
         recentAuditLogsUrl: recent_audit_logs_path(format: :json),
         auditLogsUrl: audit_logs_path,
         identitiesUrl: identities_path,
-        shadowItUrl: shadow_it_alerts_path
+        shadowItUrl: wireless_shadow_alerts_path
       }
     }
   end

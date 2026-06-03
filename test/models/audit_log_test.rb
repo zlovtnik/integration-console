@@ -3,8 +3,12 @@ require "base64"
 
 class AuditLogTest < ActiveSupport::TestCase
   setup do
-    clear_sync_tables("sync_scan_ingest")
+    clear_sync_tables("sync_events")
     ensure_wireless_audit_search_vector
+  end
+
+  test "uses sync_events table for audit logs" do
+    assert_equal "sync_events", AuditLog.table_name
   end
 
   test "raw_frame returns payload value" do
@@ -136,7 +140,7 @@ class AuditLogTest < ActiveSupport::TestCase
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET security_flags = 26,
           wps_device_name = 'Lobby AP',
           wps_manufacturer = 'Acme',
@@ -171,7 +175,7 @@ class AuditLogTest < ActiveSupport::TestCase
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET source_mac = 'aa:bb:cc:dd:ee:01',
           bssid = '10:20:30:40:50:60',
           destination_bssid = '10:20:30:40:50:60',
@@ -246,7 +250,7 @@ class AuditLogTest < ActiveSupport::TestCase
     insert_sync_ingest(dedupe_key: "cleanup-old", observed_at: base, payload: payload)
     insert_sync_ingest(dedupe_key: "cleanup-new", observed_at: base + 20.seconds, payload: payload)
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET created_at = CASE dedupe_key
             WHEN 'cleanup-old' THEN '2026-04-29 10:15:00+00'::timestamptz
             ELSE '2026-04-29 10:16:00+00'::timestamptz
@@ -261,7 +265,7 @@ class AuditLogTest < ActiveSupport::TestCase
     result = sync_connection.select_one(<<~SQL.squish)
       SELECT * FROM normalize_wireless_audit_minutes('2026-04-29 10:15:10+00', '2026-04-29 11:00:00+00')
     SQL
-    rows = sync_connection.select_all("SELECT dedupe_key, observed_at FROM sync_scan_ingest ORDER BY dedupe_key").to_a
+    rows = sync_connection.select_all("SELECT dedupe_key, observed_at FROM sync_events ORDER BY dedupe_key").to_a
 
     assert_equal 2, result.fetch("normalized_count")
     assert_equal 1, result.fetch("deleted_count")
@@ -292,7 +296,7 @@ class AuditLogTest < ActiveSupport::TestCase
       }
     )
     sync_connection.execute(<<~SQL.squish)
-      UPDATE sync_scan_ingest
+      UPDATE sync_events
       SET device_fingerprint = NULL
       WHERE dedupe_key = 'audit-payload-fingerprint-search'
     SQL

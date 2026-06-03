@@ -3,7 +3,7 @@ class RepairSyncUpdateIdentitiesForMacKeyedDevices < ActiveRecord::Migration[7.2
     execute <<~SQL
       DO $$
       BEGIN
-        IF to_regclass('public.sync_scan_ingest') IS NULL
+        IF to_regclass('public.sync_events') IS NULL
           OR to_regclass('public.devices') IS NULL
           OR NOT EXISTS (
             SELECT 1

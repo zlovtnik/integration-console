@@ -2,7 +2,7 @@ require "test_helper"
 
 class BacklogControllerTest < ActionDispatch::IntegrationTest
   setup do
-    clear_sync_tables("audit_backlog")
+    clear_sync_tables("sync_backlog")
   end
 
   test "index paginates backlog entries and preserves status filter" do
