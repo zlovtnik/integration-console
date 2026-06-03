@@ -23,6 +23,10 @@ export const mockResult: SearchResult = {
   detail_json: JSON.stringify({ subtype: 'probe_request', channel: 11 }),
 };
 
+interface MockApiOptions {
+  results?: SearchResult[];
+}
+
 function json(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
@@ -31,7 +35,9 @@ function json(route: Route, body: unknown) {
   });
 }
 
-export async function mockApi(page: Page) {
+export async function mockApi(page: Page, options: MockApiOptions = {}) {
+  const results = options.results ?? [mockResult];
+
   await page.route('**/healthz', (route) => json(route, { status: 'ok' }));
   await page.route('**/v1/suggest/filters**', (route) =>
     json(route, {
@@ -44,19 +50,19 @@ export async function mockApi(page: Page) {
   await page.route('**/v1/search', (route) =>
     json(route, {
       query_id: 1,
-      results: [mockResult],
+      results,
       mode_used: 'SEARCH_MODE_HYBRID',
       fallback_reason: '',
-      dense_result_count: 1,
-      sparse_result_count: 1,
-      fused_result_count: 1,
+      dense_result_count: results.length,
+      sparse_result_count: results.length,
+      fused_result_count: results.length,
     }),
   );
   await page.route('**/v1/search/stream', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/x-ndjson',
-      body: `${JSON.stringify(mockResult)}\n`,
+      body: results.map((result) => JSON.stringify(result)).join('\n') + '\n',
     }),
   );
   await page.route('**/v1/explain/**', (route) =>

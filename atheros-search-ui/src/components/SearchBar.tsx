@@ -8,7 +8,12 @@ export function SearchBar(props: { onSubmit: () => void }) {
 
   const suggestions = createMemo(() =>
     history()
-      .filter((item) => item.toLowerCase().includes(query().toLowerCase()))
+      .filter((item) => {
+        const itemText = item.toLowerCase();
+        const queryText = query().trim().toLowerCase();
+
+        return itemText.includes(queryText) && itemText !== queryText;
+      })
       .slice(0, 8),
   );
 
@@ -65,6 +70,7 @@ export function SearchBar(props: { onSubmit: () => void }) {
         type="search"
         role="combobox"
         aria-expanded={open()}
+        aria-haspopup="listbox"
         aria-controls={
           open() && suggestions().length > 0 ? 'search-listbox' : undefined
         }

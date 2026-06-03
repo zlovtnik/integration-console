@@ -1,4 +1,11 @@
-import { createEffect, createSignal, For, Show } from 'solid-js';
+import {
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from 'solid-js';
 import { X } from 'lucide-solid';
 import {
   filters,
@@ -26,12 +33,66 @@ function clampTopK(value: number): number {
   return Math.max(1, Math.min(200, value));
 }
 
-export function FilterPanel(props: { open: boolean; onClose: () => void }) {
+const DRAWER_MEDIA = '(max-width: 1119px)';
+const FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+export function FilterPanel(props: {
+  open: boolean;
+  onClose: () => void;
+  returnFocus: () => void;
+}) {
   const [topKInput, setTopKInput] = createSignal(String(topK()));
+  const [isDrawer, setIsDrawer] = createSignal(false);
+  let panelRef: HTMLElement | undefined;
+  let closeButtonRef: HTMLButtonElement | undefined;
+  let wasOpen = false;
 
   createEffect(() => {
     setTopKInput(String(topK()));
   });
+
+  createEffect(() => {
+    document.body.classList.toggle(
+      'filter-drawer-open',
+      props.open && isDrawer(),
+    );
+  });
+
+  createEffect(() => {
+    const open = props.open && isDrawer();
+
+    if (open && !wasOpen) {
+      queueMicrotask(() => {
+        const firstField = panelRef?.querySelector<HTMLElement>(
+          FOCUSABLE_SELECTOR,
+        );
+        (closeButtonRef ?? firstField ?? panelRef)?.focus();
+      });
+    }
+
+    if (!open && wasOpen) {
+      props.returnFocus();
+    }
+
+    wasOpen = open;
+  });
+
+  onMount(() => {
+    const media = window.matchMedia(DRAWER_MEDIA);
+    const syncDrawer = () => setIsDrawer(media.matches);
+
+    syncDrawer();
+    media.addEventListener('change', syncDrawer);
+    window.addEventListener('keydown', handleWindowKeyDown);
+
+    onCleanup(() => {
+      media.removeEventListener('change', syncDrawer);
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    });
+  });
+
+  onCleanup(() => document.body.classList.remove('filter-drawer-open'));
 
   function handleTopKInput(value: string) {
     setTopKInput(value);
@@ -48,26 +109,74 @@ export function FilterPanel(props: { open: boolean; onClose: () => void }) {
     setTopKInput(String(topK()));
   }
 
+  function focusableItems() {
+    if (!panelRef) return [];
+
+    return Array.from(panelRef.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+      .filter((element) => !element.hasAttribute('disabled'));
+  }
+
+  function trapFocus(event: KeyboardEvent) {
+    const items = focusableItems();
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!first || !last) return;
+
+    if (!panelRef?.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function handleWindowKeyDown(event: KeyboardEvent) {
+    if (!props.open || !isDrawer()) return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      props.onClose();
+      return;
+    }
+
+    if (event.key === 'Tab') trapFocus(event);
+  }
+
   return (
     <>
-      <Show when={props.open}>
+      <Show when={props.open && isDrawer()}>
         <button
           type="button"
           class="drawer-scrim"
-          aria-label="Close filters"
+          aria-label="Close filter drawer"
           onClick={() => props.onClose()}
         />
       </Show>
       <aside
+        ref={panelRef}
         id="filter-panel"
-        aria-label="Search filters"
+        role={isDrawer() ? 'dialog' : undefined}
+        aria-modal={isDrawer() && props.open ? 'true' : undefined}
+        aria-hidden={isDrawer() && !props.open ? 'true' : undefined}
+        aria-labelledby="filter-panel-title"
+        tabIndex={isDrawer() ? -1 : undefined}
         class={`filter-panel ${props.open ? 'filter-panel--open' : ''}`}
       >
         <div class="panel-heading">
-          <h2 class="heading-2">Filters</h2>
+          <h2 id="filter-panel-title" class="heading-2">
+            Filters
+          </h2>
           <button
+            ref={closeButtonRef}
             type="button"
-            class="icon-btn only-mobile"
+            class="icon-btn only-drawer"
             aria-label="Close filters"
             onClick={() => props.onClose()}
           >

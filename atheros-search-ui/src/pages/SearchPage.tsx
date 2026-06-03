@@ -70,6 +70,7 @@ export default function SearchPage() {
   const streamSearch = useSearchStream();
   const restoreScroll = useScrollRestoration();
   let abortController: AbortController | null = null;
+  let filterButton: HTMLButtonElement | undefined;
 
   useSuggest();
   useUrlSync();
@@ -207,7 +208,11 @@ export default function SearchPage() {
 
   return (
     <div class="app-layout">
-      <FilterPanel open={filtersOpen()} onClose={() => setFiltersOpen(false)} />
+      <FilterPanel
+        open={filtersOpen()}
+        onClose={() => setFiltersOpen(false)}
+        returnFocus={() => filterButton?.focus()}
+      />
 
       <main id="main-content" class="main-content" tabIndex={-1}>
         <section class="search-workspace" aria-labelledby="page-title">
@@ -221,8 +226,9 @@ export default function SearchPage() {
               </p>
             </div>
             <button
+              ref={filterButton}
               type="button"
-              class="btn btn-secondary"
+              class="btn btn-secondary filter-toggle"
               aria-expanded={filtersOpen()}
               aria-controls="filter-panel"
               onClick={() => setFiltersOpen((value) => !value)}
