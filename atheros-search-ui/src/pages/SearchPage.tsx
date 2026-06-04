@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from '@solidjs/router';
+import { useNavigate } from '@solidjs/router';
 import {
   createEffect,
   createMemo,
@@ -7,7 +7,12 @@ import {
   onMount,
   Show,
 } from 'solid-js';
-import { Filter, Play, Search as SearchIcon, Square } from 'lucide-solid';
+import {
+  ChevronDown,
+  Filter,
+  Search as SearchIcon,
+  Square,
+} from 'lucide-solid';
 import { ApiError, api } from '~/api/client';
 import { FilterChips } from '~/components/FilterChips';
 import { FilterPanel } from '~/components/FilterPanel';
@@ -15,7 +20,6 @@ import { KindSelector } from '~/components/KindSelector';
 import { ModeSelector } from '~/components/ModeSelector';
 import { ResultCard } from '~/components/ResultCard';
 import { SearchBar } from '~/components/SearchBar';
-import { ShortcutsModal } from '~/components/ShortcutsModal';
 import { SkeletonCard } from '~/components/SkeletonCard';
 import { useKeyboardShortcuts } from '~/hooks/useKeyboardShortcuts';
 import { useScrollRestoration } from '~/hooks/useScrollRestoration';
@@ -41,27 +45,33 @@ import {
   streaming,
   topK,
 } from '~/stores/searchStore';
+import { shortcutsOpen, setShortcutsOpen } from '~/stores/uiStore';
+import { friendlyError } from '~/utils/friendlyError';
 
 function describeError(errorValue: unknown): string {
-  if (errorValue instanceof ApiError && errorValue.status === 401) {
-    return 'Search API authentication failed - check backend credentials or session state.';
+  if (errorValue instanceof ApiError) {
+    return `HTTP ${errorValue.status}: ${errorValue.message}`;
   }
-  if (errorValue instanceof ApiError)
-    return errorValue.message || `API returned ${errorValue.status}.`;
   if (errorValue instanceof Error && errorValue.name === 'AbortError') {
-    return 'Search timed out - try a more specific query.';
+    return 'Search timed out.';
   }
   return (
     (errorValue instanceof Error && errorValue.message) ||
-    'Cannot reach atheros-search - check API_BASE or service health.'
+    'Cannot reach atheros-search.'
   );
 }
 
+const EXAMPLE_QUERIES = [
+  'probe requests from unknown devices',
+  'deauthentication flood last 24h',
+  'rogue AP shadow network',
+  'aa:bb:cc:dd:ee:ff',
+];
+
 export default function SearchPage() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = createSignal(false);
-  const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [useStream, setUseStream] = createSignal(true);
   const [searched, setSearched] = createSignal(false);
   const [lastSearchMs, setLastSearchMs] = createSignal<number | null>(null);
@@ -78,7 +88,6 @@ export default function SearchPage() {
   onMount(() => {
     document.title = 'Search - atheros search';
     window.scrollTo(0, restoreScroll());
-    if (params.shortcuts === '1') setShortcutsOpen(true);
   });
 
   createEffect(() => {
@@ -109,6 +118,8 @@ export default function SearchPage() {
       (_, index) => index,
     ),
   );
+
+  const errorCopy = createMemo(() => friendlyError(error() ?? ''));
 
   async function runSearch() {
     const request = buildSearchRequest();
@@ -241,40 +252,69 @@ export default function SearchPage() {
           <div class="search-controls">
             <SearchBar onSubmit={() => void runSearch()} />
             <div class="control-row">
-              <KindSelector />
-              <ModeSelector />
-              <label class="switch-inline">
-                <input
-                  type="checkbox"
-                  checked={useStream()}
-                  onChange={(event) =>
-                    setUseStream(event.currentTarget.checked)
-                  }
-                />
-                <span>Live</span>
-              </label>
-              <button
-                type="button"
-                class="btn btn-primary"
-                onClick={() => void runSearch()}
-              >
-                <SearchIcon size={16} aria-hidden="true" />
-                <span>Search</span>
-              </button>
-              <Show when={loading() || streaming()}>
+              <div class="control-inline">
                 <button
                   type="button"
-                  class="btn btn-secondary"
-                  onClick={cancelSearch}
+                  class="btn btn-primary"
+                  onClick={() => void runSearch()}
                 >
-                  <Show
-                    when={streaming()}
-                    fallback={<Play size={16} aria-hidden="true" />}
-                  >
-                    <Square size={16} aria-hidden="true" />
-                  </Show>
+                  <SearchIcon size={16} aria-hidden="true" />
+                  <span>Search</span>
+                </button>
+
+                <button
+                  type="button"
+                  class={`btn btn-secondary cancel-btn ${
+                    loading() || streaming() ? 'cancel-btn--visible' : ''
+                  }`}
+                  onClick={cancelSearch}
+                  aria-hidden={!(loading() || streaming())}
+                  tabIndex={loading() || streaming() ? 0 : -1}
+                >
+                  <Square size={16} aria-hidden="true" />
                   <span>Cancel</span>
                 </button>
+              </div>
+
+              <div class="control-secondary">
+                <button
+                  type="button"
+                  class="btn btn-ghost advanced-toggle"
+                  aria-expanded={showAdvanced()}
+                  onClick={() => setShowAdvanced((value) => !value)}
+                >
+                  <span>Advanced</span>
+                  <ChevronDown
+                    size={14}
+                    aria-hidden="true"
+                    class={showAdvanced() ? 'chevron-up' : ''}
+                  />
+                </button>
+
+                <label
+                  class="switch-inline"
+                  title="Stream results as they arrive instead of waiting for the full response"
+                >
+                  <input
+                    type="checkbox"
+                    checked={useStream()}
+                    onChange={(event) =>
+                      setUseStream(event.currentTarget.checked)
+                    }
+                  />
+                  <span>Live stream</span>
+                </label>
+              </div>
+
+              <Show when={showAdvanced()}>
+                <div
+                  class="advanced-controls"
+                  role="group"
+                  aria-label="Advanced search options"
+                >
+                  <KindSelector />
+                  <ModeSelector />
+                </div>
               </Show>
             </div>
             <FilterChips />
@@ -313,12 +353,33 @@ export default function SearchPage() {
                               <Show
                                 when={searched()}
                                 fallback={
-                                  <p>
-                                    Start searching with a query or MAC address.
-                                  </p>
+                                  <div class="empty-welcome">
+                                    <p class="caption">Try searching for:</p>
+                                    <ul role="list" class="example-queries">
+                                      <For each={EXAMPLE_QUERIES}>
+                                        {(example) => (
+                                          <li>
+                                            <button
+                                              type="button"
+                                              class="example-query-btn"
+                                              onClick={() => {
+                                                setQuery(example);
+                                                void runSearch();
+                                              }}
+                                            >
+                                              {example}
+                                            </button>
+                                          </li>
+                                        )}
+                                      </For>
+                                    </ul>
+                                  </div>
                                 }
                               >
-                                <p>No results for "{query()}".</p>
+                                <p>
+                                  No results for "{query()}" - try broadening
+                                  your search or removing filters.
+                                </p>
                               </Show>
                             </div>
                           }
@@ -379,17 +440,18 @@ export default function SearchPage() {
               }
             >
               <div class="state-banner state-banner--error" role="alert">
-                {error()}
+                <strong>{errorCopy().heading}</strong>
+                <Show when={errorCopy().detail !== errorCopy().heading}>
+                  <p class="caption">{errorCopy().detail}</p>
+                </Show>
+                <Show when={errorCopy().action}>
+                  <p class="caption">{errorCopy().action}</p>
+                </Show>
               </div>
             </Show>
           </section>
         </section>
       </main>
-
-      <ShortcutsModal
-        open={shortcutsOpen()}
-        onClose={() => setShortcutsOpen(false)}
-      />
     </div>
   );
 }

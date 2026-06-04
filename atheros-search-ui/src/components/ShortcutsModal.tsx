@@ -1,15 +1,20 @@
 import { createEffect, For, onCleanup, onMount, Show } from 'solid-js';
 import { X } from 'lucide-solid';
 
-const SHORTCUTS = [
-  ['/', 'Focus search'],
-  ['Cmd/Ctrl K', 'Focus search'],
-  ['Cmd/Ctrl Enter', 'Submit search'],
-  ['Cmd/Ctrl Shift F', 'Toggle filters'],
-  ['J / K', 'Move results'],
-  ['Enter', 'Open focused result'],
-  ['Escape', 'Close'],
-] as const;
+const isMac = () => navigator.platform.startsWith('Mac');
+const mod = () => (isMac() ? 'Cmd' : 'Ctrl');
+
+const SHORTCUTS = () =>
+  [
+    ['/', 'Focus search'],
+    [`${mod()} K`, 'Focus search'],
+    [`${mod()} Enter`, 'Submit search'],
+    [`${mod()} Shift F`, 'Toggle filters'],
+    ['J / K', 'Navigate results down / up'],
+    ['Enter', 'Open focused result'],
+    ['?', 'Show this panel'],
+    ['Esc', 'Close / clear'],
+  ] as const;
 
 export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
   let dialogRef: HTMLDivElement | undefined;
@@ -91,7 +96,7 @@ export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
             </button>
           </div>
           <dl class="shortcut-list">
-            <For each={SHORTCUTS}>
+            <For each={SHORTCUTS()}>
               {([keys, action]) => (
                 <div>
                   <dt class="mono">{keys}</dt>

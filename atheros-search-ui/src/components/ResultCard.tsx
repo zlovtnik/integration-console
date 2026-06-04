@@ -10,7 +10,45 @@ import { JsonViewer } from './JsonViewer';
 import { KindBadge } from './KindBadge';
 import { ScoreBar } from './ScoreBar';
 
-export function ResultCard(props: { result: SearchResult; queryText: string; kind: string }) {
+type HighlightSegment = {
+  text: string;
+  highlighted: boolean;
+};
+
+function highlightSegments(snippet: string): HighlightSegment[] {
+  const segments: HighlightSegment[] = [];
+  const tagPattern = /<\/?(em|mark|strong)>/gi;
+  let lastIndex = 0;
+  let depth = 0;
+
+  for (const match of snippet.matchAll(tagPattern)) {
+    if (match.index > lastIndex) {
+      segments.push({
+        text: snippet.slice(lastIndex, match.index),
+        highlighted: depth > 0,
+      });
+    }
+
+    depth += match[0].startsWith('</') ? -1 : 1;
+    depth = Math.max(0, depth);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < snippet.length) {
+    segments.push({
+      text: snippet.slice(lastIndex),
+      highlighted: depth > 0,
+    });
+  }
+
+  return segments;
+}
+
+export function ResultCard(props: {
+  result: SearchResult;
+  queryText: string;
+  kind: string;
+}) {
   const [expanded, setExpanded] = createSignal(false);
   const safeId = () => domId(props.result.source_key);
   const detailId = () => `detail-${safeId()}`;
@@ -61,7 +99,9 @@ export function ResultCard(props: { result: SearchResult; queryText: string; kin
 
       <Show when={(props.result.tags ?? []).length > 0}>
         <ul class="tag-list" aria-label="Tags" role="list">
-          <For each={props.result.tags}>{(tag) => <li class={tagClass(tag)}>{tag}</li>}</For>
+          <For each={props.result.tags}>
+            {(tag) => <li class={tagClass(tag)}>{tag}</li>}
+          </For>
         </ul>
       </Show>
 
@@ -73,7 +113,10 @@ export function ResultCard(props: { result: SearchResult; queryText: string; kin
           aria-expanded={expanded()}
           aria-controls={detailId()}
         >
-          <Show when={expanded()} fallback={<ChevronDown size={16} aria-hidden="true" />}>
+          <Show
+            when={expanded()}
+            fallback={<ChevronDown size={16} aria-hidden="true" />}
+          >
             <ChevronUp size={16} aria-hidden="true" />
           </Show>
           <span>{expanded() ? 'Hide detail' : 'Show detail'}</span>
@@ -89,6 +132,31 @@ export function ResultCard(props: { result: SearchResult; queryText: string; kin
 
       <Show when={expanded()}>
         <div id={detailId()} class="detail-json">
+          <Show when={Object.keys(props.result.highlights ?? {}).length > 0}>
+            <div class="detail-highlights">
+              <For each={Object.entries(props.result.highlights ?? {})}>
+                {([field, snippet]) => (
+                  <p class="highlight-row">
+                    <span class="highlight-field caption">
+                      {field.replace(/_/g, ' ')}
+                    </span>
+                    <span class="highlight-snippet">
+                      <For each={highlightSegments(snippet)}>
+                        {(segment) => (
+                          <Show
+                            when={segment.highlighted}
+                            fallback={segment.text}
+                          >
+                            <mark>{segment.text}</mark>
+                          </Show>
+                        )}
+                      </For>
+                    </span>
+                  </p>
+                )}
+              </For>
+            </div>
+          </Show>
           <JsonViewer json={props.result.detail_json} />
         </div>
       </Show>

@@ -53,10 +53,22 @@ export default function ExplainPage() {
 
   return (
     <main id="main-content" class="main-content explain-page" tabIndex={-1}>
-      <A href="/" class="btn btn-ghost back-link">
-        <ArrowLeft size={16} aria-hidden="true" />
-        <span>Back</span>
-      </A>
+      <nav aria-label="Breadcrumb" class="breadcrumb">
+        <A
+          href={`/?q=${encodeURIComponent(
+            typeof searchParams.query === 'string' ? searchParams.query : '',
+          )}`}
+          class="btn btn-ghost back-link"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          <span>
+            Back to results
+            {typeof searchParams.query === 'string' && searchParams.query
+              ? ` for "${searchParams.query}"`
+              : ''}
+          </span>
+        </A>
+      </nav>
 
       <h1 class="display">Explain: {sourceKey()}</h1>
 
@@ -110,8 +122,12 @@ export default function ExplainPage() {
                   class="explain-section"
                 >
                   <h2 id="sequence-title" class="heading-1">
-                    Sequence
+                    Frame sequence
                   </h2>
+                  <p class="caption">
+                    Log-probability of this event sequence under the trained
+                    model. Lower scores indicate more unusual ordering.
+                  </p>
                   <div class="sequence-row">
                     <Show
                       when={(details().sequence_tokens ?? []).length > 0}

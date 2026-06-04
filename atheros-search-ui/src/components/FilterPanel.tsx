@@ -2,11 +2,12 @@ import {
   createEffect,
   createSignal,
   For,
+  type JSX,
   onCleanup,
   onMount,
   Show,
 } from 'solid-js';
-import { X } from 'lucide-solid';
+import { ChevronDown, X } from 'lucide-solid';
 import {
   filters,
   minSimilarity,
@@ -31,6 +32,35 @@ function joinList(value: string[] | undefined): string {
 
 function clampTopK(value: number): number {
   return Math.max(1, Math.min(200, Math.round(value)));
+}
+
+function FilterSection(props: {
+  title: string;
+  children: JSX.Element;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = createSignal(props.defaultOpen ?? false);
+
+  return (
+    <div class="filter-section">
+      <button
+        type="button"
+        class="filter-section-toggle"
+        aria-expanded={open()}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{props.title}</span>
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          class={open() ? 'chevron-up' : ''}
+        />
+      </button>
+      <Show when={open()}>
+        <div class="filter-section-body">{props.children}</div>
+      </Show>
+    </div>
+  );
 }
 
 const DRAWER_MEDIA = '(max-width: 1119px)';
@@ -64,9 +94,8 @@ export function FilterPanel(props: {
 
     if (open && !wasOpen) {
       queueMicrotask(() => {
-        const firstField = panelRef?.querySelector<HTMLElement>(
-          FOCUSABLE_SELECTOR,
-        );
+        const firstField =
+          panelRef?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
         (closeButtonRef ?? firstField ?? panelRef)?.focus();
       });
     }
@@ -112,8 +141,9 @@ export function FilterPanel(props: {
   function focusableItems() {
     if (!panelRef) return [];
 
-    return Array.from(panelRef.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      .filter((element) => !element.hasAttribute('disabled'));
+    return Array.from(
+      panelRef.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    ).filter((element) => !element.hasAttribute('disabled'));
   }
 
   function trapFocus(event: KeyboardEvent) {
@@ -185,215 +215,262 @@ export function FilterPanel(props: {
         </div>
 
         <div class="field-stack">
-          <label class="field">
-            <span>Top K</span>
-            <input
-              type="number"
-              min="1"
-              max="200"
-              value={topKInput()}
-              onInput={(event) => handleTopKInput(event.currentTarget.value)}
-              onBlur={resetTopKInput}
-            />
-          </label>
+          <div class="filter-group filter-group--core">
+            <label class="field">
+              <span>
+                Results to return
+                <span class="field-hint">1-200</span>
+              </span>
+              <input
+                type="number"
+                min="1"
+                max="200"
+                value={topKInput()}
+                onInput={(event) => handleTopKInput(event.currentTarget.value)}
+                onBlur={resetTopKInput}
+              />
+            </label>
 
-          <label class="field">
-            <span>Minimum similarity</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={minSimilarity()}
-              onInput={(event) =>
-                setMinSimilarity(Number(event.currentTarget.value))
-              }
-            />
-            <span class="mono caption">{minSimilarity().toFixed(2)}</span>
-          </label>
-
-          <label class="field">
-            <span>Location IDs</span>
-            <input
-              value={joinList(filters.location_ids)}
-              list="location-suggestions"
-              onChange={(event) =>
-                setFilters('location_ids', splitList(event.currentTarget.value))
-              }
-            />
-          </label>
-          <datalist id="location-suggestions">
-            <For each={suggestions.location_ids}>
-              {(item) => <option value={item} />}
-            </For>
-          </datalist>
-
-          <label class="field">
-            <span>Sensor IDs</span>
-            <input
-              value={joinList(filters.sensor_ids)}
-              list="sensor-suggestions"
-              onChange={(event) =>
-                setFilters('sensor_ids', splitList(event.currentTarget.value))
-              }
-            />
-          </label>
-          <datalist id="sensor-suggestions">
-            <For each={suggestions.sensor_ids}>
-              {(item) => <option value={item} />}
-            </For>
-          </datalist>
-
-          <label class="field">
-            <span>SSID</span>
-            <input
-              value={filters.ssid ?? ''}
-              list="ssid-suggestions"
-              onInput={(event) =>
-                setFilters('ssid', event.currentTarget.value || undefined)
-              }
-            />
-          </label>
-          <datalist id="ssid-suggestions">
-            <For each={suggestions.ssids}>
-              {(item) => <option value={item} />}
-            </For>
-          </datalist>
-
-          <label class="field">
-            <span>Source MAC</span>
-            <input
-              inputmode="text"
-              placeholder="aa:bb:cc:dd:ee:ff"
-              value={filters.source_mac ?? ''}
-              onInput={(event) =>
-                setFilters('source_mac', event.currentTarget.value || undefined)
-              }
-            />
-          </label>
-
-          <fieldset class="field">
-            <legend>Frame subtypes</legend>
-            <div class="check-grid">
-              <For
-                each={
-                  suggestions.frame_subtypes.length
-                    ? suggestions.frame_subtypes
-                    : [
-                        'probe_request',
-                        'deauthentication',
-                        'association_request',
-                      ]
+            <label class="field">
+              <span>
+                Minimum match score
+                <span class="field-hint">{minSimilarity().toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={minSimilarity()}
+                onInput={(event) =>
+                  setMinSimilarity(Number(event.currentTarget.value))
                 }
-              >
-                {(subtype) => (
-                  <label class="check-row">
-                    <input
-                      type="checkbox"
-                      checked={filters.frame_subtypes?.includes(subtype)}
-                      onChange={(event) => {
-                        const current = filters.frame_subtypes ?? [];
-                        setFilters(
-                          'frame_subtypes',
-                          event.currentTarget.checked
-                            ? [...current, subtype]
-                            : splitList(
-                                current
-                                  .filter((item) => item !== subtype)
-                                  .join(','),
-                              ),
-                        );
-                      }}
-                    />
-                    <span>{subtype}</span>
-                  </label>
-                )}
+              />
+              <div class="range-labels">
+                <span>Any</span>
+                <span>Exact</span>
+              </div>
+            </label>
+          </div>
+
+          <FilterSection title="Device & Network" defaultOpen={true}>
+            <label class="field">
+              <span>SSID</span>
+              <input
+                value={filters.ssid ?? ''}
+                list="ssid-suggestions"
+                onInput={(event) =>
+                  setFilters('ssid', event.currentTarget.value || undefined)
+                }
+              />
+            </label>
+            <datalist id="ssid-suggestions">
+              <For each={suggestions.ssids}>
+                {(item) => <option value={item} />}
               </For>
-            </div>
-          </fieldset>
+            </datalist>
 
-          <label class="field">
-            <span>Observed after</span>
-            <input
-              type="datetime-local"
-              value={filters.observed_after ?? ''}
-              onInput={(event) =>
-                setFilters(
-                  'observed_after',
-                  event.currentTarget.value || undefined,
-                )
-              }
-            />
-          </label>
+            <label class="field">
+              <span>Source MAC address</span>
+              <input
+                inputmode="text"
+                placeholder="aa:bb:cc:dd:ee:ff"
+                value={filters.source_mac ?? ''}
+                onInput={(event) =>
+                  setFilters(
+                    'source_mac',
+                    event.currentTarget.value || undefined,
+                  )
+                }
+              />
+            </label>
 
-          <label class="field">
-            <span>Observed before</span>
-            <input
-              type="datetime-local"
-              value={filters.observed_before ?? ''}
-              onInput={(event) =>
-                setFilters(
-                  'observed_before',
-                  event.currentTarget.value || undefined,
-                )
-              }
-            />
-          </label>
+            <label class="field">
+              <span>
+                Location IDs
+                <span class="field-hint">comma-separated</span>
+              </span>
+              <input
+                value={joinList(filters.location_ids)}
+                list="location-suggestions"
+                onChange={(event) =>
+                  setFilters(
+                    'location_ids',
+                    splitList(event.currentTarget.value),
+                  )
+                }
+              />
+            </label>
+            <datalist id="location-suggestions">
+              <For each={suggestions.location_ids}>
+                {(item) => <option value={item} />}
+              </For>
+            </datalist>
 
-          <label class="switch-row">
-            <input
-              type="checkbox"
-              checked={Boolean(filters.threat_only)}
-              onChange={(event) =>
-                setFilters(
-                  'threat_only',
-                  event.currentTarget.checked || undefined,
-                )
-              }
-            />
-            <span>Threat only</span>
-          </label>
+            <label class="field">
+              <span>
+                Sensor IDs
+                <span class="field-hint">comma-separated</span>
+              </span>
+              <input
+                value={joinList(filters.sensor_ids)}
+                list="sensor-suggestions"
+                onChange={(event) =>
+                  setFilters('sensor_ids', splitList(event.currentTarget.value))
+                }
+              />
+            </label>
+            <datalist id="sensor-suggestions">
+              <For each={suggestions.sensor_ids}>
+                {(item) => <option value={item} />}
+              </For>
+            </datalist>
+          </FilterSection>
 
-          <label class="switch-row">
-            <input
-              type="checkbox"
-              checked={Boolean(filters.handshake_only)}
-              onChange={(event) =>
-                setFilters(
-                  'handshake_only',
-                  event.currentTarget.checked || undefined,
-                )
-              }
-            />
-            <span>Handshake only</span>
-          </label>
+          <FilterSection title="Frame Types">
+            <fieldset class="field">
+              <legend class="sr-only">Frame subtypes</legend>
+              <div class="check-grid">
+                <For
+                  each={
+                    suggestions.frame_subtypes.length
+                      ? suggestions.frame_subtypes
+                      : [
+                          'probe_request',
+                          'deauthentication',
+                          'association_request',
+                        ]
+                  }
+                >
+                  {(subtype) => (
+                    <label class="check-row">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(
+                          filters.frame_subtypes?.includes(subtype),
+                        )}
+                        onChange={(event) => {
+                          const current = filters.frame_subtypes ?? [];
+                          setFilters(
+                            'frame_subtypes',
+                            event.currentTarget.checked
+                              ? [...current, subtype]
+                              : splitList(
+                                  current
+                                    .filter((item) => item !== subtype)
+                                    .join(','),
+                                ),
+                          );
+                        }}
+                      />
+                      <span>{subtype.replace(/_/g, ' ')}</span>
+                    </label>
+                  )}
+                </For>
+              </div>
+            </fieldset>
+          </FilterSection>
 
-          <label class="field">
-            <span>Security flags mask</span>
-            <input
-              type="number"
-              min="0"
-              value={filters.security_flags_mask ?? ''}
-              onInput={(event) =>
-                setFilters(
-                  'security_flags_mask',
-                  event.currentTarget.value
-                    ? Number(event.currentTarget.value)
-                    : undefined,
-                )
-              }
-            />
-          </label>
+          <FilterSection title="Time Window">
+            <label class="field">
+              <span>
+                After
+                <span class="field-hint">local time</span>
+              </span>
+              <input
+                type="datetime-local"
+                value={filters.observed_after ?? ''}
+                onInput={(event) =>
+                  setFilters(
+                    'observed_after',
+                    event.currentTarget.value || undefined,
+                  )
+                }
+              />
+            </label>
 
-          <label class="field">
-            <span>Tags</span>
-            <input
-              value={joinList(filters.tags)}
-              onChange={(event) =>
-                setFilters('tags', splitList(event.currentTarget.value))
-              }
-            />
-          </label>
+            <label class="field">
+              <span>
+                Before
+                <span class="field-hint">local time</span>
+              </span>
+              <input
+                type="datetime-local"
+                value={filters.observed_before ?? ''}
+                onInput={(event) =>
+                  setFilters(
+                    'observed_before',
+                    event.currentTarget.value || undefined,
+                  )
+                }
+              />
+            </label>
+          </FilterSection>
+
+          <FilterSection title="Threat Filters">
+            <label class="switch-row">
+              <input
+                type="checkbox"
+                checked={Boolean(filters.threat_only)}
+                onChange={(event) =>
+                  setFilters(
+                    'threat_only',
+                    event.currentTarget.checked || undefined,
+                  )
+                }
+              />
+              <span>Threats only</span>
+            </label>
+
+            <label class="switch-row">
+              <input
+                type="checkbox"
+                checked={Boolean(filters.handshake_only)}
+                onChange={(event) =>
+                  setFilters(
+                    'handshake_only',
+                    event.currentTarget.checked || undefined,
+                  )
+                }
+              />
+              <span>Handshakes only</span>
+            </label>
+
+            <label class="field">
+              <span>
+                Tags
+                <span class="field-hint">comma-separated</span>
+              </span>
+              <input
+                value={joinList(filters.tags)}
+                onChange={(event) =>
+                  setFilters('tags', splitList(event.currentTarget.value))
+                }
+              />
+            </label>
+          </FilterSection>
+
+          <FilterSection title="Expert Options">
+            <label class="field">
+              <span>
+                Security flags bitmask
+                <span class="field-hint">802.11 capability flags</span>
+              </span>
+              <input
+                type="number"
+                min="0"
+                value={filters.security_flags_mask ?? ''}
+                onInput={(event) =>
+                  setFilters(
+                    'security_flags_mask',
+                    event.currentTarget.value
+                      ? Number(event.currentTarget.value)
+                      : undefined,
+                  )
+                }
+              />
+            </label>
+          </FilterSection>
         </div>
       </aside>
     </>
