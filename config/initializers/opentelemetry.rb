@@ -7,9 +7,10 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
   require "opentelemetry/instrumentation/redis"
   require "opentelemetry/instrumentation/pg"
 
+  ENV["OTEL_TRACES_SAMPLER"] ||= "always_on"
+
   OpenTelemetry::SDK.configure do |config|
     config.service_name = ENV.fetch("OTEL_SERVICE_NAME", "integration-console-web")
-    config.sampler = OpenTelemetry::SDK::Trace::Samplers::ALWAYS_ON
 
     install = lambda do |name, options = {}|
       options.empty? ? config.use(name) : config.use(name, **options)
