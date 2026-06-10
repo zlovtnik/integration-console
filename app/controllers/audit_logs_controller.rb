@@ -232,7 +232,7 @@ class AuditLogsController < ApplicationController
       device_fingerprint: entry.device_fingerprint,
       wps_device_name: entry.wps_device_name,
       handshake_captured: entry.handshake_captured,
-      tags: entry.payload.is_a?(Hash) ? Array(entry.payload["tags"]).select { |t| t.is_a?(String) && t.start_with?("threat:") } : []
+      tags: Array(entry.tags).select { |t| t.is_a?(String) && t.start_with?("threat:") }
     }
   end
 
