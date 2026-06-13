@@ -1,4 +1,4 @@
-import { For } from 'solid-js';
+import { createMemo, For } from 'solid-js';
 import type { ExplainResponse } from '~/api/types';
 
 export function ScoreChart(props: { explain: ExplainResponse }) {
@@ -7,6 +7,9 @@ export function ScoreChart(props: { explain: ExplainResponse }) {
   const sparseScore = () => score(props.explain.sparse_score);
   const fusedScore = () => score(props.explain.fused_score);
   const threatBoost = () => score(props.explain.threat_boost);
+  const maxScore = createMemo(() =>
+    Math.max(denseScore(), sparseScore(), fusedScore(), threatBoost(), 1),
+  );
   const bars = () => [
     {
       label: 'Semantic',
@@ -56,7 +59,7 @@ export function ScoreChart(props: { explain: ExplainResponse }) {
                 <div
                   class={`chart-fill ${bar.className}`}
                   style={{
-                    width: `${Math.max(0, Math.min(bar.value, 1)) * 100}%`,
+                    width: `${Math.max(0, Math.min(bar.value / maxScore(), 1)) * 100}%`,
                   }}
                 />
               </div>

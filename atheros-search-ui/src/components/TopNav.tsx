@@ -1,5 +1,5 @@
 import { A, useLocation } from '@solidjs/router';
-import { Activity, Keyboard, Search } from 'lucide-solid';
+import { Activity, Keyboard, Network, Search } from 'lucide-solid';
 import { ApiStatus } from './ApiStatus';
 import { ShortcutsModal } from './ShortcutsModal';
 import { ThemeToggle } from './ThemeToggle';
@@ -27,6 +27,18 @@ export function TopNav() {
             >
               <Search size={16} aria-hidden="true" />
               <span>Search</span>
+            </A>
+          </li>
+          <li>
+            <A
+              href="/graph"
+              class="nav-link"
+              aria-current={
+                location.pathname === '/graph' ? 'page' : undefined
+              }
+            >
+              <Network size={16} aria-hidden="true" />
+              <span>Graph</span>
             </A>
           </li>
         </ul>

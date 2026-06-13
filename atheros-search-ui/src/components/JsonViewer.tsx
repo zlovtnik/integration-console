@@ -44,6 +44,7 @@ export function JsonViewer(props: { json: string }) {
         </button>
       </div>
       <pre class="json-code mono">
+        {/* syntaxHighlight escapes all user-visible content before adding spans. */}
         {/* eslint-disable-next-line solid/no-innerhtml */}
         <code innerHTML={syntaxHighlight(formatted())} />
       </pre>

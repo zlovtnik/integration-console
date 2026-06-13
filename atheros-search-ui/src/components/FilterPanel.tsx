@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   type JSX,
@@ -16,7 +17,9 @@ import {
   setTopK,
   topK,
 } from '~/stores/searchStore';
-import { suggestions } from '~/stores/suggestStore';
+import { fetchSuggestions } from '~/hooks/useSuggest';
+import { suggestLoaded, suggestions } from '~/stores/suggestStore';
+import { debounce } from '~/utils/debounce';
 
 function splitList(value: string): string[] | undefined {
   const values = value
@@ -66,6 +69,14 @@ function FilterSection(props: {
 const DRAWER_MEDIA = '(max-width: 1119px)';
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+const SECURITY_FLAG_OPTIONS = [
+  { label: 'WPA', value: 1 },
+  { label: 'WPA2 / RSN', value: 2 },
+  { label: 'WPA3', value: 4 },
+  { label: 'WPS', value: 8 },
+  { label: 'PMF required', value: 16 },
+  { label: 'PMF capable', value: 32 },
+];
 
 export function FilterPanel(props: {
   open: boolean;
@@ -74,6 +85,26 @@ export function FilterPanel(props: {
 }) {
   const [topKInput, setTopKInput] = createSignal(String(topK()));
   const [isDrawer, setIsDrawer] = createSignal(false);
+  const dateRangeError = createMemo(() => {
+    if (!filters.observed_after || !filters.observed_before) return '';
+    return filters.observed_after > filters.observed_before
+      ? 'After must be earlier than before.'
+      : '';
+  });
+  const currentLocalMax = createMemo(() => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 16);
+  });
+  const observedAfterMax = createMemo(() => {
+    if (!filters.observed_before) return currentLocalMax();
+    return filters.observed_before < currentLocalMax()
+      ? filters.observed_before
+      : currentLocalMax();
+  });
+  const requestSuggestions = debounce((prefix: string) => {
+    void fetchSuggestions(prefix.trim());
+  }, 250);
   let panelRef: HTMLElement | undefined;
   let closeButtonRef: HTMLButtonElement | undefined;
   let wasOpen = false;
@@ -136,6 +167,12 @@ export function FilterPanel(props: {
 
   function resetTopKInput() {
     setTopKInput(String(topK()));
+  }
+
+  function setSecurityFlag(flag: number, enabled: boolean) {
+    const current = filters.security_flags_mask ?? 0;
+    const next = enabled ? current | flag : current & ~flag;
+    setFilters('security_flags_mask', next > 0 ? next : undefined);
   }
 
   function focusableItems() {
@@ -215,6 +252,10 @@ export function FilterPanel(props: {
         </div>
 
         <div class="field-stack">
+          <Show when={!suggestLoaded()}>
+            <p class="filter-note">Suggestions unavailable.</p>
+          </Show>
+
           <div class="filter-group filter-group--core">
             <label class="field">
               <span>
@@ -259,9 +300,11 @@ export function FilterPanel(props: {
               <input
                 value={filters.ssid ?? ''}
                 list="ssid-suggestions"
-                onInput={(event) =>
-                  setFilters('ssid', event.currentTarget.value || undefined)
-                }
+                onInput={(event) => {
+                  const value = event.currentTarget.value;
+                  setFilters('ssid', value || undefined);
+                  requestSuggestions(value);
+                }}
               />
             </label>
             <datalist id="ssid-suggestions">
@@ -276,12 +319,11 @@ export function FilterPanel(props: {
                 inputmode="text"
                 placeholder="aa:bb:cc:dd:ee:ff"
                 value={filters.source_mac ?? ''}
-                onInput={(event) =>
-                  setFilters(
-                    'source_mac',
-                    event.currentTarget.value || undefined,
-                  )
-                }
+                onInput={(event) => {
+                  const value = event.currentTarget.value;
+                  setFilters('source_mac', value || undefined);
+                  requestSuggestions(value);
+                }}
               />
             </label>
 
@@ -293,6 +335,9 @@ export function FilterPanel(props: {
               <input
                 value={joinList(filters.location_ids)}
                 list="location-suggestions"
+                onInput={(event) =>
+                  requestSuggestions(event.currentTarget.value)
+                }
                 onChange={(event) =>
                   setFilters(
                     'location_ids',
@@ -315,6 +360,9 @@ export function FilterPanel(props: {
               <input
                 value={joinList(filters.sensor_ids)}
                 list="sensor-suggestions"
+                onInput={(event) =>
+                  requestSuggestions(event.currentTarget.value)
+                }
                 onChange={(event) =>
                   setFilters('sensor_ids', splitList(event.currentTarget.value))
                 }
@@ -380,6 +428,8 @@ export function FilterPanel(props: {
               <input
                 type="datetime-local"
                 value={filters.observed_after ?? ''}
+                max={observedAfterMax()}
+                aria-invalid={Boolean(dateRangeError()) || undefined}
                 onInput={(event) =>
                   setFilters(
                     'observed_after',
@@ -397,6 +447,9 @@ export function FilterPanel(props: {
               <input
                 type="datetime-local"
                 value={filters.observed_before ?? ''}
+                min={filters.observed_after ?? undefined}
+                max={currentLocalMax()}
+                aria-invalid={Boolean(dateRangeError()) || undefined}
                 onInput={(event) =>
                   setFilters(
                     'observed_before',
@@ -405,9 +458,14 @@ export function FilterPanel(props: {
                 }
               />
             </label>
+            <Show when={dateRangeError()}>
+              <p class="field-error" role="alert">
+                {dateRangeError()}
+              </p>
+            </Show>
           </FilterSection>
 
-          <FilterSection title="Threat Filters">
+          <FilterSection title="Threat Signals">
             <label class="switch-row">
               <input
                 type="checkbox"
@@ -470,6 +528,31 @@ export function FilterPanel(props: {
                 }
               />
             </label>
+
+            <details class="flag-disclosure">
+              <summary>Named flags</summary>
+              <div class="check-grid">
+                <For each={SECURITY_FLAG_OPTIONS}>
+                  {(option) => (
+                    <label class="check-row">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(
+                          (filters.security_flags_mask ?? 0) & option.value,
+                        )}
+                        onChange={(event) =>
+                          setSecurityFlag(
+                            option.value,
+                            event.currentTarget.checked,
+                          )
+                        }
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  )}
+                </For>
+              </div>
+            </details>
           </FilterSection>
         </div>
       </aside>

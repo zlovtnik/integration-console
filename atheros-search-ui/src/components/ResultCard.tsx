@@ -1,3 +1,4 @@
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- J/K shortcuts move focus to the full result context, not a nested action. */
 import { A } from '@solidjs/router';
 import { createSignal, For, Show } from 'solid-js';
 import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-solid';
@@ -48,6 +49,7 @@ export function ResultCard(props: {
   result: SearchResult;
   queryText: string;
   kind: string;
+  focused?: boolean;
 }) {
   const [expanded, setExpanded] = createSignal(false);
   const safeId = () => domId(props.result.source_key);
@@ -56,14 +58,22 @@ export function ResultCard(props: {
 
   return (
     <article
-      class={`result-card result-card--${props.result.source_kind || 'unknown'}`}
+      class={`result-card result-card--${props.result.source_kind || 'unknown'} ${
+        props.focused ? 'result-card--focused' : ''
+      }`}
       aria-labelledby={titleId()}
       data-source-key={props.result.source_key}
+      tabIndex={props.focused ? 0 : -1}
     >
       <header class="card-header">
-        <h3 id={titleId()} class="card-title mono">
-          {props.result.source_key}
-        </h3>
+        <div class="card-title-wrap">
+          <Show when={props.result.source_table}>
+            <span class="source-table-badge">{props.result.source_table}</span>
+          </Show>
+          <h3 id={titleId()} class="card-title mono">
+            {props.result.source_key}
+          </h3>
+        </div>
         <div class="card-badges">
           <KindBadge kind={props.result.source_kind || props.kind} />
           <For each={props.result.boost_reasons ?? []}>
@@ -130,7 +140,7 @@ export function ResultCard(props: {
         </A>
       </div>
 
-      <Show when={expanded()}>
+      <Show when={expanded()} keyed={false}>
         <div id={detailId()} class="detail-json">
           <Show when={Object.keys(props.result.highlights ?? {}).length > 0}>
             <div class="detail-highlights">

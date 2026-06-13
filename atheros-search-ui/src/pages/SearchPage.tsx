@@ -1,9 +1,10 @@
-import { useNavigate } from '@solidjs/router';
+import { useLocation, useNavigate } from '@solidjs/router';
 import {
   createEffect,
   createMemo,
   createSignal,
   For,
+  onCleanup,
   onMount,
   Show,
 } from 'solid-js';
@@ -36,12 +37,12 @@ import {
   mode,
   pushHistory,
   query,
+  replaceResults,
   results,
   setError,
   setLoading,
   setMeta,
   setQuery,
-  setResults,
   streaming,
   topK,
 } from '~/stores/searchStore';
@@ -50,6 +51,20 @@ import { friendlyError } from '~/utils/friendlyError';
 
 function describeError(errorValue: unknown): string {
   if (errorValue instanceof ApiError) {
+    const code = errorValue.code?.toLowerCase();
+    if (
+      code === 'invalid_argument' ||
+      code === 'invalid_query' ||
+      code === 'validation_error'
+    ) {
+      return `HTTP ${errorValue.status}: Invalid search request. ${errorValue.message}`;
+    }
+    if (code === 'unauthenticated' || code === 'permission_denied') {
+      return `HTTP ${errorValue.status}: Authentication required.`;
+    }
+    if (code === 'rate_limited' || code === 'resource_exhausted') {
+      return `HTTP ${errorValue.status}: Too many search requests. Try again shortly.`;
+    }
     return `HTTP ${errorValue.status}: ${errorValue.message}`;
   }
   if (errorValue instanceof Error && errorValue.name === 'AbortError') {
@@ -68,49 +83,90 @@ const EXAMPLE_QUERIES = [
   'aa:bb:cc:dd:ee:ff',
 ];
 
+function readLiveStreamPreference(): boolean {
+  try {
+    const stored = window.localStorage.getItem('atheros-search.live-stream');
+    return stored === null ? true : stored === 'true';
+  } catch {
+    return true;
+  }
+}
+
 export default function SearchPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [filtersOpen, setFiltersOpen] = createSignal(false);
   const [showAdvanced, setShowAdvanced] = createSignal(false);
-  const [useStream, setUseStream] = createSignal(true);
+  const [useStream, setUseStream] = createSignal(readLiveStreamPreference());
   const [searched, setSearched] = createSignal(false);
   const [lastSearchMs, setLastSearchMs] = createSignal<number | null>(null);
   const [activeResultIndex, setActiveResultIndex] = createSignal(-1);
-  const [autoRan, setAutoRan] = createSignal(false);
+  const [lastAutoQuery, setLastAutoQuery] = createSignal('');
   const streamSearch = useSearchStream();
   const restoreScroll = useScrollRestoration();
   let abortController: AbortController | null = null;
   let filterButton: HTMLButtonElement | undefined;
+  let searchDebounceTimer: number | undefined;
 
   useSuggest();
   useUrlSync();
 
   onMount(() => {
-    document.title = 'Search - atheros search';
     window.scrollTo(0, restoreScroll());
   });
 
   createEffect(() => {
-    if (!autoRan() && query().trim()) {
-      setAutoRan(true);
-      void runSearch();
+    document.title = query().trim()
+      ? `${query().trim()} - atheros search`
+      : 'Search - atheros search';
+  });
+
+  createEffect(() => {
+    try {
+      window.localStorage.setItem(
+        'atheros-search.live-stream',
+        String(useStream()),
+      );
+    } catch {
+      // Preference persistence can be disabled by browser policy.
     }
+  });
+
+  createEffect(() => {
+    const urlQuery =
+      new URLSearchParams(location.search).get('q')?.trim() ?? '';
+    const active = document.activeElement as HTMLElement | null;
+    const localEditInProgress = Boolean(active?.closest('.search-controls'));
+
+    if (!urlQuery || urlQuery === lastAutoQuery() || localEditInProgress) {
+      return;
+    }
+    if (urlQuery !== query().trim()) return;
+
+    setLastAutoQuery(urlQuery);
+    queueSearch();
   });
 
   const resultMeta = createMemo(() => {
     if (loading()) return 'Searching...';
-    if (streaming())
-      return `Streaming ${results().length} result${results().length === 1 ? '' : 's'}`;
-    if (results().length > 0) {
+    if (streaming()) {
+      const reconnecting = streamSearch.retrying() ? 'Reconnecting - ' : '';
+      return `${reconnecting}Streaming ${results.length} / ${topK()}`;
+    }
+    if (results.length > 0) {
       const modeLabel =
         meta.mode_used?.replace('SEARCH_MODE_', '').toLowerCase() ??
         mode().replace('SEARCH_MODE_', '').toLowerCase();
       const timing = lastSearchMs() === null ? '' : ` · ${lastSearchMs()} ms`;
-      return `${results().length} result${results().length === 1 ? '' : 's'} · ${modeLabel}${timing}`;
+      return `${results.length} result${results.length === 1 ? '' : 's'} · ${modeLabel}${timing}`;
     }
     if (searched()) return `No results for "${query()}"`;
     return 'Ready';
   });
+
+  const streamingProgress = createMemo(() =>
+    Math.min(100, (results.length / Math.max(1, topK())) * 100),
+  );
 
   const skeletons = createMemo(() =>
     Array.from(
@@ -120,6 +176,26 @@ export default function SearchPage() {
   );
 
   const errorCopy = createMemo(() => friendlyError(error() ?? ''));
+
+  createEffect(() => {
+    if (results.length === 0) {
+      setActiveResultIndex(-1);
+      return;
+    }
+
+    if (activeResultIndex() >= results.length) {
+      setActiveResultIndex(results.length - 1);
+    }
+  });
+
+  onCleanup(() => window.clearTimeout(searchDebounceTimer));
+
+  function queueSearch() {
+    window.clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = window.setTimeout(() => {
+      void runSearch();
+    }, 50);
+  }
 
   async function runSearch() {
     const request = buildSearchRequest();
@@ -151,10 +227,11 @@ export default function SearchPage() {
 
     try {
       const response = await api.search(request, currentController.signal);
-      setResults(response.results ?? []);
+      replaceResults(response.results ?? []);
       setMeta(response);
     } catch (searchError) {
-      setResults([]);
+      if (currentController.signal.aborted) return;
+      replaceResults([]);
       setError(describeError(searchError));
     } finally {
       if (abortController === currentController) {
@@ -177,15 +254,15 @@ export default function SearchPage() {
   }
 
   function focusResult(index: number) {
-    const explainLinks = Array.from(
+    const cards = Array.from(
       document.querySelectorAll<HTMLElement>(
-        '.result-card:not(.skeleton-card) .card-actions a',
+        '.result-card:not(.skeleton-card)',
       ),
     );
-    if (explainLinks.length === 0) return;
-    const next = Math.max(0, Math.min(index, explainLinks.length - 1));
+    if (cards.length === 0) return;
+    const next = Math.max(0, Math.min(index, cards.length - 1));
     setActiveResultIndex(next);
-    explainLinks[next]?.focus();
+    queueMicrotask(() => cards[next]?.focus());
   }
 
   function openFocusedResult() {
@@ -203,7 +280,7 @@ export default function SearchPage() {
 
   useKeyboardShortcuts({
     focusSearch,
-    submitSearch: () => void runSearch(),
+    submitSearch: queueSearch,
     toggleFilters: () => setFiltersOpen((value) => !value),
     escape: () => {
       if (shortcutsOpen()) setShortcutsOpen(false);
@@ -250,13 +327,13 @@ export default function SearchPage() {
           </div>
 
           <div class="search-controls">
-            <SearchBar onSubmit={() => void runSearch()} />
+            <SearchBar onSubmit={queueSearch} />
             <div class="control-row">
               <div class="control-inline">
                 <button
                   type="button"
                   class="btn btn-primary"
-                  onClick={() => void runSearch()}
+                  onClick={queueSearch}
                 >
                   <SearchIcon size={16} aria-hidden="true" />
                   <span>Search</span>
@@ -320,7 +397,11 @@ export default function SearchPage() {
             <FilterChips />
           </div>
 
-          <Show when={meta.fallback_reason}>
+          <Show
+            when={
+              meta.fallback_reason && meta.fallback_reason.trim().length > 0
+            }
+          >
             <div class="state-banner state-banner--warn" role="status">
               Embedding backend unavailable - showing keyword results only.{' '}
               {meta.fallback_reason}
@@ -336,6 +417,19 @@ export default function SearchPage() {
             {resultMeta()}
           </h2>
 
+          <Show when={streaming()}>
+            <div
+              class="stream-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={topK()}
+              aria-valuenow={Math.min(results.length, topK())}
+              aria-label="Streaming result progress"
+            >
+              <span style={{ width: `${streamingProgress()}%` }} />
+            </div>
+          </Show>
+
           <section aria-label="Search results" class="result-surface">
             <Show
               when={error()}
@@ -347,7 +441,7 @@ export default function SearchPage() {
                       when={loading()}
                       fallback={
                         <Show
-                          when={results().length > 0}
+                          when={results.length > 0}
                           fallback={
                             <div class="empty-state">
                               <Show
@@ -364,7 +458,7 @@ export default function SearchPage() {
                                               class="example-query-btn"
                                               onClick={() => {
                                                 setQuery(example);
-                                                void runSearch();
+                                                queueSearch();
                                               }}
                                             >
                                               {example}
@@ -389,13 +483,14 @@ export default function SearchPage() {
                             role="list"
                             class="result-list"
                           >
-                            <For each={results()}>
-                              {(result) => (
+                            <For each={results}>
+                              {(result, index) => (
                                 <li>
                                   <ResultCard
                                     result={result}
                                     queryText={query()}
                                     kind={kind()}
+                                    focused={activeResultIndex() === index()}
                                   />
                                 </li>
                               )}
@@ -421,7 +516,7 @@ export default function SearchPage() {
                       {(_, index) => (
                         <li>
                           <Show
-                            when={results()[index()]}
+                            when={results[index()]}
                             fallback={<SkeletonCard />}
                           >
                             {(result) => (
@@ -429,6 +524,7 @@ export default function SearchPage() {
                                 result={result()}
                                 queryText={query()}
                                 kind={kind()}
+                                focused={activeResultIndex() === index()}
                               />
                             )}
                           </Show>

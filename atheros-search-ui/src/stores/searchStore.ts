@@ -9,19 +9,87 @@ import type {
   SearchResult,
 } from '~/api/types';
 
+const HISTORY_STORAGE_KEY = 'atheros-search.history';
+const SESSION_STORAGE_KEY = 'atheros-search.session-id';
+const HISTORY_LIMIT = 50;
+const DEFAULT_KIND: SearchKind = 'SEARCH_KIND_EVENT';
+const DEFAULT_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+
+function readSessionList(key: string): string[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(key) ?? '[]',
+    ) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function writeSessionList(key: string, values: string[]) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify(values.slice(0, HISTORY_LIMIT)),
+    );
+  } catch {
+    // Storage can be disabled by browser policy.
+  }
+}
+
+function createFallbackSessionId(): string {
+  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function tabSessionId(): string {
+  if (typeof window === 'undefined') return createFallbackSessionId();
+
+  try {
+    const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (existing) return existing;
+    const next =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : createFallbackSessionId();
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, next);
+    return next;
+  } catch {
+    return createFallbackSessionId();
+  }
+}
+
+export function normalizeSearchKind(value: SearchKind): SearchKind {
+  return value === 'SEARCH_KIND_UNSPECIFIED' ? DEFAULT_KIND : value;
+}
+
+export function normalizeSearchMode(value: SearchMode): SearchMode {
+  return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_MODE : value;
+}
+
 export const [query, setQuery] = createSignal('');
-export const [kind, setKind] = createSignal<SearchKind>('SEARCH_KIND_EVENT');
-export const [mode, setMode] = createSignal<SearchMode>('SEARCH_MODE_HYBRID');
+export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_KIND);
+export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_MODE);
 export const [topK, setTopK] = createSignal(20);
 export const [minSimilarity, setMinSimilarity] = createSignal(0);
 export const [filters, setFilters] = createStore<SearchFilters>({});
 
-export const [results, setResults] = createSignal<SearchResult[]>([]);
+export const [results, setResults] = createStore<SearchResult[]>([]);
 export const [meta, setMeta] = createStore<Partial<SearchResponse>>({});
 export const [loading, setLoading] = createSignal(false);
 export const [streaming, setStreaming] = createSignal(false);
 export const [error, setError] = createSignal<string | null>(null);
-export const [history, setHistory] = createSignal<string[]>([]);
+export const [history, setHistory] = createSignal<string[]>(
+  readSessionList(HISTORY_STORAGE_KEY),
+);
 
 function compactList(values: string[] | undefined): string[] | undefined {
   const next = values?.map((value) => value.trim()).filter(Boolean);
@@ -45,7 +113,10 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
   if (source.observed_before) next.observed_before = source.observed_before;
   if (source.threat_only) next.threat_only = true;
   if (source.handshake_only) next.handshake_only = true;
-  if (typeof source.security_flags_mask === 'number' && !Number.isNaN(source.security_flags_mask)) {
+  if (
+    typeof source.security_flags_mask === 'number' &&
+    !Number.isNaN(source.security_flags_mask)
+  ) {
     next.security_flags_mask = source.security_flags_mask;
   }
 
@@ -55,9 +126,10 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
 export function buildSearchRequest(): SearchRequest {
   const request: SearchRequest = {
     query: query().trim(),
-    kind: kind(),
-    mode: mode(),
+    kind: normalizeSearchKind(kind()),
+    mode: normalizeSearchMode(mode()),
     top_k: topK(),
+    session_id: tabSessionId(),
   };
 
   if (minSimilarity() > 0) {
@@ -75,11 +147,26 @@ export function buildSearchRequest(): SearchRequest {
 export function pushHistory(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return;
-  setHistory((items) => [trimmed, ...items.filter((item) => item !== trimmed)].slice(0, 50));
+  setHistory((items) => {
+    const next = [trimmed, ...items.filter((item) => item !== trimmed)].slice(
+      0,
+      HISTORY_LIMIT,
+    );
+    writeSessionList(HISTORY_STORAGE_KEY, next);
+    return next;
+  });
+}
+
+export function replaceResults(next: SearchResult[]) {
+  setResults(reconcile(next));
+}
+
+export function appendResult(result: SearchResult) {
+  setResults(results.length, result);
 }
 
 export function clearResults() {
-  setResults([]);
+  replaceResults([]);
   setMeta(reconcile({}));
   setError(null);
 }
