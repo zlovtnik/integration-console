@@ -31,6 +31,7 @@ export function useForceGraph(
   let sim: d3.Simulation<SimNode, SimEdge> | null = null;
   let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
   let nodeById = new Map<string, SimNode>();
+  let fitTimer: number | undefined;
 
   function build() {
     const el = svgRef();
@@ -38,6 +39,7 @@ export function useForceGraph(
 
     sim?.stop();
     sim = null;
+    window.clearTimeout(fitTimer);
     d3.select(el).selectAll('*').remove();
 
     const bounds = el.getBoundingClientRect();
@@ -108,6 +110,10 @@ export function useForceGraph(
       .attr('stroke-opacity', 0.5)
       .attr('marker-end', (edge) => `url(#arrow-${edge.kind})`);
 
+    link
+      .append('title')
+      .text((edge) => edge.label || edge.kind.replaceAll('_', ' '));
+
     const dragBehavior = d3
       .drag<SVGGElement, SimNode>()
       .on('start', (event, node) => {
@@ -154,9 +160,9 @@ export function useForceGraph(
       .attr('stroke-opacity', 0.25);
 
     node
-      .append('circle')
+      .append('path')
       .attr('class', 'graph-node-body')
-      .attr('r', nodeRadius)
+      .attr('d', nodeShapePath)
       .attr('fill', (item) => `${nodeColor(item)}28`)
       .attr('stroke', (item) => nodeColor(item))
       .attr('stroke-width', 1.5);
@@ -196,9 +202,12 @@ export function useForceGraph(
           .distance((edge) => linkDistance(edge.kind))
           .strength(0.4),
       )
-      .force('charge', d3.forceManyBody().strength(-280))
+      .force('charge', d3.forceManyBody().strength(-210))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide<SimNode>((item) => nodeRadius(item) + 18))
+      .force(
+        'collide',
+        d3.forceCollide<SimNode>((item) => nodeRadius(item) + 14),
+      )
       .on('tick', () => {
         link
           .attr('x1', (edge) => (edge.source as SimNode).x ?? 0)
@@ -214,9 +223,11 @@ export function useForceGraph(
     applyVisibility();
     applySelection();
     applyPinned();
+    fitTimer = window.setTimeout(() => fitToGraph(), 450);
   }
 
   function resetZoom() {
+    if (fitToGraph()) return;
     const el = svgRef();
     if (!el || !zoomBehavior) return;
     d3.select<SVGSVGElement, unknown>(el).call(
@@ -225,7 +236,47 @@ export function useForceGraph(
     );
   }
 
+  function fitToGraph(): boolean {
+    const el = svgRef();
+    if (!el || !zoomBehavior || nodeById.size === 0) return false;
+    const positioned = Array.from(nodeById.values()).filter(
+      (node) => Number.isFinite(node.x) && Number.isFinite(node.y),
+    );
+    if (positioned.length === 0) return false;
+
+    const bounds = el.getBoundingClientRect();
+    const width = Math.max(bounds.width || el.clientWidth, 320);
+    const height = Math.max(bounds.height || el.clientHeight, 240);
+    const padding = 56;
+    const minX = d3.min(positioned, (node) => node.x ?? 0) ?? 0;
+    const maxX = d3.max(positioned, (node) => node.x ?? 0) ?? 0;
+    const minY = d3.min(positioned, (node) => node.y ?? 0) ?? 0;
+    const maxY = d3.max(positioned, (node) => node.y ?? 0) ?? 0;
+    const graphWidth = Math.max(maxX - minX, 1);
+    const graphHeight = Math.max(maxY - minY, 1);
+    const scale = Math.max(
+      0.12,
+      Math.min(
+        2,
+        (width - padding * 2) / graphWidth,
+        (height - padding * 2) / graphHeight,
+      ),
+    );
+    const centerX = minX + graphWidth / 2;
+    const centerY = minY + graphHeight / 2;
+    const transform = d3.zoomIdentity
+      .translate(width / 2 - centerX * scale, height / 2 - centerY * scale)
+      .scale(scale);
+
+    d3.select<SVGSVGElement, unknown>(el).call(
+      zoomBehavior.transform,
+      transform,
+    );
+    return true;
+  }
+
   function stop() {
+    window.clearTimeout(fitTimer);
     sim?.stop();
     sim = null;
   }
@@ -254,9 +305,41 @@ export function useForceGraph(
     const el = svgRef();
     if (!el) return;
     const selected = options.selectedNodeId?.() ?? null;
+    const related = new Set<string>();
+    if (selected) {
+      related.add(selected);
+      for (const edge of edges()) {
+        if (edge.source === selected) related.add(edge.target);
+        if (edge.target === selected) related.add(edge.source);
+      }
+    }
+
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
-      .classed('selected', (item) => item.id === selected);
+      .classed('selected', (item) => item.id === selected)
+      .classed(
+        'related',
+        (item) =>
+          selected !== null && item.id !== selected && related.has(item.id),
+      )
+      .classed('dimmed', (item) => selected !== null && !related.has(item.id));
+
+    d3.select(el)
+      .selectAll<SVGLineElement, SimEdge>('.graph-link')
+      .classed('selected', (edge) => {
+        if (!selected) return false;
+        return (
+          endpointId(edge.source) === selected ||
+          endpointId(edge.target) === selected
+        );
+      })
+      .classed('dimmed', (edge) => {
+        if (!selected) return false;
+        return (
+          endpointId(edge.source) !== selected &&
+          endpointId(edge.target) !== selected
+        );
+      });
   }
 
   function applyPinned() {
@@ -273,6 +356,10 @@ export function useForceGraph(
       return nodeById.get(value)?.kind ?? 'device';
     }
     return value.kind;
+  }
+
+  function endpointId(value: string | SimNode): string {
+    return typeof value === 'string' ? value : value.id;
   }
 
   onMount(build);
@@ -300,6 +387,46 @@ export function nodeRadius(node: GraphNode): number {
   if (node.kind === 'ap') return 10;
   if (node.kind === 'shadow_alert' || node.kind === 'alert') return 8;
   return 7;
+}
+
+function nodeShapePath(node: GraphNode): string {
+  const r = nodeRadius(node);
+  switch (node.kind) {
+    case 'device':
+      return `M0,${-r}L${r},0L0,${r}L${-r},0Z`;
+    case 'cluster':
+      return polygonPath(r, 6);
+    case 'ap':
+      return polygonPath(r * 1.15, 3, -Math.PI / 2);
+    case 'client':
+      return `M${-r},${-r}L${r},${-r}L${r},${r}L${-r},${r}Z`;
+    case 'shadow_alert':
+      return polygonPath(r * 1.1, 8);
+    case 'alert':
+      return polygonPath(r * 1.15, 3, Math.PI / 2);
+    default:
+      return circlePath(r);
+  }
+}
+
+function polygonPath(
+  radius: number,
+  sides: number,
+  rotation = -Math.PI / 2,
+): string {
+  const points = Array.from({ length: sides }, (_, index) => {
+    const angle = rotation + (index * Math.PI * 2) / sides;
+    return `${round(Math.cos(angle) * radius)},${round(Math.sin(angle) * radius)}`;
+  });
+  return `M${points.join('L')}Z`;
+}
+
+function circlePath(radius: number): string {
+  return `M${-radius},0a${radius},${radius} 0 1,0 ${radius * 2},0a${radius},${radius} 0 1,0 ${-radius * 2},0`;
+}
+
+function round(value: number): number {
+  return Number(value.toFixed(2));
 }
 
 export function nodeColor(node: Pick<GraphNode, 'kind'>): string {

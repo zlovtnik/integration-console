@@ -158,7 +158,8 @@
 .graph-node-ring {
   transition:
     stroke-width var(--duration-fast),
-    stroke-opacity var(--duration-fast);
+    stroke-opacity var(--duration-fast),
+    opacity var(--duration-fast);
 }
 
 .graph-node.selected .graph-node-body {
@@ -175,8 +176,29 @@
   fill: var(--color-text-primary);
 }
 
+.graph-node.related .graph-node-ring {
+  stroke-opacity: 0.65;
+  stroke-width: 1.25;
+}
+
+.graph-node.dimmed {
+  opacity: 0.22;
+}
+
 .graph-link {
   pointer-events: none;
+  transition:
+    opacity var(--duration-fast),
+    stroke-width var(--duration-fast);
+}
+
+.graph-link.selected {
+  stroke-width: 2.5;
+  stroke-opacity: 0.9;
+}
+
+.graph-link.dimmed {
+  stroke-opacity: 0.12;
 }
 
 .graph-legend {

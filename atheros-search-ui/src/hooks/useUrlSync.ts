@@ -44,6 +44,7 @@ export function useUrlSync() {
       const sensorIds = asList(params.sensor);
       const frameSubtypes = asList(params.frame);
       const tags = asList(params.tag);
+      const macs = asList(params.mac);
       const mask = first(params.mask);
 
       if (locationIds) urlFilters.location_ids = locationIds;
@@ -51,8 +52,11 @@ export function useUrlSync() {
       if (typeof params.ssid === 'string' && params.ssid) {
         urlFilters.ssid = params.ssid;
       }
-      if (typeof params.mac === 'string' && params.mac) {
-        urlFilters.source_mac = params.mac;
+      if (macs?.length === 1) {
+        const mac = macs[0];
+        if (mac) urlFilters.source_mac = mac;
+      } else if (macs && macs.length > 1) {
+        urlFilters.source_macs = macs;
       }
       if (frameSubtypes) urlFilters.frame_subtypes = frameSubtypes;
       if (typeof params.after === 'string' && params.after) {
@@ -105,7 +109,9 @@ export function useUrlSync() {
         ? nextFilters.sensor_ids
         : undefined,
       ssid: nextFilters.ssid || undefined,
-      mac: nextFilters.source_mac || undefined,
+      mac: nextFilters.source_macs?.length
+        ? nextFilters.source_macs
+        : nextFilters.source_mac || undefined,
       frame: nextFilters.frame_subtypes?.length
         ? nextFilters.frame_subtypes
         : undefined,

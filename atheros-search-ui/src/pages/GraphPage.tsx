@@ -1,4 +1,11 @@
-import { createEffect, createMemo, onCleanup, onMount, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+} from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { GraphControls } from '~/components/graph/GraphControls';
 import { GraphLegend } from '~/components/graph/GraphLegend';
@@ -9,6 +16,7 @@ import { useSuggest } from '~/hooks/useSuggest';
 import {
   graphEdges,
   graphError,
+  graphFilters,
   graphLoading,
   graphNodes,
   pinnedNodeIds,
@@ -20,6 +28,7 @@ import '~/styles/graph.css';
 
 export default function GraphPage() {
   let svgRef: SVGSVGElement | undefined;
+  let filterReloadTimer: number | undefined;
   const { load } = useGraph();
 
   useSuggest();
@@ -34,6 +43,19 @@ export default function GraphPage() {
 
   const selected = createMemo(
     () => graphNodes().find((node) => node.id === selectedNodeId()) ?? null,
+  );
+  const filterKey = createMemo(() =>
+    JSON.stringify({
+      location_ids: graphFilters.location_ids ?? [],
+      sensor_ids: graphFilters.sensor_ids ?? [],
+      source_mac: graphFilters.source_mac ?? '',
+      ssid: graphFilters.ssid ?? '',
+      kinds: graphFilters.kinds ?? [],
+      threat_only: graphFilters.threat_only ?? false,
+      observed_after: graphFilters.observed_after ?? '',
+      observed_before: graphFilters.observed_before ?? '',
+      limit: graphFilters.limit ?? 200,
+    }),
   );
 
   onMount(() => {
@@ -66,6 +88,21 @@ export default function GraphPage() {
     graphEdges();
     graph.rebuild();
   });
+
+  createEffect(
+    on(
+      filterKey,
+      () => {
+        window.clearTimeout(filterReloadTimer);
+        filterReloadTimer = window.setTimeout(() => {
+          void load();
+        }, 250);
+      },
+      { defer: true },
+    ),
+  );
+
+  onCleanup(() => window.clearTimeout(filterReloadTimer));
 
   return (
     <main id="main-content" class="graph-page" tabIndex={-1}>

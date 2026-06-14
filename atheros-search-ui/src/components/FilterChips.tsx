@@ -67,6 +67,14 @@ export function FilterChips() {
         label: filters.source_mac,
         remove: () => setFilters('source_mac', undefined),
       });
+    filters.source_macs?.forEach((value) =>
+      next.push({
+        id: `mac-${value}`,
+        label: value,
+        remove: () =>
+          setFilters('source_macs', (items) => removeListItem(items, value)),
+      }),
+    );
     if (filters.observed_after)
       next.push({
         id: 'after',

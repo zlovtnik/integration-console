@@ -23,6 +23,7 @@ export interface SearchFilters {
   sensor_ids?: string[];
   ssid?: string;
   source_mac?: string;
+  source_macs?: string[];
   frame_subtypes?: string[];
   observed_after?: string;
   observed_before?: string;
@@ -122,6 +123,10 @@ export interface GraphNode {
   first_seen?: string;
   last_seen?: string;
   resolved_at?: string;
+  event_source_macs?: string[];
+  event_ssids?: string[];
+  explain_source_key?: string;
+  explain_kind?: SearchKind;
 }
 
 export type NodeKind =
@@ -174,9 +179,13 @@ export interface GraphFilters {
 }
 
 export function isSearchKind(value: unknown): value is SearchKind {
-  return typeof value === 'string' && SEARCH_KINDS.includes(value as SearchKind);
+  return (
+    typeof value === 'string' && SEARCH_KINDS.includes(value as SearchKind)
+  );
 }
 
 export function isSearchMode(value: unknown): value is SearchMode {
-  return typeof value === 'string' && SEARCH_MODES.includes(value as SearchMode);
+  return (
+    typeof value === 'string' && SEARCH_MODES.includes(value as SearchMode)
+  );
 }

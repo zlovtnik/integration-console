@@ -2,7 +2,12 @@ import { A } from '@solidjs/router';
 import { createMemo, For, Show } from 'solid-js';
 import { Pin, PinOff, X } from 'lucide-solid';
 import type { GraphNode } from '~/api/types';
-import { graphEdges, graphNodes, pinnedNodeIds, togglePin } from '~/stores/graphStore';
+import {
+  graphEdges,
+  graphNodes,
+  pinnedNodeIds,
+  togglePin,
+} from '~/stores/graphStore';
 import { nodeKindLabel } from '~/hooks/useForceGraph';
 
 function formatDate(value: string | undefined): string {
@@ -18,11 +23,6 @@ function formatValue(value: string | number | boolean | undefined): string {
   return String(value);
 }
 
-function sourceKey(node: GraphNode): string {
-  if (node.mac) return node.mac;
-  return node.id.slice(node.id.indexOf(':') + 1);
-}
-
 function DetailRow(props: {
   label: string;
   value?: string | number | boolean | undefined;
@@ -31,9 +31,58 @@ function DetailRow(props: {
   return (
     <div class="graph-detail-row">
       <dt>{props.label}</dt>
-      <dd>{props.date ? formatDate(String(props.value ?? '')) : formatValue(props.value)}</dd>
+      <dd>
+        {props.date
+          ? formatDate(String(props.value ?? ''))
+          : formatValue(props.value)}
+      </dd>
     </div>
   );
+}
+
+function compact(values: (string | undefined)[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]),
+  );
+}
+
+function eventSourceMacs(node: GraphNode): string[] {
+  const explicit = compact(node.event_source_macs ?? []);
+  if (explicit.length > 0) return explicit;
+  return compact([node.mac]);
+}
+
+function eventSSIDs(node: GraphNode): string[] {
+  const explicit = compact(node.event_ssids ?? []);
+  if (explicit.length > 0) return explicit;
+  return compact([node.ssid]);
+}
+
+function eventSearchHref(node: GraphNode): string {
+  const params = new URLSearchParams({
+    q: '*',
+    kind: 'SEARCH_KIND_EVENT',
+    mode: 'SEARCH_MODE_SPARSE',
+    k: '200',
+  });
+  for (const mac of eventSourceMacs(node)) params.append('mac', mac);
+  const ssids = eventSSIDs(node);
+  const ssid = ssids.length === 1 ? ssids[0] : undefined;
+  if (ssid) params.set('ssid', ssid);
+  return `/?${params.toString()}`;
+}
+
+function hasEventScope(node: GraphNode): boolean {
+  return eventSourceMacs(node).length > 0 || eventSSIDs(node).length === 1;
+}
+
+function explainHref(node: GraphNode): string | null {
+  if (!node.explain_source_key) return null;
+  const params = new URLSearchParams({
+    query: node.mac ?? node.label,
+    kind: node.explain_kind ?? 'SEARCH_KIND_DEVICE',
+  });
+  return `/explain/${encodeURIComponent(node.explain_source_key)}?${params.toString()}`;
 }
 
 function NodeLinkList(props: { title: string; nodes: GraphNode[] }) {
@@ -88,8 +137,7 @@ export function GraphNodePanel(props: {
 
   const associatedAP = createMemo(() => {
     const edge = graphEdges().find(
-      (item) =>
-        item.kind === 'association' && item.source === props.node.id,
+      (item) => item.kind === 'association' && item.source === props.node.id,
     );
     return edge ? nodesById().get(edge.target) : undefined;
   });
@@ -97,16 +145,14 @@ export function GraphNodePanel(props: {
   const connectedClients = createMemo(() =>
     graphEdges()
       .filter(
-        (edge) =>
-          edge.kind === 'association' && edge.target === props.node.id,
+        (edge) => edge.kind === 'association' && edge.target === props.node.id,
       )
       .map((edge) => nodesById().get(edge.source))
       .filter((node): node is GraphNode => Boolean(node)),
   );
 
   const pinned = () => pinnedNodeIds().has(props.node.id);
-  const key = () => sourceKey(props.node);
-  const query = () => props.node.mac ?? props.node.label;
+  const explanation = createMemo(() => explainHref(props.node));
 
   return (
     <aside
@@ -129,7 +175,10 @@ export function GraphNodePanel(props: {
             title={pinned() ? 'Unpin node' : 'Pin node'}
             onClick={() => togglePin(props.node.id)}
           >
-            <Show when={pinned()} fallback={<Pin size={16} aria-hidden="true" />}>
+            <Show
+              when={pinned()}
+              fallback={<Pin size={16} aria-hidden="true" />}
+            >
               <PinOff size={16} aria-hidden="true" />
             </Show>
           </button>
@@ -193,7 +242,10 @@ export function GraphNodePanel(props: {
           <h3>Access point</h3>
           <dl class="graph-detail-list">
             <DetailRow label="Enabled" value={props.node.enabled} />
-            <DetailRow label="Connected clients" value={connectedClients().length} />
+            <DetailRow
+              label="Connected clients"
+              value={connectedClients().length}
+            />
           </dl>
         </section>
         <NodeLinkList title="Clients" nodes={connectedClients()} />
@@ -242,20 +294,18 @@ export function GraphNodePanel(props: {
       <section class="graph-panel-section">
         <h3>Actions</h3>
         <div class="graph-panel-links">
-          <A
-            class="btn btn-secondary"
-            href={`/explain/${encodeURIComponent(key())}?query=${encodeURIComponent(
-              query(),
-            )}&kind=SEARCH_KIND_DEVICE`}
-          >
-            Explain
-          </A>
-          <A
-            class="btn btn-secondary"
-            href={`/?q=${encodeURIComponent(query())}&kind=SEARCH_KIND_EVENT`}
-          >
-            Search events
-          </A>
+          <Show when={explanation()}>
+            {(href) => (
+              <A class="btn btn-secondary" href={href()}>
+                Explain
+              </A>
+            )}
+          </Show>
+          <Show when={hasEventScope(props.node)}>
+            <A class="btn btn-secondary" href={eventSearchHref(props.node)}>
+              Search events
+            </A>
+          </Show>
         </div>
       </section>
     </aside>

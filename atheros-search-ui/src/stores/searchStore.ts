@@ -109,6 +109,8 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
   if (tags) next.tags = tags;
   if (source.ssid?.trim()) next.ssid = source.ssid.trim();
   if (source.source_mac?.trim()) next.source_mac = source.source_mac.trim();
+  const sourceMacs = compactList(source.source_macs);
+  if (sourceMacs) next.source_macs = sourceMacs;
   if (source.observed_after) next.observed_after = source.observed_after;
   if (source.observed_before) next.observed_before = source.observed_before;
   if (source.threat_only) next.threat_only = true;
