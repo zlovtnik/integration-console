@@ -33,7 +33,7 @@ describe('createSimNodes', () => {
     expect(node?.y).toBeCloseTo(48.8, 1);
   });
 
-  it('does not seed unpinned nodes', () => {
+  it('seeds unpinned nodes without fixing them', () => {
     const previous = new Map<string, SimNode>([
       [
         graphNode.id,
@@ -49,7 +49,7 @@ describe('createSimNodes', () => {
 
     expect(node?.fx).toBeUndefined();
     expect(node?.fy).toBeUndefined();
-    expect(node?.x).toBeUndefined();
-    expect(node?.y).toBeUndefined();
+    expect(node?.x).toBeCloseTo(132.4, 1);
+    expect(node?.y).toBeCloseTo(48.8, 1);
   });
 });

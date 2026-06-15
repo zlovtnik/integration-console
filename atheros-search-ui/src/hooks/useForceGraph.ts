@@ -145,6 +145,8 @@ export function useForceGraph(
       .join('g')
       .attr('class', 'graph-node')
       .attr('data-kind', (item) => item.kind)
+      .attr('data-node-id', (item) => item.id)
+      .attr('data-label', (item) => item.label)
       .attr('tabindex', 0)
       .attr('role', 'button')
       .attr('aria-label', (item) => `${nodeKindLabel(item.kind)} ${item.label}`)
@@ -219,6 +221,16 @@ export function useForceGraph(
           .strength(0.4),
       )
       .force('charge', d3.forceManyBody().strength(-210))
+      .force(
+        'x',
+        d3.forceX<SimNode>((item) => nodeLaneX(item, width)).strength(0.16),
+      )
+      .force(
+        'y',
+        d3
+          .forceY<SimNode>((item, index) => nodeLaneY(item, index, height))
+          .strength(0.08),
+      )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collide',
@@ -226,13 +238,13 @@ export function useForceGraph(
       )
       .on('tick', () => {
         link
-          .attr('x1', (edge) => (edge.source as SimNode).x ?? 0)
-          .attr('y1', (edge) => (edge.source as SimNode).y ?? 0)
-          .attr('x2', (edge) => (edge.target as SimNode).x ?? 0)
-          .attr('y2', (edge) => (edge.target as SimNode).y ?? 0);
+          .attr('x1', (edge) => finiteCoord((edge.source as SimNode).x))
+          .attr('y1', (edge) => finiteCoord((edge.source as SimNode).y))
+          .attr('x2', (edge) => finiteCoord((edge.target as SimNode).x))
+          .attr('y2', (edge) => finiteCoord((edge.target as SimNode).y));
         node.attr(
           'transform',
-          (item) => `translate(${item.x ?? 0},${item.y ?? 0})`,
+          (item) => `translate(${finiteCoord(item.x)},${finiteCoord(item.y)})`,
         );
       })
       .on('end', () => {
@@ -257,18 +269,20 @@ export function useForceGraph(
     );
   }
 
-  function fitToGraph(): boolean {
+  function fitToGraph(nodeIds?: Set<string>, padding = 56): boolean {
     const el = svgRef();
     if (!el || !zoomBehavior || nodeById.size === 0) return false;
     const positioned = Array.from(nodeById.values()).filter(
-      (node) => Number.isFinite(node.x) && Number.isFinite(node.y),
+      (node) =>
+        Number.isFinite(node.x) &&
+        Number.isFinite(node.y) &&
+        (!nodeIds || nodeIds.has(node.id)),
     );
     if (positioned.length === 0) return false;
 
     const bounds = el.getBoundingClientRect();
     const width = Math.max(bounds.width || el.clientWidth, 320);
     const height = Math.max(bounds.height || el.clientHeight, 240);
-    const padding = 56;
     const minX = d3.min(positioned, (node) => node.x ?? 0) ?? 0;
     const maxX = d3.max(positioned, (node) => node.x ?? 0) ?? 0;
     const minY = d3.min(positioned, (node) => node.y ?? 0) ?? 0;
@@ -371,6 +385,10 @@ export function useForceGraph(
           endpointId(edge.target) !== selected
         );
       });
+
+    if (selected) {
+      queueMicrotask(() => fitToGraph(related, 80));
+    }
   }
 
   function applyPinned(
@@ -432,9 +450,12 @@ export function createSimNodes(
     const next: SimNode = { ...node };
     const previous = previousNodeById.get(node.id);
 
-    if (pinned.has(node.id) && hasFinitePosition(previous)) {
+    if (hasFinitePosition(previous)) {
       next.x = previous.x;
       next.y = previous.y;
+    }
+
+    if (pinned.has(node.id) && hasFinitePosition(previous)) {
       next.fx = previous.x;
       next.fy = previous.y;
     }
@@ -449,6 +470,38 @@ function hasFinitePosition(
   return (
     node !== undefined && Number.isFinite(node.x) && Number.isFinite(node.y)
   );
+}
+
+function finiteCoord(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function nodeLaneX(node: GraphNode, width: number): number {
+  const lanes: Record<NodeKind, number> = {
+    cluster: 0.18,
+    device: 0.34,
+    client: 0.52,
+    ap: 0.72,
+    shadow_alert: 0.88,
+    alert: 0.88,
+    embedding: 0.5,
+  };
+  return width * (lanes[node.kind] ?? 0.5);
+}
+
+function nodeLaneY(node: GraphNode, index: number, height: number): number {
+  const band = Math.max(160, height * 0.78);
+  const top = Math.max(32, (height - band) / 2);
+  const spread = stableUnitValue(node.id || `${node.kind}:${index}`);
+  return top + spread * band;
+}
+
+function stableUnitValue(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return (hash % 997) / 996;
 }
 
 export function nodeRadius(node: GraphNode): number {

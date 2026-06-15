@@ -4,6 +4,10 @@ import { reconcile } from 'solid-js/store';
 import { isSearchKind, isSearchMode, type SearchFilters } from '~/api/types';
 import {
   cleanFilters,
+  DEFAULT_MIN_SIMILARITY,
+  DEFAULT_SEARCH_KIND,
+  DEFAULT_SEARCH_MODE,
+  DEFAULT_TOP_K,
   filters,
   kind,
   minSimilarity,
@@ -11,6 +15,7 @@ import {
   normalizeSearchKind,
   normalizeSearchMode,
   query,
+  resetSearchControlsFromUrlDefaults,
   setFilters,
   setKind,
   setMinSimilarity,
@@ -43,6 +48,7 @@ export function useUrlSync() {
 
   onMount(() => {
     batch(() => {
+      resetSearchControlsFromUrlDefaults();
       const nextKind = first(params.kind);
       const nextMode = first(params.mode);
       const urlFilters: SearchFilters = {};
@@ -78,14 +84,27 @@ export function useUrlSync() {
 
       const nextFilters = cleanFilters(urlFilters);
 
-      if (typeof params.q === 'string') setQuery(params.q);
-      if (isSearchKind(nextKind)) setKind(normalizeSearchKind(nextKind));
-      if (isSearchMode(nextMode)) setMode(normalizeSearchMode(nextMode));
+      setQuery(typeof params.q === 'string' ? params.q : '');
+      setKind(
+        isSearchKind(nextKind)
+          ? normalizeSearchKind(nextKind)
+          : DEFAULT_SEARCH_KIND,
+      );
+      setMode(
+        isSearchMode(nextMode)
+          ? normalizeSearchMode(nextMode)
+          : DEFAULT_SEARCH_MODE,
+      );
       const parsedK = Number(first(params.k));
-      if (Number.isFinite(parsedK) && parsedK > 0) setTopK(parsedK);
+      setTopK(
+        Number.isFinite(parsedK) && parsedK > 0 ? parsedK : DEFAULT_TOP_K,
+      );
       const parsedMin = Number(first(params.min));
-      if (Number.isFinite(parsedMin) && parsedMin >= 0)
-        setMinSimilarity(parsedMin);
+      setMinSimilarity(
+        Number.isFinite(parsedMin) && parsedMin >= 0
+          ? parsedMin
+          : DEFAULT_MIN_SIMILARITY,
+      );
       setFilters(reconcile(nextFilters));
       setReady(true);
     });

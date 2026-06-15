@@ -3,6 +3,7 @@ import { reconcile } from 'solid-js/store';
 import {
   buildSearchRequest,
   isWildcardAllQuery,
+  resetSearchControlsFromUrlDefaults,
   setFilters,
   setKind,
   setMinSimilarity,
@@ -64,5 +65,24 @@ describe('search store request construction', () => {
       ssid: 'lab-net',
     });
     expect(buildSearchRequest().filters?.source_mac).toBeUndefined();
+  });
+
+  it('resets stale advanced controls for URL-driven searches', () => {
+    setQuery('probe');
+    setKind('SEARCH_KIND_CROSS');
+    setMode('SEARCH_MODE_DENSE');
+    setTopK(500);
+    setMinSimilarity(0.9);
+
+    resetSearchControlsFromUrlDefaults();
+    setQuery('*');
+
+    expect(buildSearchRequest()).toMatchObject({
+      query: '*',
+      kind: 'SEARCH_KIND_EVENT',
+      mode: 'SEARCH_MODE_SPARSE',
+      top_k: 20,
+    });
+    expect(buildSearchRequest().min_similarity).toBeUndefined();
   });
 });

@@ -12,8 +12,10 @@ import type {
 const HISTORY_STORAGE_KEY = 'atheros-search.history';
 const SESSION_STORAGE_KEY = 'atheros-search.session-id';
 const HISTORY_LIMIT = 50;
-const DEFAULT_KIND: SearchKind = 'SEARCH_KIND_EVENT';
-const DEFAULT_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+export const DEFAULT_SEARCH_KIND: SearchKind = 'SEARCH_KIND_EVENT';
+export const DEFAULT_SEARCH_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+export const DEFAULT_TOP_K = 20;
+export const DEFAULT_MIN_SIMILARITY = 0;
 let fallbackSessionId: string | null = null;
 
 function readSessionList(key: string): string[] {
@@ -74,11 +76,11 @@ function tabSessionId(): string {
 }
 
 export function normalizeSearchKind(value: SearchKind): SearchKind {
-  return value === 'SEARCH_KIND_UNSPECIFIED' ? DEFAULT_KIND : value;
+  return value === 'SEARCH_KIND_UNSPECIFIED' ? DEFAULT_SEARCH_KIND : value;
 }
 
 export function normalizeSearchMode(value: SearchMode): SearchMode {
-  return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_MODE : value;
+  return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_SEARCH_MODE : value;
 }
 
 export function isWildcardAllQuery(value: string): boolean {
@@ -87,10 +89,12 @@ export function isWildcardAllQuery(value: string): boolean {
 }
 
 export const [query, setQuery] = createSignal('');
-export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_KIND);
-export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_MODE);
-export const [topK, setTopK] = createSignal(20);
-export const [minSimilarity, setMinSimilarity] = createSignal(0);
+export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_SEARCH_KIND);
+export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_SEARCH_MODE);
+export const [topK, setTopK] = createSignal(DEFAULT_TOP_K);
+export const [minSimilarity, setMinSimilarity] = createSignal(
+  DEFAULT_MIN_SIMILARITY,
+);
 export const [filters, setFilters] = createStore<SearchFilters>({});
 
 export const [results, setResults] = createStore<SearchResult[]>([]);
@@ -165,6 +169,14 @@ export function buildSearchRequest(): SearchRequest {
   }
 
   return request;
+}
+
+export function resetSearchControlsFromUrlDefaults() {
+  setQuery('');
+  setKind(DEFAULT_SEARCH_KIND);
+  setMode(DEFAULT_SEARCH_MODE);
+  setTopK(DEFAULT_TOP_K);
+  setMinSimilarity(DEFAULT_MIN_SIMILARITY);
 }
 
 export function pushHistory(value: string) {
