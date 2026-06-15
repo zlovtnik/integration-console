@@ -6,6 +6,7 @@ import type { ExplainResponse } from '~/api/types';
 import { BoostBadge } from '~/components/BoostBadge';
 import { JsonViewer } from '~/components/JsonViewer';
 import { ScoreChart } from '~/components/ScoreChart';
+import { SkeletonExplain } from '~/components/SkeletonExplain';
 
 export default function ExplainPage() {
   const params = useParams();
@@ -53,21 +54,26 @@ export default function ExplainPage() {
 
   return (
     <main id="main-content" class="main-content explain-page" tabIndex={-1}>
-      <A href="/" class="btn btn-ghost back-link">
-        <ArrowLeft size={16} aria-hidden="true" />
-        <span>Back</span>
-      </A>
+      <nav aria-label="Breadcrumb" class="breadcrumb">
+        <A
+          href={`/?q=${encodeURIComponent(
+            typeof searchParams.query === 'string' ? searchParams.query : '',
+          )}`}
+          class="btn btn-ghost back-link"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          <span>
+            Back to results
+            {typeof searchParams.query === 'string' && searchParams.query
+              ? ` for "${searchParams.query}"`
+              : ''}
+          </span>
+        </A>
+      </nav>
 
       <h1 class="display">Explain: {sourceKey()}</h1>
 
-      <Show
-        when={!loading()}
-        fallback={
-          <div class="loading-state" role="status">
-            Loading explanation...
-          </div>
-        }
-      >
+      <Show when={!loading()} fallback={<SkeletonExplain />}>
         <Show
           when={!error()}
           fallback={
@@ -105,29 +111,28 @@ export default function ExplainPage() {
                   </Show>
                 </section>
 
-                <section
-                  aria-labelledby="sequence-title"
-                  class="explain-section"
-                >
-                  <h2 id="sequence-title" class="heading-1">
-                    Sequence
-                  </h2>
-                  <div class="sequence-row">
-                    <Show
-                      when={(details().sequence_tokens ?? []).length > 0}
-                      fallback={
-                        <span class="caption">sequence log probability</span>
-                      }
-                    >
+                <Show when={(details().sequence_tokens ?? []).length > 0}>
+                  <section
+                    aria-labelledby="sequence-title"
+                    class="explain-section"
+                  >
+                    <h2 id="sequence-title" class="heading-1">
+                      Frame sequence
+                    </h2>
+                    <p class="caption">
+                      Log-probability of this event sequence under the trained
+                      model. Lower scores indicate more unusual ordering.
+                    </p>
+                    <div class="sequence-row">
                       <For each={details().sequence_tokens}>
                         {(token) => <span class="sequence-token">{token}</span>}
                       </For>
-                    </Show>
-                    <span class="mono">
-                      {(details().sequence_log_prob ?? 0).toFixed(3)}
-                    </span>
-                  </div>
-                </section>
+                      <span class="mono">
+                        {(details().sequence_log_prob ?? 0).toFixed(3)}
+                      </span>
+                    </div>
+                  </section>
+                </Show>
 
                 <section
                   aria-labelledby="payload-title"

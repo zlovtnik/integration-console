@@ -12,7 +12,11 @@ function removeListItem(
   items: string[] | undefined,
   value: string,
 ): string[] | undefined {
-  const next = (items ?? []).filter((item) => item !== value);
+  if (!items) return undefined;
+  const idx = items.indexOf(value);
+  if (idx === -1) return items;
+  const next = [...items];
+  next.splice(idx, 1);
   return next.length > 0 ? next : undefined;
 }
 
@@ -63,6 +67,14 @@ export function FilterChips() {
         label: filters.source_mac,
         remove: () => setFilters('source_mac', undefined),
       });
+    filters.source_macs?.forEach((value) =>
+      next.push({
+        id: `mac-${value}`,
+        label: value,
+        remove: () =>
+          setFilters('source_macs', (items) => removeListItem(items, value)),
+      }),
+    );
     if (filters.observed_after)
       next.push({
         id: 'after',

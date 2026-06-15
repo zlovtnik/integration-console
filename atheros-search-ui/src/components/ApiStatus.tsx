@@ -34,7 +34,11 @@ export function ApiStatus() {
     })[status()];
 
   return (
-    <span class={`api-status api-status--${status()}`} role="status" title={label()}>
+    <span
+      class={`api-status api-status--${status()}`}
+      role="status"
+      title={label()}
+    >
       <span class="sr-only">{label()}</span>
     </span>
   );

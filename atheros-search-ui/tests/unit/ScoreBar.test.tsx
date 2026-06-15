@@ -18,4 +18,26 @@ describe('ScoreBar', () => {
     expect(meter).toHaveAttribute('aria-valuenow', '82');
     expect(meter).toHaveAttribute('aria-label', 'Score 82.0%');
   });
+
+  it('announces when no score breakdown is available', () => {
+    const { getByRole, getByText } = render(() => (
+      <ScoreBar
+        result={
+          {
+            score: 0,
+            cosine_similarity: 0,
+            keyword_rank: 0,
+            threat_boost: 0,
+          } as SearchResult
+        }
+      />
+    ));
+    const meter = getByRole('meter');
+
+    expect(meter).toHaveAttribute(
+      'aria-label',
+      'Score 0.0%, no score breakdown',
+    );
+    getByText('no score breakdown');
+  });
 });

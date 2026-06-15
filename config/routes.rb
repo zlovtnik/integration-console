@@ -1,5 +1,6 @@
 Rails.application.routes.draw do
   root "dashboard#index"
+  get "/metrics", to: "metrics#show"
   get "/health", to: "health#show"
   get "/health/cards", to: "dashboard#cards"
   get "/health/sync_data", to: "health#sync_data"

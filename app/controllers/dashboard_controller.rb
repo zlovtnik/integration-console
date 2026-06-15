@@ -151,10 +151,13 @@ class DashboardController < ApplicationController
   end
 
   def pmf_attack_count_24h
-    AuditLog.wireless
-      .where("observed_at > ?", 24.hours.ago)
-      .where("payload->'tags' @> ?", '["threat:pmf_deauth_attack"]')
-      .count
+    tag_json = '["threat:pmf_deauth_attack"]'
+    scope = AuditLog.wireless.where("observed_at > ?", 24.hours.ago)
+    if AuditLog.column_names.include?("tags")
+      scope.where("(tags @> ?::jsonb OR payload->'tags' @> ?::jsonb)", tag_json, tag_json).count
+    else
+      scope.where("payload->'tags' @> ?::jsonb", tag_json).count
+    end
   end
 
   def active_client_count
