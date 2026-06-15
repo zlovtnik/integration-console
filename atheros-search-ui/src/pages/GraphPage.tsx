@@ -86,11 +86,7 @@ export default function GraphPage() {
     onCleanup(() => window.removeEventListener('keydown', handleKeydown));
   });
 
-  createEffect(() => {
-    graphNodes();
-    graphEdges();
-    queueGraphRebuild();
-  });
+  createEffect(on([graphNodes, graphEdges], queueGraphRebuild));
 
   createEffect(
     on(

@@ -1,8 +1,15 @@
 import { A, useParams, useSearchParams } from '@solidjs/router';
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createResource,
+  For,
+  on,
+  onCleanup,
+  Show,
+} from 'solid-js';
 import { ArrowLeft } from 'lucide-solid';
 import { api } from '~/api/client';
-import type { ExplainResponse } from '~/api/types';
 import { BoostBadge } from '~/components/BoostBadge';
 import { JsonViewer } from '~/components/JsonViewer';
 import { ScoreChart } from '~/components/ScoreChart';
@@ -10,6 +17,8 @@ import { SkeletonExplain } from '~/components/SkeletonExplain';
 
 export default function ExplainPage() {
   const params = useParams();
+  const [searchParams] = useSearchParams();
+  const controllers = new Set<AbortController>();
   const sourceKey = () => {
     try {
       return decodeURIComponent(params.sourceKey ?? '');
@@ -17,68 +26,83 @@ export default function ExplainPage() {
       return '';
     }
   };
-  const [searchParams] = useSearchParams();
-  const [explain, setExplain] = createSignal<ExplainResponse | null>(null);
-  const [loading, setLoading] = createSignal(true);
-  const [error, setError] = createSignal<string | null>(null);
-  const controller = new AbortController();
 
-  onMount(async () => {
-    document.title = `Explain: ${sourceKey()} - atheros search`;
-    if (!sourceKey()) {
-      setError('Missing source key.');
-      setLoading(false);
-      return;
-    }
+  const queryParam = () =>
+    typeof searchParams.query === 'string' ? searchParams.query : '';
+  const kindParam = () =>
+    typeof searchParams.kind === 'string'
+      ? searchParams.kind
+      : 'SEARCH_KIND_EVENT';
+  const explainRequest = () => {
+    const key = sourceKey();
+    if (!key) return null;
+    return {
+      sourceKey: key,
+      query: queryParam(),
+      kind: kindParam(),
+    };
+  };
+  const [explain] = createResource(explainRequest, async (request) => {
+    const controller = new AbortController();
+    controllers.add(controller);
 
     try {
-      const response = await api.explain(
-        sourceKey(),
-        typeof searchParams.query === 'string' ? searchParams.query : '',
-        typeof searchParams.kind === 'string'
-          ? searchParams.kind
-          : 'SEARCH_KIND_EVENT',
+      return await api.explain(
+        request.sourceKey,
+        request.query,
+        request.kind,
         controller.signal,
       );
-      setExplain(response);
-    } catch (explainError) {
-      setError(
-        (explainError as Error).message || 'Could not load explanation.',
-      );
     } finally {
-      setLoading(false);
+      controllers.delete(controller);
     }
   });
 
-  onCleanup(() => controller.abort());
+  const backHref = createMemo(() => {
+    const query = queryParam();
+    const kind = typeof searchParams.kind === 'string' ? searchParams.kind : '';
+    return `/?q=${encodeURIComponent(query)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+  });
+
+  const errorMessage = () => {
+    if (!sourceKey()) return 'Missing source key.';
+    if (!explain.error) return '';
+    return (explain.error as Error).message || 'Could not load explanation.';
+  };
+
+  createEffect(
+    on(sourceKey, (key) => {
+      document.title = key
+        ? `Explain: ${key} - atheros search`
+        : 'Explain - atheros search';
+    }),
+  );
+
+  onCleanup(() => {
+    for (const controller of controllers) controller.abort();
+    controllers.clear();
+  });
 
   return (
     <main id="main-content" class="main-content explain-page" tabIndex={-1}>
       <nav aria-label="Breadcrumb" class="breadcrumb">
-        <A
-          href={`/?q=${encodeURIComponent(
-            typeof searchParams.query === 'string' ? searchParams.query : '',
-          )}${typeof searchParams.kind === 'string' ? `&kind=${encodeURIComponent(searchParams.kind)}` : ''}`}
-          class="btn btn-ghost back-link"
-        >
+        <A href={backHref()} class="btn btn-ghost back-link">
           <ArrowLeft size={16} aria-hidden="true" />
           <span>
             Back to results
-            {typeof searchParams.query === 'string' && searchParams.query
-              ? ` for "${searchParams.query}"`
-              : ''}
+            {queryParam() ? ` for "${queryParam()}"` : ''}
           </span>
         </A>
       </nav>
 
       <h1 class="display">Explain: {sourceKey()}</h1>
 
-      <Show when={!loading()} fallback={<SkeletonExplain />}>
+      <Show when={!explain.loading} fallback={<SkeletonExplain />}>
         <Show
-          when={!error()}
+          when={!errorMessage()}
           fallback={
             <div class="state-banner state-banner--error" role="alert">
-              {error()}
+              {errorMessage()}
             </div>
           }
         >

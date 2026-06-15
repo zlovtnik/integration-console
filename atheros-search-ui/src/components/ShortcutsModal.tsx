@@ -1,4 +1,4 @@
-import { createEffect, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { X } from 'lucide-solid';
 
 const isMac = () => navigator.platform.startsWith('Mac');
@@ -28,16 +28,21 @@ export function ShortcutsModal(props: { open: boolean; onClose: () => void }) {
     queueMicrotask(() => target.focus());
   }
 
-  createEffect(() => {
-    if (props.open) {
-      lastFocused = document.activeElement as HTMLElement | null;
-      queueMicrotask(() =>
-        dialogRef?.querySelector<HTMLElement>('button')?.focus(),
-      );
-    } else {
-      restoreFocus();
-    }
-  });
+  createEffect(
+    on(
+      () => props.open,
+      (open) => {
+        if (open) {
+          lastFocused = document.activeElement as HTMLElement | null;
+          queueMicrotask(() =>
+            dialogRef?.querySelector<HTMLElement>('button')?.focus(),
+          );
+        } else {
+          restoreFocus();
+        }
+      },
+    ),
+  );
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape') props.onClose();

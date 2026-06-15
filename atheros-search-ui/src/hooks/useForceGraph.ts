@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { createEffect, onCleanup, onMount } from 'solid-js';
+import { createEffect, on, onCleanup, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import type { GraphEdge, GraphNode, NodeKind } from '~/api/types';
 
@@ -301,10 +301,12 @@ export function useForceGraph(
     sim = null;
   }
 
-  function applyVisibility(restartSimulation: boolean) {
+  function applyVisibility(
+    restartSimulation: boolean,
+    visible = options.visibleKinds?.(),
+  ) {
     const el = svgRef();
     if (!el) return;
-    const visible = options.visibleKinds?.();
     if (!visible) return;
     const visibleKinds = visible;
 
@@ -331,10 +333,9 @@ export function useForceGraph(
     if (restartSimulation) sim?.alpha(0.05).restart();
   }
 
-  function applySelection() {
+  function applySelection(selected = options.selectedNodeId?.() ?? null) {
     const el = svgRef();
     if (!el) return;
-    const selected = options.selectedNodeId?.() ?? null;
     const related = new Set<string>();
     if (selected) {
       related.add(selected);
@@ -372,10 +373,11 @@ export function useForceGraph(
       });
   }
 
-  function applyPinned() {
+  function applyPinned(
+    pinned = options.pinnedNodeIds?.() ?? new Set<string>(),
+  ) {
     const el = svgRef();
     if (!el) return;
-    const pinned = options.pinnedNodeIds?.() ?? new Set<string>();
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
       .classed('pinned', (item) => pinned.has(item.id))
@@ -405,19 +407,17 @@ export function useForceGraph(
   }
 
   onMount(build);
-  createEffect(() => {
-    options.visibleKinds?.();
-    applyVisibility(visibilityEffectReady);
-    visibilityEffectReady = true;
-  });
-  createEffect(() => {
-    options.selectedNodeId?.();
-    applySelection();
-  });
-  createEffect(() => {
-    options.pinnedNodeIds?.();
-    applyPinned();
-  });
+  createEffect(
+    on(
+      () => options.visibleKinds?.(),
+      (visible) => {
+        applyVisibility(visibilityEffectReady, visible);
+        visibilityEffectReady = true;
+      },
+    ),
+  );
+  createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
+  createEffect(on(() => options.pinnedNodeIds?.(), applyPinned));
   onCleanup(stop);
 
   return { rebuild: build, resetZoom, stop };

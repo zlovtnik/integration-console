@@ -4,6 +4,7 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -116,22 +117,29 @@ export default function SearchPage() {
     if (initialQuery) queueSearch();
   });
 
-  createEffect(() => {
-    document.title = query().trim()
-      ? `${query().trim()} - atheros search`
-      : 'Search - atheros search';
-  });
+  createEffect(
+    on(
+      () => query().trim(),
+      (titleQuery) => {
+        document.title = titleQuery
+          ? `${titleQuery} - atheros search`
+          : 'Search - atheros search';
+      },
+    ),
+  );
 
-  createEffect(() => {
-    try {
-      window.localStorage.setItem(
-        'atheros-search.live-stream',
-        String(useStream()),
-      );
-    } catch {
-      // Preference persistence can be disabled by browser policy.
-    }
-  });
+  createEffect(
+    on(useStream, (enabled) => {
+      try {
+        window.localStorage.setItem(
+          'atheros-search.live-stream',
+          String(enabled),
+        );
+      } catch {
+        // Preference persistence can be disabled by browser policy.
+      }
+    }),
+  );
 
   const resultMeta = createMemo(() => {
     if (loading()) return 'Searching...';
@@ -156,16 +164,21 @@ export default function SearchPage() {
 
   const errorCopy = createMemo(() => friendlyError(error() ?? ''));
 
-  createEffect(() => {
-    if (results.length === 0) {
-      setActiveResultIndex(-1);
-      return;
-    }
+  createEffect(
+    on(
+      () => results.length,
+      (resultCount) => {
+        if (resultCount === 0) {
+          setActiveResultIndex(-1);
+          return;
+        }
 
-    if (activeResultIndex() >= results.length) {
-      setActiveResultIndex(results.length - 1);
-    }
-  });
+        if (activeResultIndex() >= resultCount) {
+          setActiveResultIndex(resultCount - 1);
+        }
+      },
+    ),
+  );
 
   onCleanup(() => window.clearTimeout(searchDebounceTimer));
 

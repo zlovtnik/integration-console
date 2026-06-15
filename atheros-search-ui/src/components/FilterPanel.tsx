@@ -1,9 +1,11 @@
 import {
+  children,
   createEffect,
   createMemo,
   createSignal,
   For,
   type JSX,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -42,6 +44,7 @@ function FilterSection(props: {
   children: JSX.Element;
   defaultOpen?: boolean;
 }) {
+  const resolvedChildren = children(() => props.children);
   const [open, setOpen] = createSignal(props.defaultOpen ?? false);
 
   return (
@@ -60,7 +63,7 @@ function FilterSection(props: {
         />
       </button>
       <Show when={open()}>
-        <div class="filter-section-body">{props.children}</div>
+        <div class="filter-section-body">{resolvedChildren()}</div>
       </Show>
     </div>
   );
@@ -83,8 +86,10 @@ export function FilterPanel(props: {
   onClose: () => void;
   returnFocus: () => void;
 }) {
-  const [topKInput, setTopKInput] = createSignal(String(topK()));
+  const [topKDraft, setTopKDraft] = createSignal<string | null>(null);
+  const topKInput = () => topKDraft() ?? String(topK());
   const [isDrawer, setIsDrawer] = createSignal(false);
+  const drawerOpen = createMemo(() => props.open && isDrawer());
   const dateRangeError = createMemo(() => {
     if (!filters.observed_after || !filters.observed_before) return '';
     return filters.observed_after > filters.observed_before
@@ -109,34 +114,29 @@ export function FilterPanel(props: {
   let closeButtonRef: HTMLButtonElement | undefined;
   let wasOpen = false;
 
-  createEffect(() => {
-    setTopKInput(String(topK()));
-  });
+  createEffect(
+    on(drawerOpen, (open) => {
+      document.body.classList.toggle('filter-drawer-open', open);
+    }),
+  );
 
-  createEffect(() => {
-    document.body.classList.toggle(
-      'filter-drawer-open',
-      props.open && isDrawer(),
-    );
-  });
+  createEffect(
+    on(drawerOpen, (open) => {
+      if (open && !wasOpen) {
+        queueMicrotask(() => {
+          const firstField =
+            panelRef?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+          (closeButtonRef ?? firstField ?? panelRef)?.focus();
+        });
+      }
 
-  createEffect(() => {
-    const open = props.open && isDrawer();
+      if (!open && wasOpen) {
+        props.returnFocus();
+      }
 
-    if (open && !wasOpen) {
-      queueMicrotask(() => {
-        const firstField =
-          panelRef?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-        (closeButtonRef ?? firstField ?? panelRef)?.focus();
-      });
-    }
-
-    if (!open && wasOpen) {
-      props.returnFocus();
-    }
-
-    wasOpen = open;
-  });
+      wasOpen = open;
+    }),
+  );
 
   onMount(() => {
     const media = window.matchMedia(DRAWER_MEDIA);
@@ -155,7 +155,7 @@ export function FilterPanel(props: {
   onCleanup(() => document.body.classList.remove('filter-drawer-open'));
 
   function handleTopKInput(value: string) {
-    setTopKInput(value);
+    setTopKDraft(value);
     const trimmed = value.trim();
     if (!trimmed) return;
 
@@ -166,7 +166,7 @@ export function FilterPanel(props: {
   }
 
   function resetTopKInput() {
-    setTopKInput(String(topK()));
+    setTopKDraft(null);
   }
 
   function setSecurityFlag(flag: number, enabled: boolean) {

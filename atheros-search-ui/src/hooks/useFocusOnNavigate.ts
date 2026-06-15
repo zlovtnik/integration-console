@@ -1,13 +1,17 @@
 import { useLocation } from '@solidjs/router';
-import { createEffect } from 'solid-js';
+import { createEffect, on } from 'solid-js';
 
 export function useFocusOnNavigate() {
   const location = useLocation();
 
-  createEffect(() => {
-    location.pathname;
-    queueMicrotask(() => {
-      document.getElementById('main-content')?.focus();
-    });
-  });
+  createEffect(
+    on(
+      () => location.pathname,
+      () => {
+        queueMicrotask(() => {
+          document.getElementById('main-content')?.focus();
+        });
+      },
+    ),
+  );
 }
