@@ -4,6 +4,7 @@ import { Pin, PinOff, X } from 'lucide-solid';
 import type { GraphNode } from '~/api/types';
 import {
   graphEdges,
+  graphFilters,
   graphNodes,
   pinnedNodeIds,
   togglePin,
@@ -53,6 +54,9 @@ function eventSourceMacs(node: GraphNode): string[] {
 }
 
 function eventSSIDs(node: GraphNode): string[] {
+  const graphSSID = graphFilters.ssid?.trim();
+  if (graphSSID) return [graphSSID];
+
   const explicit = compact(node.event_ssids ?? []);
   if (explicit.length > 0) return explicit;
   return compact([node.ssid]);

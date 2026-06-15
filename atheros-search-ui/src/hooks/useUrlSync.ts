@@ -23,8 +23,14 @@ import {
 function asList(value: string | string[] | undefined): string[] | undefined {
   if (!value) return undefined;
   const list = Array.isArray(value) ? value : [value];
-  const compact = list.map((item) => item.trim()).filter(Boolean);
+  const compact = Array.from(
+    new Set(list.map((item) => item.trim()).filter(Boolean)),
+  );
   return compact.length > 0 ? compact : undefined;
+}
+
+function sourceMacParams(source: SearchFilters): string[] | undefined {
+  return asList([source.source_mac ?? '', ...(source.source_macs ?? [])]);
 }
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -52,10 +58,7 @@ export function useUrlSync() {
       if (typeof params.ssid === 'string' && params.ssid) {
         urlFilters.ssid = params.ssid;
       }
-      if (macs?.length === 1) {
-        const mac = macs[0];
-        if (mac) urlFilters.source_mac = mac;
-      } else if (macs && macs.length > 1) {
+      if (macs) {
         urlFilters.source_macs = macs;
       }
       if (frameSubtypes) urlFilters.frame_subtypes = frameSubtypes;
@@ -81,7 +84,8 @@ export function useUrlSync() {
       const parsedK = Number(first(params.k));
       if (Number.isFinite(parsedK) && parsedK > 0) setTopK(parsedK);
       const parsedMin = Number(first(params.min));
-      if (Number.isFinite(parsedMin) && parsedMin >= 0) setMinSimilarity(parsedMin);
+      if (Number.isFinite(parsedMin) && parsedMin >= 0)
+        setMinSimilarity(parsedMin);
       setFilters(reconcile(nextFilters));
       setReady(true);
     });
@@ -90,6 +94,7 @@ export function useUrlSync() {
   createEffect(() => {
     if (!ready()) return;
     const nextFilters = cleanFilters(filters);
+    const macs = sourceMacParams(filters);
 
     const next: Record<string, string | string[] | undefined> = {
       q: query() || undefined,
@@ -110,9 +115,7 @@ export function useUrlSync() {
         ? nextFilters.sensor_ids
         : undefined,
       ssid: nextFilters.ssid || undefined,
-      mac: nextFilters.source_macs?.length
-        ? nextFilters.source_macs
-        : nextFilters.source_mac || undefined,
+      mac: macs,
       frame: nextFilters.frame_subtypes?.length
         ? nextFilters.frame_subtypes
         : undefined,

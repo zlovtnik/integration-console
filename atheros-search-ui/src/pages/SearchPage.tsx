@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useNavigate } from '@solidjs/router';
 import {
   createEffect,
   createMemo,
@@ -94,14 +94,12 @@ function readLiveStreamPreference(): boolean {
 
 export default function SearchPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [filtersOpen, setFiltersOpen] = createSignal(false);
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [useStream, setUseStream] = createSignal(readLiveStreamPreference());
   const [searched, setSearched] = createSignal(false);
   const [lastSearchMs, setLastSearchMs] = createSignal<number | null>(null);
   const [activeResultIndex, setActiveResultIndex] = createSignal(-1);
-  const [lastAutoQuery, setLastAutoQuery] = createSignal('');
   const streamSearch = useSearchStream();
   const restoreScroll = useScrollRestoration();
   let abortController: AbortController | null = null;
@@ -113,6 +111,9 @@ export default function SearchPage() {
 
   onMount(() => {
     window.scrollTo(0, restoreScroll());
+    const initialQuery =
+      new URLSearchParams(window.location.search).get('q')?.trim() ?? '';
+    if (initialQuery) queueSearch();
   });
 
   createEffect(() => {
@@ -130,21 +131,6 @@ export default function SearchPage() {
     } catch {
       // Preference persistence can be disabled by browser policy.
     }
-  });
-
-  createEffect(() => {
-    const urlQuery =
-      new URLSearchParams(location.search).get('q')?.trim() ?? '';
-    const active = document.activeElement as HTMLElement | null;
-    const localEditInProgress = Boolean(active?.closest('.search-controls'));
-
-    if (!urlQuery || urlQuery === lastAutoQuery() || localEditInProgress) {
-      return;
-    }
-    if (urlQuery !== query().trim()) return;
-
-    setLastAutoQuery(urlQuery);
-    queueSearch();
   });
 
   const resultMeta = createMemo(() => {
@@ -166,13 +152,6 @@ export default function SearchPage() {
 
   const streamingProgress = createMemo(() =>
     Math.min(100, (results.length / Math.max(1, topK())) * 100),
-  );
-
-  const skeletons = createMemo(() =>
-    Array.from(
-      { length: Math.max(3, Math.min(topK(), 8)) },
-      (_, index) => index,
-    ),
   );
 
   const errorCopy = createMemo(() => friendlyError(error() ?? ''));
@@ -437,68 +416,44 @@ export default function SearchPage() {
               when={error()}
               fallback={
                 <Show
-                  when={streaming()}
+                  when={results.length > 0}
                   fallback={
                     <Show
-                      when={loading()}
+                      when={loading() || streaming()}
                       fallback={
-                        <Show
-                          when={results.length > 0}
-                          fallback={
-                            <div class="empty-state">
-                              <Show
-                                when={searched()}
-                                fallback={
-                                  <div class="empty-welcome">
-                                    <p class="caption">Try searching for:</p>
-                                    <ul role="list" class="example-queries">
-                                      <For each={EXAMPLE_QUERIES}>
-                                        {(example) => (
-                                          <li>
-                                            <button
-                                              type="button"
-                                              class="example-query-btn"
-                                              onClick={() => {
-                                                setQuery(example);
-                                                queueSearch();
-                                              }}
-                                            >
-                                              {example}
-                                            </button>
-                                          </li>
-                                        )}
-                                      </For>
-                                    </ul>
-                                  </div>
-                                }
-                              >
-                                <p>
-                                  No results for "{query()}" - try broadening
-                                  your search or removing filters.
-                                </p>
-                              </Show>
-                            </div>
-                          }
-                        >
-                          <ol
-                            aria-labelledby="results-heading"
-                            role="list"
-                            class="result-list"
+                        <div class="empty-state">
+                          <Show
+                            when={searched()}
+                            fallback={
+                              <div class="empty-welcome">
+                                <p class="caption">Try searching for:</p>
+                                <ul role="list" class="example-queries">
+                                  <For each={EXAMPLE_QUERIES}>
+                                    {(example) => (
+                                      <li>
+                                        <button
+                                          type="button"
+                                          class="example-query-btn"
+                                          onClick={() => {
+                                            setQuery(example);
+                                            queueSearch();
+                                          }}
+                                        >
+                                          {example}
+                                        </button>
+                                      </li>
+                                    )}
+                                  </For>
+                                </ul>
+                              </div>
+                            }
                           >
-                            <For each={results}>
-                              {(result, index) => (
-                                <li>
-                                  <ResultCard
-                                    result={result}
-                                    queryText={query()}
-                                    kind={kind()}
-                                    focused={activeResultIndex() === index()}
-                                  />
-                                </li>
-                              )}
-                            </For>
-                          </ol>
-                        </Show>
+                            <p>
+                              No results for "{query()}" - try broadening your
+                              search or removing filters.
+                            </p>
+                          </Show>
+                        </div>
                       }
                     >
                       <div class="loading-state" role="status">
@@ -514,22 +469,15 @@ export default function SearchPage() {
                     role="list"
                     class="result-list"
                   >
-                    <For each={skeletons()}>
-                      {(_, index) => (
+                    <For each={results}>
+                      {(result, index) => (
                         <li>
-                          <Show
-                            when={results[index()]}
-                            fallback={<SkeletonCard />}
-                          >
-                            {(result) => (
-                              <ResultCard
-                                result={result()}
-                                queryText={query()}
-                                kind={kind()}
-                                focused={activeResultIndex() === index()}
-                              />
-                            )}
-                          </Show>
+                          <ResultCard
+                            result={result}
+                            queryText={query()}
+                            kind={kind()}
+                            focused={activeResultIndex() === index()}
+                          />
                         </li>
                       )}
                     </For>

@@ -81,6 +81,11 @@ export function normalizeSearchMode(value: SearchMode): SearchMode {
   return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_MODE : value;
 }
 
+export function isWildcardAllQuery(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed !== '' && trimmed.replace(/[*%]/g, '').trim() === '';
+}
+
 export const [query, setQuery] = createSignal('');
 export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_KIND);
 export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_MODE);
@@ -102,6 +107,10 @@ function compactList(values: string[] | undefined): string[] | undefined {
   return next && next.length > 0 ? Array.from(new Set(next)) : undefined;
 }
 
+function compactSourceMacs(source: SearchFilters): string[] | undefined {
+  return compactList([source.source_mac ?? '', ...(source.source_macs ?? [])]);
+}
+
 export function cleanFilters(source: SearchFilters): SearchFilters {
   const next: SearchFilters = {};
   const locations = compactList(source.location_ids);
@@ -114,9 +123,13 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
   if (frameSubtypes) next.frame_subtypes = frameSubtypes;
   if (tags) next.tags = tags;
   if (source.ssid?.trim()) next.ssid = source.ssid.trim();
-  if (source.source_mac?.trim()) next.source_mac = source.source_mac.trim();
-  const sourceMacs = compactList(source.source_macs);
-  if (sourceMacs) next.source_macs = sourceMacs;
+  const sourceMacs = compactSourceMacs(source);
+  if (sourceMacs?.length === 1) {
+    const [sourceMac] = sourceMacs;
+    if (sourceMac) next.source_mac = sourceMac;
+  } else if (sourceMacs && sourceMacs.length > 1) {
+    next.source_macs = sourceMacs;
+  }
   if (source.observed_after) next.observed_after = source.observed_after;
   if (source.observed_before) next.observed_before = source.observed_before;
   if (source.threat_only) next.threat_only = true;
@@ -132,10 +145,12 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
 }
 
 export function buildSearchRequest(): SearchRequest {
+  const trimmedQuery = query().trim();
+  const wildcardAll = isWildcardAllQuery(trimmedQuery);
   const request: SearchRequest = {
-    query: query().trim(),
+    query: trimmedQuery,
     kind: normalizeSearchKind(kind()),
-    mode: normalizeSearchMode(mode()),
+    mode: wildcardAll ? 'SEARCH_MODE_SPARSE' : normalizeSearchMode(mode()),
     top_k: topK(),
     session_id: tabSessionId(),
   };

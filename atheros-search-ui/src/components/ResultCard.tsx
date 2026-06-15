@@ -52,17 +52,30 @@ export function ResultCard(props: {
   focused?: boolean;
 }) {
   const [expanded, setExpanded] = createSignal(false);
-  const safeId = () => domId(props.result.source_key);
+  const sourceKey = () =>
+    props.result.source_key ||
+    [
+      props.result.source_table,
+      props.result.source_mac,
+      props.result.location_id,
+      props.result.sensor_id,
+      props.result.observed_at,
+      props.queryText,
+    ]
+      .filter(Boolean)
+      .join('|') ||
+    'result';
+  const safeId = () => domId(sourceKey());
   const detailId = () => `detail-${safeId()}`;
   const titleId = () => `card-title-${safeId()}`;
 
   return (
-    <article
+      <article
       class={`result-card result-card--${props.result.source_kind || 'unknown'} ${
         props.focused ? 'result-card--focused' : ''
       }`}
       aria-labelledby={titleId()}
-      data-source-key={props.result.source_key}
+      data-source-key={sourceKey()}
       tabIndex={props.focused ? 0 : -1}
     >
       <header class="card-header">
@@ -71,7 +84,7 @@ export function ResultCard(props: {
             <span class="source-table-badge">{props.result.source_table}</span>
           </Show>
           <h3 id={titleId()} class="card-title mono">
-            {props.result.source_key}
+            {sourceKey()}
           </h3>
         </div>
         <div class="card-badges">
@@ -132,7 +145,7 @@ export function ResultCard(props: {
           <span>{expanded() ? 'Hide detail' : 'Show detail'}</span>
         </button>
         <A
-          href={`/explain/${encodeURIComponent(props.result.source_key)}?query=${encodeURIComponent(props.queryText)}&kind=${encodeURIComponent(props.kind)}`}
+          href={`/explain/${encodeURIComponent(sourceKey())}?query=${encodeURIComponent(props.queryText)}&kind=${encodeURIComponent(props.kind)}`}
           class="btn btn-ghost"
         >
           <ExternalLink size={16} aria-hidden="true" />

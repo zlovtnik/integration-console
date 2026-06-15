@@ -31,7 +31,8 @@ export function useForceGraph(
   let sim: d3.Simulation<SimNode, SimEdge> | null = null;
   let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
   let nodeById = new Map<string, SimNode>();
-  let fitTimer: number | undefined;
+  let prevNodeById = new Map<string, SimNode>();
+  let visibilityEffectReady = false;
 
   function build() {
     const el = svgRef();
@@ -39,13 +40,16 @@ export function useForceGraph(
 
     sim?.stop();
     sim = null;
-    window.clearTimeout(fitTimer);
     d3.select(el).selectAll('*').remove();
 
     const bounds = el.getBoundingClientRect();
     const width = Math.max(bounds.width || el.clientWidth, 320);
     const height = Math.max(bounds.height || el.clientHeight, 240);
-    const simNodes: SimNode[] = nodes().map((node) => ({ ...node }));
+    const simNodes = createSimNodes(
+      nodes(),
+      options.pinnedNodeIds?.() ?? new Set<string>(),
+      prevNodeById,
+    );
     nodeById = new Map(simNodes.map((node) => [node.id, node]));
     const simEdges: SimEdge[] = edges()
       .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
@@ -146,7 +150,11 @@ export function useForceGraph(
       .attr('aria-label', (item) => `${nodeKindLabel(item.kind)} ${item.label}`)
       .on('click', (_, item) => options.onNodeClick?.(item))
       .on('keydown', (event, item) => {
-        if (event.key !== 'Enter' && event.key !== ' ' && event.code !== 'Space') {
+        if (
+          event.key !== 'Enter' &&
+          event.key !== ' ' &&
+          event.code !== 'Space'
+        ) {
           return;
         }
         event.preventDefault();
@@ -199,6 +207,7 @@ export function useForceGraph(
       .attr('stroke-linejoin', 'round')
       .text((item) => truncate(item.label, 22));
 
+    let fitOnSimulationEnd = true;
     sim = d3
       .forceSimulation<SimNode>(simNodes)
       .force(
@@ -225,12 +234,17 @@ export function useForceGraph(
           'transform',
           (item) => `translate(${item.x ?? 0},${item.y ?? 0})`,
         );
+      })
+      .on('end', () => {
+        if (!fitOnSimulationEnd) return;
+        fitOnSimulationEnd = false;
+        fitToGraph();
       });
 
-    applyVisibility();
+    applyVisibility(false);
     applySelection();
     applyPinned();
-    fitTimer = window.setTimeout(() => fitToGraph(), 450);
+    prevNodeById = nodeById;
   }
 
   function resetZoom() {
@@ -283,29 +297,38 @@ export function useForceGraph(
   }
 
   function stop() {
-    window.clearTimeout(fitTimer);
     sim?.stop();
     sim = null;
   }
 
-  function applyVisibility() {
+  function applyVisibility(restartSimulation: boolean) {
     const el = svgRef();
     if (!el) return;
     const visible = options.visibleKinds?.();
     if (!visible) return;
+    const visibleKinds = visible;
 
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
-      .style('display', (item) => (visible.has(item.kind) ? null : 'none'));
+      .style('display', (item) =>
+        visibleKinds.has(item.kind) ? null : 'none',
+      );
+
+    function edgeIsVisible(edge: SimEdge): boolean {
+      return (
+        visibleKinds.has(endpointKind(edge.source)) &&
+        visibleKinds.has(endpointKind(edge.target))
+      );
+    }
 
     d3.select(el)
       .selectAll<SVGLineElement, SimEdge>('.graph-link')
-      .style('display', (edge) =>
-        visible.has(endpointKind(edge.source)) &&
-        visible.has(endpointKind(edge.target))
-          ? null
-          : 'none',
+      .style('display', (edge) => (edgeIsVisible(edge) ? null : 'none'))
+      .attr('marker-end', (edge) =>
+        edgeIsVisible(edge) ? `url(#arrow-${edge.kind})` : null,
       );
+
+    if (restartSimulation) sim?.alpha(0.05).restart();
   }
 
   function applySelection() {
@@ -384,7 +407,8 @@ export function useForceGraph(
   onMount(build);
   createEffect(() => {
     options.visibleKinds?.();
-    applyVisibility();
+    applyVisibility(visibilityEffectReady);
+    visibilityEffectReady = true;
   });
   createEffect(() => {
     options.selectedNodeId?.();
@@ -397,6 +421,34 @@ export function useForceGraph(
   onCleanup(stop);
 
   return { rebuild: build, resetZoom, stop };
+}
+
+export function createSimNodes(
+  sourceNodes: GraphNode[],
+  pinned: Set<string>,
+  previousNodeById: Map<string, SimNode>,
+): SimNode[] {
+  return sourceNodes.map((node) => {
+    const next: SimNode = { ...node };
+    const previous = previousNodeById.get(node.id);
+
+    if (pinned.has(node.id) && hasFinitePosition(previous)) {
+      next.x = previous.x;
+      next.y = previous.y;
+      next.fx = previous.x;
+      next.fy = previous.y;
+    }
+
+    return next;
+  });
+}
+
+function hasFinitePosition(
+  node: SimNode | undefined,
+): node is SimNode & { x: number; y: number } {
+  return (
+    node !== undefined && Number.isFinite(node.x) && Number.isFinite(node.y)
+  );
 }
 
 export function nodeRadius(node: GraphNode): number {

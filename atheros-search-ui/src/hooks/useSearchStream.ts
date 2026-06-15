@@ -1,9 +1,15 @@
 import { batch, createSignal } from 'solid-js';
-import { ApiError } from '~/api/client';
+import {
+  ApiError,
+  apiErrorFromResponse,
+  normalizeSearchMeta,
+  normalizeSearchResult,
+} from '~/api/client';
 import { env } from '~/env';
 import {
   appendResult,
   clearResults,
+  results,
   setError,
   setLoading,
   setMeta,
@@ -20,18 +26,33 @@ type StreamEnvelope = {
 
 type ErrorMapper = (error: unknown) => string;
 
-function isSearchResult(value: unknown): value is SearchResult {
+function isRawSearchResult(value: unknown): value is SearchResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    'source_key' in value &&
-    typeof (value as SearchResult).source_key === 'string'
+    typeof obj.source_key === 'string' || typeof obj.sourceKey === 'string'
   );
 }
 
-function readStreamLine(line: string): SearchResult | StreamEnvelope | null {
+function resultIdentity(result: SearchResult): string {
+  return (
+    result.source_key ||
+    [
+      result.source_table,
+      result.source_mac,
+      result.location_id,
+      result.sensor_id,
+      result.observed_at,
+      result.detail_json,
+    ]
+      .filter(Boolean)
+      .join('|')
+  );
+}
+
+function readStreamLine(line: string): unknown {
   try {
-    return JSON.parse(line) as SearchResult | StreamEnvelope;
+    return JSON.parse(line) as unknown;
   } catch {
     return null;
   }
@@ -48,33 +69,52 @@ export function useSearchStream() {
   let abortCtrl: AbortController | null = null;
   const [retrying, setRetrying] = createSignal(false);
 
+  function isEnvelope(value: unknown): value is StreamEnvelope {
+    if (typeof value !== 'object' || value === null) return false;
+    const obj = value as Record<string, unknown>;
+    return (
+      obj.type !== undefined || obj.meta !== undefined || obj.done !== undefined
+    );
+  }
+
   function applyParsed(
-    parsed: SearchResult | StreamEnvelope,
+    parsed: unknown,
     seenKeys: Set<string>,
   ): { done: boolean; envelopeProtocol: boolean } {
-    if (isSearchResult(parsed)) {
-      if (!seenKeys.has(parsed.source_key)) {
-        seenKeys.add(parsed.source_key);
-        appendResult(parsed);
+    if (isRawSearchResult(parsed)) {
+      const result = normalizeSearchResult(parsed);
+      const key = resultIdentity(result);
+      if (key && !seenKeys.has(key)) {
+        seenKeys.add(key);
+        appendResult(result);
       }
       return { done: false, envelopeProtocol: false };
     }
 
-    if (parsed.type === 'result' && parsed.result) {
-      if (!seenKeys.has(parsed.result.source_key)) {
-        seenKeys.add(parsed.result.source_key);
-        appendResult(parsed.result);
+    // Not a raw result and not an envelope — skip silently.
+    if (!isEnvelope(parsed)) {
+      return { done: false, envelopeProtocol: false };
+    }
+
+    if (parsed.type === 'result' && isRawSearchResult(parsed.result)) {
+      const result = normalizeSearchResult(parsed.result);
+      const key = resultIdentity(result);
+      if (key && !seenKeys.has(key)) {
+        seenKeys.add(key);
+        appendResult(result);
       }
       return { done: false, envelopeProtocol: true };
     }
 
-    if (parsed.result) {
-      if (!seenKeys.has(parsed.result.source_key)) {
-        seenKeys.add(parsed.result.source_key);
-        appendResult(parsed.result);
+    if (isRawSearchResult(parsed.result)) {
+      const result = normalizeSearchResult(parsed.result);
+      const key = resultIdentity(result);
+      if (key && !seenKeys.has(key)) {
+        seenKeys.add(key);
+        appendResult(result);
       }
     }
-    if (parsed.meta) setMeta(parsed.meta);
+    if (parsed.meta) setMeta(normalizeSearchMeta(parsed.meta));
     return {
       done: Boolean(parsed.done || parsed.type === 'done'),
       envelopeProtocol: true,
@@ -145,8 +185,7 @@ export function useSearchStream() {
     });
 
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new ApiError(response.status, body || response.statusText);
+      throw await apiErrorFromResponse(response);
     }
     if (!response.body) {
       throw new ApiError(response.status, 'Streaming response body was empty.');
@@ -233,9 +272,16 @@ export function useSearchStream() {
       }
 
       if (!completed && !current.signal.aborted) {
-        setError(
-          'Search stream ended before completion. Showing partial results.',
-        );
+        if (results.length > 0) {
+          // Partial results are better than nothing; nudge instead of error.
+          setError(
+            'Search stream ended before completion. Showing partial results.',
+          );
+        } else {
+          setError(
+            'Search stream ended before completion. No results available.',
+          );
+        }
       }
     } catch (streamError) {
       if (streamError instanceof Error && streamError.name === 'TimeoutError') {
