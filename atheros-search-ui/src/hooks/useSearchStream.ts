@@ -181,7 +181,10 @@ export function useSearchStream() {
         const applied = applyParsed(parsed, seenKeys);
         completed = applied.done;
         envelopeProtocol ||= applied.envelopeProtocol;
-        if (completed) break;
+        if (completed) {
+          await reader.cancel().catch(() => {});
+          break;
+        }
       }
     }
 
@@ -204,6 +207,7 @@ export function useSearchStream() {
     batch(() => {
       clearResults();
       setLoading(false);
+      setRetrying(false);
       setStreaming(true);
       setError(null);
       setMeta(initialMeta);

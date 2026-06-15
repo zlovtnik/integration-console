@@ -2,17 +2,25 @@ module Observability
   class JobMetrics
     class << self
       def record(job:, status:, duration_ms:, extra: {})
-        IntegrationConsole::Metrics.observe_worker_cycle(
-          worker: job,
-          status: status,
-          duration_ms: duration_ms
-        )
+        begin
+          IntegrationConsole::Metrics.observe_worker_cycle(
+            worker: job,
+            status: status,
+            duration_ms: duration_ms
+          )
+        rescue => error
+          Rails.logger.warn("Observability worker metrics failed for #{job}: #{error.class} #{error.message}")
+        end
 
-        Pushgateway.push(
-          job: job,
-          grouping: { service: ENV.fetch("OTEL_SERVICE_NAME", job) },
-          metrics: body(job: job, status: status, duration_ms: duration_ms, extra: extra)
-        )
+        begin
+          Pushgateway.push(
+            job: job,
+            grouping: { service: ENV.fetch("OTEL_SERVICE_NAME", job) },
+            metrics: body(job: job, status: status, duration_ms: duration_ms, extra: extra)
+          )
+        rescue => error
+          Rails.logger.warn("Observability pushgateway publish failed for #{job}: #{error.class} #{error.message}")
+        end
       end
 
       private
@@ -31,6 +39,9 @@ module Observability
           "observability_job_last_run_timestamp_seconds #{Time.now.to_f}",
         ]
         extra.each do |name, value|
+          name = name.to_s
+          next unless name.match?(/\A[A-Za-z0-9_]+\z/)
+
           metric = "observability_job_#{name}"
           lines << "# TYPE #{metric} gauge"
           lines << "#{metric} #{numeric(value)}"

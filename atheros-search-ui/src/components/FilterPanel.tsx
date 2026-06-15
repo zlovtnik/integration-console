@@ -518,14 +518,16 @@ export function FilterPanel(props: {
                 type="number"
                 min="0"
                 value={filters.security_flags_mask ?? ''}
-                onInput={(event) =>
+                onInput={(event) => {
+                  const parsedValue =
+                    event.currentTarget.value === ''
+                      ? undefined
+                      : Number(event.currentTarget.value);
                   setFilters(
                     'security_flags_mask',
-                    event.currentTarget.value
-                      ? Number(event.currentTarget.value)
-                      : undefined,
-                  )
-                }
+                    Number.isFinite(parsedValue) ? parsedValue : undefined,
+                  );
+                }}
               />
             </label>
 

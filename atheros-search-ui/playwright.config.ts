@@ -2,7 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 
 const requestedPort = Number(process.env.PLAYWRIGHT_PORT);
 const port =
-  Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 5173;
+  Number.isInteger(requestedPort) &&
+  requestedPort > 0 &&
+  requestedPort <= 65535
+    ? requestedPort
+    : 5173;
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({

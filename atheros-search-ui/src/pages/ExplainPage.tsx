@@ -58,7 +58,7 @@ export default function ExplainPage() {
         <A
           href={`/?q=${encodeURIComponent(
             typeof searchParams.query === 'string' ? searchParams.query : '',
-          )}`}
+          )}${typeof searchParams.kind === 'string' ? `&kind=${encodeURIComponent(searchParams.kind)}` : ''}`}
           class="btn btn-ghost back-link"
         >
           <ArrowLeft size={16} aria-hidden="true" />

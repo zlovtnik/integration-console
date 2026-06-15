@@ -34,12 +34,11 @@ export function ApiStatus() {
     })[status()];
 
   return (
-    <span
+    <button
+      type="button"
       class={`api-status api-status--${status()}`}
-      role="status"
+      aria-label={label()}
       title={label()}
-    >
-      <span class="sr-only">{label()}</span>
-    </span>
+    />
   );
 }

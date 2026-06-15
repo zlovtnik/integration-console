@@ -26,6 +26,11 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
   end
 
   OTEL_DB_TRACER = OpenTelemetry.tracer_provider.tracer("integration-console.active_record")
+  integration_console_db_name = lambda do
+    ActiveRecord::Base.connection_db_config.database.presence || "integration_console"
+  rescue
+    "integration_console"
+  end
 
   ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, started, finished, _id, payload|
     next if payload[:name] == "SCHEMA"
@@ -38,7 +43,7 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
       attributes: {
         "db.system" => "postgresql",
         "db.operation" => operation,
-        "db.name" => integration_console_db_name,
+        "db.name" => integration_console_db_name.call,
         "status" => payload[:exception].present? ? "error" : "ok",
       }
     )
@@ -46,10 +51,4 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
   rescue => error
     Rails.logger.debug("OpenTelemetry ActiveRecord span skipped: #{error.class} #{error.message}")
   end
-end
-
-def integration_console_db_name
-  ActiveRecord::Base.connection_db_config.database.presence || "integration_console"
-rescue
-  "integration_console"
 end

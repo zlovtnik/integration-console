@@ -15,6 +15,7 @@ export const GRAPH_NODE_KINDS: NodeKind[] = [
   'client',
   'shadow_alert',
   'alert',
+  'embedding',
 ];
 
 export const GRAPH_LIMITS = [50, 100, 200, 500] as const;

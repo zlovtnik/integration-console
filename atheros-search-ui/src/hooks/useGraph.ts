@@ -12,10 +12,12 @@ import {
 
 export function useGraph() {
   let ctrl: AbortController | null = null;
+  let activeRequestId = 0;
 
   async function load() {
     ctrl?.abort();
     ctrl = new AbortController();
+    const requestId = ++activeRequestId;
     clearGraph();
     setGraphLoading(true);
 
@@ -30,9 +32,14 @@ export function useGraph() {
       });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      setGraphError((err as Error).message || 'Graph load failed.');
+      if (requestId === activeRequestId) {
+        setGraphError((err as Error).message || 'Graph load failed.');
+      }
     } finally {
-      setGraphLoading(false);
+      if (requestId === activeRequestId) {
+        ctrl = null;
+        setGraphLoading(false);
+      }
     }
   }
 

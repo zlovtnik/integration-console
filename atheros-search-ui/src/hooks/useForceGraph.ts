@@ -145,6 +145,13 @@ export function useForceGraph(
       .attr('role', 'button')
       .attr('aria-label', (item) => `${nodeKindLabel(item.kind)} ${item.label}`)
       .on('click', (_, item) => options.onNodeClick?.(item))
+      .on('keydown', (event, item) => {
+        if (event.key !== 'Enter' && event.key !== ' ' && event.code !== 'Space') {
+          return;
+        }
+        event.preventDefault();
+        options.onNodeClick?.(item);
+      })
       .on('mouseenter', (_, item) => options.onNodeHover?.(item))
       .on('mouseleave', () => options.onNodeHover?.(null));
 
@@ -348,7 +355,19 @@ export function useForceGraph(
     const pinned = options.pinnedNodeIds?.() ?? new Set<string>();
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
-      .classed('pinned', (item) => pinned.has(item.id));
+      .classed('pinned', (item) => pinned.has(item.id))
+      .each((item) => {
+        if (pinned.has(item.id)) {
+          if (item.fx == null || item.fy == null) {
+            item.fx = item.x ?? null;
+            item.fy = item.y ?? null;
+          }
+          return;
+        }
+
+        item.fx = null;
+        item.fy = null;
+      });
   }
 
   function endpointKind(value: string | SimNode): NodeKind {

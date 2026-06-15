@@ -68,8 +68,9 @@ export function useUrlSync() {
       if (tags) urlFilters.tags = tags;
       if (params.threat) urlFilters.threat_only = first(params.threat) === '1';
       if (params.hs) urlFilters.handshake_only = first(params.hs) === '1';
-      if (mask && !Number.isNaN(Number(mask))) {
-        urlFilters.security_flags_mask = Number(mask);
+      const parsedMask = mask ? Number(mask) : undefined;
+      if (parsedMask !== undefined && Number.isFinite(parsedMask)) {
+        urlFilters.security_flags_mask = parsedMask;
       }
 
       const nextFilters = cleanFilters(urlFilters);
@@ -77,10 +78,10 @@ export function useUrlSync() {
       if (typeof params.q === 'string') setQuery(params.q);
       if (isSearchKind(nextKind)) setKind(normalizeSearchKind(nextKind));
       if (isSearchMode(nextMode)) setMode(normalizeSearchMode(nextMode));
-      if (params.k && Number(first(params.k)) > 0)
-        setTopK(Number(first(params.k)));
-      if (params.min && Number(first(params.min)) >= 0)
-        setMinSimilarity(Number(first(params.min)));
+      const parsedK = Number(first(params.k));
+      if (Number.isFinite(parsedK) && parsedK > 0) setTopK(parsedK);
+      const parsedMin = Number(first(params.min));
+      if (Number.isFinite(parsedMin) && parsedMin >= 0) setMinSimilarity(parsedMin);
       setFilters(reconcile(nextFilters));
       setReady(true);
     });

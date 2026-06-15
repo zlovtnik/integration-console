@@ -14,6 +14,7 @@ const SESSION_STORAGE_KEY = 'atheros-search.session-id';
 const HISTORY_LIMIT = 50;
 const DEFAULT_KIND: SearchKind = 'SEARCH_KIND_EVENT';
 const DEFAULT_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+let fallbackSessionId: string | null = null;
 
 function readSessionList(key: string): string[] {
   if (typeof window === 'undefined') return [];
@@ -50,8 +51,13 @@ function createFallbackSessionId(): string {
   return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function cachedFallbackSessionId(): string {
+  fallbackSessionId ||= createFallbackSessionId();
+  return fallbackSessionId;
+}
+
 function tabSessionId(): string {
-  if (typeof window === 'undefined') return createFallbackSessionId();
+  if (typeof window === 'undefined') return cachedFallbackSessionId();
 
   try {
     const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -63,7 +69,7 @@ function tabSessionId(): string {
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, next);
     return next;
   } catch {
-    return createFallbackSessionId();
+    return cachedFallbackSessionId();
   }
 }
 

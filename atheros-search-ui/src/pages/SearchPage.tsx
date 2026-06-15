@@ -246,6 +246,8 @@ export default function SearchPage() {
     streamSearch.cancel();
     abortController?.abort();
     abortController = null;
+    window.clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = undefined;
     setLoading(false);
   }
 
