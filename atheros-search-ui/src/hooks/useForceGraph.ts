@@ -1,9 +1,17 @@
 import * as d3 from 'd3';
-import { createEffect, on, onCleanup, onMount } from 'solid-js';
+import { createEffect, on, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import type { GraphEdge, GraphNode, NodeKind } from '~/api/types';
+import {
+  createSimNodes,
+  finiteCoord,
+  stableUnitValue,
+  useForceLayout,
+  type SimNodeDatum,
+} from './useForceLayout';
+import { circlePath, polygonPath } from '~/utils/graphShapes';
 
-export interface SimNode extends GraphNode, d3.SimulationNodeDatum {}
+export type SimNode = SimNodeDatum<GraphNode>;
 
 export interface SimEdge extends d3.SimulationLinkDatum<SimNode> {
   id: string;
@@ -28,29 +36,15 @@ export function useForceGraph(
   edges: () => GraphEdge[],
   options: ForceGraphOptions = {},
 ) {
-  let sim: d3.Simulation<SimNode, SimEdge> | null = null;
-  let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
-  let nodeById = new Map<string, SimNode>();
-  let prevNodeById = new Map<string, SimNode>();
+  const layout = useForceLayout<GraphNode, SimEdge>(svgRef, {
+    pinnedNodeIds: options.pinnedNodeIds,
+  });
   let visibilityEffectReady = false;
 
   function build() {
-    const el = svgRef();
-    if (!el) return;
-
-    sim?.stop();
-    sim = null;
-    d3.select(el).selectAll('*').remove();
-
-    const bounds = el.getBoundingClientRect();
-    const width = Math.max(bounds.width || el.clientWidth, 320);
-    const height = Math.max(bounds.height || el.clientHeight, 240);
-    const simNodes = createSimNodes(
-      nodes(),
-      options.pinnedNodeIds?.() ?? new Set<string>(),
-      prevNodeById,
-    );
-    nodeById = new Map(simNodes.map((node) => [node.id, node]));
+    const prepared = layout.prepare(nodes());
+    if (!prepared) return;
+    const { svg, container, width, height, simNodes, nodeById } = prepared;
     const simEdges: SimEdge[] = edges()
       .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
       .map((edge) => {
@@ -65,7 +59,6 @@ export function useForceGraph(
         return next;
       });
 
-    const svg = d3.select<SVGSVGElement, unknown>(el);
     const defs = svg.append('defs');
     [
       'association',
@@ -92,13 +85,6 @@ export function useForceGraph(
         .attr('fill', edgeColor(kind));
     });
 
-    const container = svg.append('g').attr('class', 'graph-viewport');
-    zoomBehavior = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.05, 6])
-      .on('zoom', (event) => container.attr('transform', event.transform));
-    svg.call(zoomBehavior);
-
     const link = container
       .append('g')
       .attr('class', 'graph-links')
@@ -118,24 +104,7 @@ export function useForceGraph(
       .append('title')
       .text((edge) => edge.label || edge.kind.replaceAll('_', ' '));
 
-    const dragBehavior = d3
-      .drag<SVGGElement, SimNode>()
-      .on('start', (event, node) => {
-        if (!event.active) sim?.alphaTarget(0.3).restart();
-        node.fx = node.x;
-        node.fy = node.y;
-      })
-      .on('drag', (event, node) => {
-        node.fx = event.x;
-        node.fy = event.y;
-      })
-      .on('end', (event, node) => {
-        if (!event.active) sim?.alphaTarget(0);
-        if (!options.pinnedNodeIds?.().has(node.id)) {
-          node.fx = null;
-          node.fy = null;
-        }
-      });
+    const dragBehavior = layout.createDragBehavior();
 
     const node = container
       .append('g')
@@ -210,7 +179,7 @@ export function useForceGraph(
       .text((item) => truncate(item.label, 22));
 
     let fitOnSimulationEnd = true;
-    sim = d3
+    const simulation = d3
       .forceSimulation<SimNode>(simNodes)
       .force(
         'link',
@@ -250,69 +219,15 @@ export function useForceGraph(
       .on('end', () => {
         if (!fitOnSimulationEnd) return;
         fitOnSimulationEnd = false;
-        fitToGraph();
+        layout.fitToGraph();
       });
+
+    layout.setSimulation(simulation);
 
     applyVisibility(false);
     applySelection();
     applyPinned();
-    prevNodeById = nodeById;
-  }
-
-  function resetZoom() {
-    if (fitToGraph()) return;
-    const el = svgRef();
-    if (!el || !zoomBehavior) return;
-    d3.select<SVGSVGElement, unknown>(el).call(
-      zoomBehavior.transform,
-      d3.zoomIdentity,
-    );
-  }
-
-  function fitToGraph(nodeIds?: Set<string>, padding = 56): boolean {
-    const el = svgRef();
-    if (!el || !zoomBehavior || nodeById.size === 0) return false;
-    const positioned = Array.from(nodeById.values()).filter(
-      (node) =>
-        Number.isFinite(node.x) &&
-        Number.isFinite(node.y) &&
-        (!nodeIds || nodeIds.has(node.id)),
-    );
-    if (positioned.length === 0) return false;
-
-    const bounds = el.getBoundingClientRect();
-    const width = Math.max(bounds.width || el.clientWidth, 320);
-    const height = Math.max(bounds.height || el.clientHeight, 240);
-    const minX = d3.min(positioned, (node) => node.x ?? 0) ?? 0;
-    const maxX = d3.max(positioned, (node) => node.x ?? 0) ?? 0;
-    const minY = d3.min(positioned, (node) => node.y ?? 0) ?? 0;
-    const maxY = d3.max(positioned, (node) => node.y ?? 0) ?? 0;
-    const graphWidth = Math.max(maxX - minX, 1);
-    const graphHeight = Math.max(maxY - minY, 1);
-    const scale = Math.max(
-      0.12,
-      Math.min(
-        2,
-        (width - padding * 2) / graphWidth,
-        (height - padding * 2) / graphHeight,
-      ),
-    );
-    const centerX = minX + graphWidth / 2;
-    const centerY = minY + graphHeight / 2;
-    const transform = d3.zoomIdentity
-      .translate(width / 2 - centerX * scale, height / 2 - centerY * scale)
-      .scale(scale);
-
-    d3.select<SVGSVGElement, unknown>(el).call(
-      zoomBehavior.transform,
-      transform,
-    );
-    return true;
-  }
-
-  function stop() {
-    sim?.stop();
-    sim = null;
+    layout.markBuilt();
   }
 
   function applyVisibility(
@@ -344,7 +259,7 @@ export function useForceGraph(
         edgeIsVisible(edge) ? `url(#arrow-${edge.kind})` : null,
       );
 
-    if (restartSimulation) sim?.alpha(0.05).restart();
+    if (restartSimulation) layout.restart();
   }
 
   function applySelection(selected = options.selectedNodeId?.() ?? null) {
@@ -387,7 +302,7 @@ export function useForceGraph(
       });
 
     if (selected) {
-      queueMicrotask(() => fitToGraph(related, 80));
+      queueMicrotask(() => layout.fitToGraph(related, 80));
     }
   }
 
@@ -415,7 +330,7 @@ export function useForceGraph(
 
   function endpointKind(value: string | SimNode): NodeKind {
     if (typeof value === 'string') {
-      return nodeById.get(value)?.kind ?? 'device';
+      return layout.nodeById().get(value)?.kind ?? 'device';
     }
     return value.kind;
   }
@@ -436,45 +351,11 @@ export function useForceGraph(
   );
   createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
   createEffect(on(() => options.pinnedNodeIds?.(), applyPinned));
-  onCleanup(stop);
 
-  return { rebuild: build, resetZoom, stop };
+  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop };
 }
 
-export function createSimNodes(
-  sourceNodes: GraphNode[],
-  pinned: Set<string>,
-  previousNodeById: Map<string, SimNode>,
-): SimNode[] {
-  return sourceNodes.map((node) => {
-    const next: SimNode = { ...node };
-    const previous = previousNodeById.get(node.id);
-
-    if (hasFinitePosition(previous)) {
-      next.x = previous.x;
-      next.y = previous.y;
-    }
-
-    if (pinned.has(node.id) && hasFinitePosition(previous)) {
-      next.fx = previous.x;
-      next.fy = previous.y;
-    }
-
-    return next;
-  });
-}
-
-function hasFinitePosition(
-  node: SimNode | undefined,
-): node is SimNode & { x: number; y: number } {
-  return (
-    node !== undefined && Number.isFinite(node.x) && Number.isFinite(node.y)
-  );
-}
-
-function finiteCoord(value: number | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
+export { createSimNodes };
 
 function nodeLaneX(node: GraphNode, width: number): number {
   const lanes: Record<NodeKind, number> = {
@@ -494,14 +375,6 @@ function nodeLaneY(node: GraphNode, index: number, height: number): number {
   const top = Math.max(32, (height - band) / 2);
   const spread = stableUnitValue(node.id || `${node.kind}:${index}`);
   return top + spread * band;
-}
-
-function stableUnitValue(value: string): number {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  }
-  return (hash % 997) / 996;
 }
 
 export function nodeRadius(node: GraphNode): number {
@@ -531,26 +404,6 @@ function nodeShapePath(node: GraphNode): string {
     default:
       return circlePath(r);
   }
-}
-
-function polygonPath(
-  radius: number,
-  sides: number,
-  rotation = -Math.PI / 2,
-): string {
-  const points = Array.from({ length: sides }, (_, index) => {
-    const angle = rotation + (index * Math.PI * 2) / sides;
-    return `${round(Math.cos(angle) * radius)},${round(Math.sin(angle) * radius)}`;
-  });
-  return `M${points.join('L')}Z`;
-}
-
-function circlePath(radius: number): string {
-  return `M${-radius},0a${radius},${radius} 0 1,0 ${radius * 2},0a${radius},${radius} 0 1,0 ${-radius * 2},0`;
-}
-
-function round(value: number): number {
-  return Number(value.toFixed(2));
 }
 
 export function nodeColor(node: Pick<GraphNode, 'kind'>): string {

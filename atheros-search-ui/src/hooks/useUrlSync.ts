@@ -24,6 +24,7 @@ import {
   setTopK,
   topK,
 } from '~/stores/searchStore';
+import { asRfc3339 } from '~/utils/timestamp';
 
 function asList(value: string | string[] | undefined): string[] | undefined {
   if (!value) return undefined;
@@ -68,12 +69,14 @@ export function useUrlSync() {
         urlFilters.source_macs = macs;
       }
       if (frameSubtypes) urlFilters.frame_subtypes = frameSubtypes;
-      if (typeof params.after === 'string' && params.after) {
-        urlFilters.observed_after = params.after;
-      }
-      if (typeof params.before === 'string' && params.before) {
-        urlFilters.observed_before = params.before;
-      }
+      const observedAfter =
+        typeof params.after === 'string' ? asRfc3339(params.after) : undefined;
+      const observedBefore =
+        typeof params.before === 'string'
+          ? asRfc3339(params.before)
+          : undefined;
+      if (observedAfter) urlFilters.observed_after = observedAfter;
+      if (observedBefore) urlFilters.observed_before = observedBefore;
       if (tags) urlFilters.tags = tags;
       if (params.threat) urlFilters.threat_only = first(params.threat) === '1';
       if (params.hs) urlFilters.handshake_only = first(params.hs) === '1';

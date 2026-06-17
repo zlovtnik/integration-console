@@ -4,6 +4,7 @@ import {
   apiErrorFromResponse,
   normalizeSearchMeta,
   normalizeSearchResult,
+  prepareSearchRequest,
 } from '~/api/client';
 import { env } from '~/env';
 import {
@@ -180,7 +181,7 @@ export function useSearchStream() {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(prepareSearchRequest(request, 'search-stream')),
       signal: signalWithTimeout(current.signal, 30_000),
     });
 

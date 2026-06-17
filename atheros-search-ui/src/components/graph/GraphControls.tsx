@@ -13,6 +13,10 @@ import {
 import { suggestions } from '~/stores/suggestStore';
 import { nodeKindLabel } from '~/hooks/useForceGraph';
 import type { NodeKind } from '~/api/types';
+import {
+  localInputToRfc3339,
+  rfc3339ToLocalInput,
+} from '~/utils/timestamp';
 
 function splitList(value: string): string[] | undefined {
   const values = value
@@ -122,13 +126,12 @@ export function GraphControls(props: {
         <label class="field graph-field graph-field--date">
           <span>After</span>
           <input
-            type="text"
-            value={graphFilters.observed_after ?? ''}
-            placeholder="2026-06-13T14:00:00Z"
+            type="datetime-local"
+            value={rfc3339ToLocalInput(graphFilters.observed_after)}
             onInput={(event) =>
               setGraphFilters(
                 'observed_after',
-                event.currentTarget.value || undefined,
+                localInputToRfc3339(event.currentTarget.value),
               )
             }
           />
@@ -137,13 +140,12 @@ export function GraphControls(props: {
         <label class="field graph-field graph-field--date">
           <span>Before</span>
           <input
-            type="text"
-            value={graphFilters.observed_before ?? ''}
-            placeholder="2026-06-13T18:00:00Z"
+            type="datetime-local"
+            value={rfc3339ToLocalInput(graphFilters.observed_before)}
             onInput={(event) =>
               setGraphFilters(
                 'observed_before',
-                event.currentTarget.value || undefined,
+                localInputToRfc3339(event.currentTarget.value),
               )
             }
           />

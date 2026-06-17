@@ -23,6 +23,7 @@ import {
   graphNodes,
   pinnedNodeIds,
   selectedNodeId,
+  setGraphFilters,
   setSelectedNodeId,
   visibleGraphKinds,
 } from '~/stores/graphStore';
@@ -63,6 +64,10 @@ export default function GraphPage() {
 
   onMount(() => {
     document.title = 'Device graph - atheros search';
+    const sourceMac = new URLSearchParams(window.location.search)
+      .get('mac')
+      ?.trim();
+    if (sourceMac) setGraphFilters('source_mac', sourceMac);
     void load();
 
     function handleKeydown(event: KeyboardEvent) {
