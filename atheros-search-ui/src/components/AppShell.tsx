@@ -1,9 +1,10 @@
-import type { ParentComponent } from 'solid-js';
-import { onCleanup, onMount } from 'solid-js';
+import { children, onCleanup, onMount, type ParentComponent } from 'solid-js';
 import { useFocusOnNavigate } from '~/hooks/useFocusOnNavigate';
 import { TopNav } from './TopNav';
 
 export const AppShell: ParentComponent = (props) => {
+  const resolvedChildren = children(() => props.children);
+
   useFocusOnNavigate();
 
   onMount(() => {
@@ -31,7 +32,7 @@ export const AppShell: ParentComponent = (props) => {
       <header role="banner">
         <TopNav />
       </header>
-      {props.children}
+      {resolvedChildren()}
       <div
         id="toast-region"
         role="status"

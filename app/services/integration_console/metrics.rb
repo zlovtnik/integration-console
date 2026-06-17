@@ -46,7 +46,15 @@ module IntegrationConsole
         snapshot = synchronize do
           {
             counters: state[:counters].values.map(&:dup),
-            histograms: state[:histograms].values.map { |histogram| Marshal.load(Marshal.dump(histogram)) },
+            histograms: state[:histograms].values.map do |histogram|
+              {
+                name: histogram[:name],
+                labels: histogram[:labels].dup,
+                buckets: histogram[:buckets].dup,
+                count: histogram[:count],
+                sum: histogram[:sum],
+              }
+            end,
             gauges: state[:gauges].values.map(&:dup),
           }
         end
@@ -148,7 +156,7 @@ module IntegrationConsole
       end
 
       def series_key(name, labels)
-        [name, normalize_labels(labels).sort].hash
+        [name, normalize_labels(labels).sort]
       end
 
       def normalize_labels(labels)

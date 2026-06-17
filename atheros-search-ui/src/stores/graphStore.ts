@@ -30,8 +30,9 @@ function graphKindFilter(kinds: Set<NodeKind>): NodeKind[] | undefined {
 
 export const [graphNodes, setGraphNodes] = createSignal<GraphNode[]>([]);
 export const [graphEdges, setGraphEdges] = createSignal<GraphEdge[]>([]);
-export const [graphMeta, setGraphMeta] =
-  createStore<Partial<GraphResponse>>({});
+export const [graphMeta, setGraphMeta] = createStore<Partial<GraphResponse>>(
+  {},
+);
 export const [graphLoading, setGraphLoading] = createSignal(false);
 export const [graphError, setGraphError] = createSignal<string | null>(null);
 export const [graphFilters, setGraphFilters] = createStore<GraphFilters>({
@@ -43,8 +44,9 @@ export const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(
 export const [pinnedNodeIds, setPinnedNodeIds] = createSignal<Set<string>>(
   new Set(),
 );
-export const [visibleGraphKinds, setVisibleGraphKinds] =
-  createSignal<Set<NodeKind>>(defaultVisibleKinds());
+export const [visibleGraphKinds, setVisibleGraphKinds] = createSignal<
+  Set<NodeKind>
+>(defaultVisibleKinds());
 
 export function togglePin(id: string) {
   setPinnedNodeIds((prev) => {

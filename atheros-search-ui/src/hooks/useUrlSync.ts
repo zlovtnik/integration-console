@@ -4,6 +4,10 @@ import { reconcile } from 'solid-js/store';
 import { isSearchKind, isSearchMode, type SearchFilters } from '~/api/types';
 import {
   cleanFilters,
+  DEFAULT_MIN_SIMILARITY,
+  DEFAULT_SEARCH_KIND,
+  DEFAULT_SEARCH_MODE,
+  DEFAULT_TOP_K,
   filters,
   kind,
   minSimilarity,
@@ -11,6 +15,7 @@ import {
   normalizeSearchKind,
   normalizeSearchMode,
   query,
+  resetSearchControlsFromUrlDefaults,
   setFilters,
   setKind,
   setMinSimilarity,
@@ -23,8 +28,14 @@ import {
 function asList(value: string | string[] | undefined): string[] | undefined {
   if (!value) return undefined;
   const list = Array.isArray(value) ? value : [value];
-  const compact = list.map((item) => item.trim()).filter(Boolean);
+  const compact = Array.from(
+    new Set(list.map((item) => item.trim()).filter(Boolean)),
+  );
   return compact.length > 0 ? compact : undefined;
+}
+
+function sourceMacParams(source: SearchFilters): string[] | undefined {
+  return asList([source.source_mac ?? '', ...(source.source_macs ?? [])]);
 }
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -37,6 +48,7 @@ export function useUrlSync() {
 
   onMount(() => {
     batch(() => {
+      resetSearchControlsFromUrlDefaults();
       const nextKind = first(params.kind);
       const nextMode = first(params.mode);
       const urlFilters: SearchFilters = {};
@@ -52,10 +64,7 @@ export function useUrlSync() {
       if (typeof params.ssid === 'string' && params.ssid) {
         urlFilters.ssid = params.ssid;
       }
-      if (macs?.length === 1) {
-        const mac = macs[0];
-        if (mac) urlFilters.source_mac = mac;
-      } else if (macs && macs.length > 1) {
+      if (macs) {
         urlFilters.source_macs = macs;
       }
       if (frameSubtypes) urlFilters.frame_subtypes = frameSubtypes;
@@ -68,19 +77,34 @@ export function useUrlSync() {
       if (tags) urlFilters.tags = tags;
       if (params.threat) urlFilters.threat_only = first(params.threat) === '1';
       if (params.hs) urlFilters.handshake_only = first(params.hs) === '1';
-      if (mask && !Number.isNaN(Number(mask))) {
-        urlFilters.security_flags_mask = Number(mask);
+      const parsedMask = mask ? Number(mask) : undefined;
+      if (parsedMask !== undefined && Number.isFinite(parsedMask)) {
+        urlFilters.security_flags_mask = parsedMask;
       }
 
       const nextFilters = cleanFilters(urlFilters);
 
-      if (typeof params.q === 'string') setQuery(params.q);
-      if (isSearchKind(nextKind)) setKind(normalizeSearchKind(nextKind));
-      if (isSearchMode(nextMode)) setMode(normalizeSearchMode(nextMode));
-      if (params.k && Number(first(params.k)) > 0)
-        setTopK(Number(first(params.k)));
-      if (params.min && Number(first(params.min)) >= 0)
-        setMinSimilarity(Number(first(params.min)));
+      setQuery(typeof params.q === 'string' ? params.q : '');
+      setKind(
+        isSearchKind(nextKind)
+          ? normalizeSearchKind(nextKind)
+          : DEFAULT_SEARCH_KIND,
+      );
+      setMode(
+        isSearchMode(nextMode)
+          ? normalizeSearchMode(nextMode)
+          : DEFAULT_SEARCH_MODE,
+      );
+      const parsedK = Number(first(params.k));
+      setTopK(
+        Number.isFinite(parsedK) && parsedK > 0 ? parsedK : DEFAULT_TOP_K,
+      );
+      const parsedMin = Number(first(params.min));
+      setMinSimilarity(
+        Number.isFinite(parsedMin) && parsedMin >= 0
+          ? parsedMin
+          : DEFAULT_MIN_SIMILARITY,
+      );
       setFilters(reconcile(nextFilters));
       setReady(true);
     });
@@ -89,6 +113,7 @@ export function useUrlSync() {
   createEffect(() => {
     if (!ready()) return;
     const nextFilters = cleanFilters(filters);
+    const macs = sourceMacParams(filters);
 
     const next: Record<string, string | string[] | undefined> = {
       q: query() || undefined,
@@ -109,9 +134,7 @@ export function useUrlSync() {
         ? nextFilters.sensor_ids
         : undefined,
       ssid: nextFilters.ssid || undefined,
-      mac: nextFilters.source_macs?.length
-        ? nextFilters.source_macs
-        : nextFilters.source_mac || undefined,
+      mac: macs,
       frame: nextFilters.frame_subtypes?.length
         ? nextFilters.frame_subtypes
         : undefined,

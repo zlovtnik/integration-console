@@ -1,9 +1,10 @@
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useNavigate } from '@solidjs/router';
 import {
   createEffect,
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -94,14 +95,12 @@ function readLiveStreamPreference(): boolean {
 
 export default function SearchPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [filtersOpen, setFiltersOpen] = createSignal(false);
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [useStream, setUseStream] = createSignal(readLiveStreamPreference());
   const [searched, setSearched] = createSignal(false);
   const [lastSearchMs, setLastSearchMs] = createSignal<number | null>(null);
   const [activeResultIndex, setActiveResultIndex] = createSignal(-1);
-  const [lastAutoQuery, setLastAutoQuery] = createSignal('');
   const streamSearch = useSearchStream();
   const restoreScroll = useScrollRestoration();
   let abortController: AbortController | null = null;
@@ -113,39 +112,34 @@ export default function SearchPage() {
 
   onMount(() => {
     window.scrollTo(0, restoreScroll());
+    const initialQuery =
+      new URLSearchParams(window.location.search).get('q')?.trim() ?? '';
+    if (initialQuery) queueSearch();
   });
 
-  createEffect(() => {
-    document.title = query().trim()
-      ? `${query().trim()} - atheros search`
-      : 'Search - atheros search';
-  });
+  createEffect(
+    on(
+      () => query().trim(),
+      (titleQuery) => {
+        document.title = titleQuery
+          ? `${titleQuery} - atheros search`
+          : 'Search - atheros search';
+      },
+    ),
+  );
 
-  createEffect(() => {
-    try {
-      window.localStorage.setItem(
-        'atheros-search.live-stream',
-        String(useStream()),
-      );
-    } catch {
-      // Preference persistence can be disabled by browser policy.
-    }
-  });
-
-  createEffect(() => {
-    const urlQuery =
-      new URLSearchParams(location.search).get('q')?.trim() ?? '';
-    const active = document.activeElement as HTMLElement | null;
-    const localEditInProgress = Boolean(active?.closest('.search-controls'));
-
-    if (!urlQuery || urlQuery === lastAutoQuery() || localEditInProgress) {
-      return;
-    }
-    if (urlQuery !== query().trim()) return;
-
-    setLastAutoQuery(urlQuery);
-    queueSearch();
-  });
+  createEffect(
+    on(useStream, (enabled) => {
+      try {
+        window.localStorage.setItem(
+          'atheros-search.live-stream',
+          String(enabled),
+        );
+      } catch {
+        // Preference persistence can be disabled by browser policy.
+      }
+    }),
+  );
 
   const resultMeta = createMemo(() => {
     if (loading()) return 'Searching...';
@@ -168,25 +162,23 @@ export default function SearchPage() {
     Math.min(100, (results.length / Math.max(1, topK())) * 100),
   );
 
-  const skeletons = createMemo(() =>
-    Array.from(
-      { length: Math.max(3, Math.min(topK(), 8)) },
-      (_, index) => index,
-    ),
-  );
-
   const errorCopy = createMemo(() => friendlyError(error() ?? ''));
 
-  createEffect(() => {
-    if (results.length === 0) {
-      setActiveResultIndex(-1);
-      return;
-    }
+  createEffect(
+    on(
+      () => results.length,
+      (resultCount) => {
+        if (resultCount === 0) {
+          setActiveResultIndex(-1);
+          return;
+        }
 
-    if (activeResultIndex() >= results.length) {
-      setActiveResultIndex(results.length - 1);
-    }
-  });
+        if (activeResultIndex() >= resultCount) {
+          setActiveResultIndex(resultCount - 1);
+        }
+      },
+    ),
+  );
 
   onCleanup(() => window.clearTimeout(searchDebounceTimer));
 
@@ -246,6 +238,8 @@ export default function SearchPage() {
     streamSearch.cancel();
     abortController?.abort();
     abortController = null;
+    window.clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = undefined;
     setLoading(false);
   }
 
@@ -435,68 +429,44 @@ export default function SearchPage() {
               when={error()}
               fallback={
                 <Show
-                  when={streaming()}
+                  when={results.length > 0}
                   fallback={
                     <Show
-                      when={loading()}
+                      when={loading() || streaming()}
                       fallback={
-                        <Show
-                          when={results.length > 0}
-                          fallback={
-                            <div class="empty-state">
-                              <Show
-                                when={searched()}
-                                fallback={
-                                  <div class="empty-welcome">
-                                    <p class="caption">Try searching for:</p>
-                                    <ul role="list" class="example-queries">
-                                      <For each={EXAMPLE_QUERIES}>
-                                        {(example) => (
-                                          <li>
-                                            <button
-                                              type="button"
-                                              class="example-query-btn"
-                                              onClick={() => {
-                                                setQuery(example);
-                                                queueSearch();
-                                              }}
-                                            >
-                                              {example}
-                                            </button>
-                                          </li>
-                                        )}
-                                      </For>
-                                    </ul>
-                                  </div>
-                                }
-                              >
-                                <p>
-                                  No results for "{query()}" - try broadening
-                                  your search or removing filters.
-                                </p>
-                              </Show>
-                            </div>
-                          }
-                        >
-                          <ol
-                            aria-labelledby="results-heading"
-                            role="list"
-                            class="result-list"
+                        <div class="empty-state">
+                          <Show
+                            when={searched()}
+                            fallback={
+                              <div class="empty-welcome">
+                                <p class="caption">Try searching for:</p>
+                                <ul role="list" class="example-queries">
+                                  <For each={EXAMPLE_QUERIES}>
+                                    {(example) => (
+                                      <li>
+                                        <button
+                                          type="button"
+                                          class="example-query-btn"
+                                          onClick={() => {
+                                            setQuery(example);
+                                            queueSearch();
+                                          }}
+                                        >
+                                          {example}
+                                        </button>
+                                      </li>
+                                    )}
+                                  </For>
+                                </ul>
+                              </div>
+                            }
                           >
-                            <For each={results}>
-                              {(result, index) => (
-                                <li>
-                                  <ResultCard
-                                    result={result}
-                                    queryText={query()}
-                                    kind={kind()}
-                                    focused={activeResultIndex() === index()}
-                                  />
-                                </li>
-                              )}
-                            </For>
-                          </ol>
-                        </Show>
+                            <p>
+                              No results for "{query()}" - try broadening your
+                              search or removing filters.
+                            </p>
+                          </Show>
+                        </div>
                       }
                     >
                       <div class="loading-state" role="status">
@@ -512,22 +482,15 @@ export default function SearchPage() {
                     role="list"
                     class="result-list"
                   >
-                    <For each={skeletons()}>
-                      {(_, index) => (
+                    <For each={results}>
+                      {(result, index) => (
                         <li>
-                          <Show
-                            when={results[index()]}
-                            fallback={<SkeletonCard />}
-                          >
-                            {(result) => (
-                              <ResultCard
-                                result={result()}
-                                queryText={query()}
-                                kind={kind()}
-                                focused={activeResultIndex() === index()}
-                              />
-                            )}
-                          </Show>
+                          <ResultCard
+                            result={result}
+                            queryText={query()}
+                            kind={kind()}
+                            focused={activeResultIndex() === index()}
+                          />
                         </li>
                       )}
                     </For>

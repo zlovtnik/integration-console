@@ -1,4 +1,4 @@
-import { onCleanup } from 'solid-js';
+import { batch, onCleanup } from 'solid-js';
 import { api } from '~/api/client';
 import {
   clearGraph,
@@ -12,27 +12,36 @@ import {
 
 export function useGraph() {
   let ctrl: AbortController | null = null;
+  let activeRequestId = 0;
 
   async function load() {
     ctrl?.abort();
     ctrl = new AbortController();
+    const requestId = ++activeRequestId;
     clearGraph();
     setGraphLoading(true);
 
     try {
       const res = await api.graph({ ...graphFilters }, ctrl.signal);
-      setGraphNodes(res.nodes);
-      setGraphEdges(res.edges);
-      setGraphMeta({
-        generated_at: res.generated_at,
-        node_count: res.node_count,
-        edge_count: res.edge_count,
+      batch(() => {
+        setGraphNodes(res.nodes);
+        setGraphEdges(res.edges);
+        setGraphMeta({
+          generated_at: res.generated_at,
+          node_count: res.node_count,
+          edge_count: res.edge_count,
+        });
       });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      setGraphError((err as Error).message || 'Graph load failed.');
+      if (requestId === activeRequestId) {
+        setGraphError((err as Error).message || 'Graph load failed.');
+      }
     } finally {
-      setGraphLoading(false);
+      if (requestId === activeRequestId) {
+        ctrl = null;
+        setGraphLoading(false);
+      }
     }
   }
 

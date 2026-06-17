@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { SearchRequest } from '~/api/types';
-import { mockApi } from './fixtures';
+import { graphForFilters, mockApi } from './fixtures';
 
 test('graph filters auto-refresh topology requests', async ({ page }) => {
   const graphRequests: unknown[] = [];
@@ -23,6 +23,49 @@ test('graph filters auto-refresh topology requests', async ({ page }) => {
       ),
     )
     .toBe(true);
+});
+
+test('graph paints nodes without NaN transforms on first load', async ({
+  page,
+}) => {
+  await mockApi(page);
+
+  await page.goto('/graph');
+
+  await expect(page.locator('.graph-node').first()).toBeVisible();
+  await page.waitForTimeout(2_000);
+
+  const transformValues = await page
+    .locator('svg [transform]')
+    .evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute('transform') ?? ''),
+    );
+
+  expect(transformValues.join(' ')).not.toContain('NaN');
+});
+
+test('SSID filter scopes visible graph topology', async ({ page }) => {
+  await mockApi(page, { graph: graphForFilters });
+
+  await page.goto('/graph');
+  await page.getByLabel('SSID').fill('lab-net');
+
+  await expect(
+    page.locator('.graph-node[data-node-id="cluster:lab"]'),
+  ).toBeVisible();
+  await expect(
+    page.locator('.graph-node[data-node-id="cluster:guest"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(
+      '.graph-node[data-node-id="ap:observed:guest-net|77:66:55:44:33:22|guest"]',
+    ),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(
+      '.graph-node[data-node-id="client:guest-net|66:55:44:33:22:11"]',
+    ),
+  ).toHaveCount(0);
 });
 
 test('cluster search events action requests a sparse 200-event entity timeline', async ({
@@ -50,6 +93,81 @@ test('cluster search events action requests a sparse 200-event entity timeline',
           macs.includes('11:22:33:44:55:66')
         );
       }),
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole('heading', { name: 'event:lab:001' }),
+  ).toBeVisible();
+});
+
+test('cluster search events preserves the active graph SSID scope', async ({
+  page,
+}) => {
+  const searchRequests: SearchRequest[] = [];
+  const graphRequests: unknown[] = [];
+  await mockApi(page, {
+    onGraphRequest: (body) => graphRequests.push(body),
+    onSearchRequest: (body) => searchRequests.push(body),
+  });
+
+  await page.goto('/graph');
+  await page.getByLabel('SSID').fill('lab-net');
+  await expect
+    .poll(() =>
+      graphRequests.some(
+        (body) =>
+          typeof body === 'object' &&
+          body !== null &&
+          (body as { ssid?: string }).ssid === 'lab-net',
+      ),
+    )
+    .toBe(true);
+  await expect(page.locator('.graph-node[data-kind="cluster"]')).toBeVisible();
+  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await page.getByRole('link', { name: 'Search events' }).click();
+
+  await expect
+    .poll(() =>
+      searchRequests.some((request) => {
+        const macs = request.filters?.source_macs ?? [];
+        return (
+          request.filters?.ssid === 'lab-net' &&
+          macs.includes('aa:bb:cc:dd:ee:ff') &&
+          macs.includes('11:22:33:44:55:66')
+        );
+      }),
+    )
+    .toBe(true);
+});
+
+test('graph event search does not inherit stale min similarity from search URL', async ({
+  page,
+}) => {
+  const searchRequests: SearchRequest[] = [];
+  await mockApi(page, {
+    onSearchRequest: (body) => searchRequests.push(body),
+  });
+
+  await page.goto('/?q=probe&min=0.9');
+  await expect(
+    page.getByRole('heading', { name: 'event:lab:001' }),
+  ).toBeVisible();
+  searchRequests.length = 0;
+
+  await page.goto('/graph');
+  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await page.getByRole('link', { name: 'Search events' }).click();
+
+  await expect
+    .poll(() =>
+      searchRequests.some(
+        (request) =>
+          request.query === '*' &&
+          request.kind === 'SEARCH_KIND_EVENT' &&
+          request.mode === 'SEARCH_MODE_SPARSE' &&
+          request.top_k === 200 &&
+          request.min_similarity === undefined,
+      ),
     )
     .toBe(true);
 });

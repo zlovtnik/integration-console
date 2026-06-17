@@ -46,8 +46,10 @@ export async function fetchSuggestions(prefix = '', signal?: AbortSignal) {
     setSuggestLoaded(true);
     persistSuggestions(data);
     return true;
-  } catch {
-    setSuggestLoaded(false);
+  } catch (error) {
+    if (!(error instanceof Error && error.name === 'AbortError')) {
+      setSuggestLoaded(false);
+    }
     return false;
   }
 }

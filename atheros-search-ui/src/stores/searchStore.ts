@@ -12,8 +12,11 @@ import type {
 const HISTORY_STORAGE_KEY = 'atheros-search.history';
 const SESSION_STORAGE_KEY = 'atheros-search.session-id';
 const HISTORY_LIMIT = 50;
-const DEFAULT_KIND: SearchKind = 'SEARCH_KIND_EVENT';
-const DEFAULT_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+export const DEFAULT_SEARCH_KIND: SearchKind = 'SEARCH_KIND_EVENT';
+export const DEFAULT_SEARCH_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
+export const DEFAULT_TOP_K = 20;
+export const DEFAULT_MIN_SIMILARITY = 0;
+let fallbackSessionId: string | null = null;
 
 function readSessionList(key: string): string[] {
   if (typeof window === 'undefined') return [];
@@ -50,8 +53,13 @@ function createFallbackSessionId(): string {
   return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function cachedFallbackSessionId(): string {
+  fallbackSessionId ||= createFallbackSessionId();
+  return fallbackSessionId;
+}
+
 function tabSessionId(): string {
-  if (typeof window === 'undefined') return createFallbackSessionId();
+  if (typeof window === 'undefined') return cachedFallbackSessionId();
 
   try {
     const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -63,23 +71,30 @@ function tabSessionId(): string {
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, next);
     return next;
   } catch {
-    return createFallbackSessionId();
+    return cachedFallbackSessionId();
   }
 }
 
 export function normalizeSearchKind(value: SearchKind): SearchKind {
-  return value === 'SEARCH_KIND_UNSPECIFIED' ? DEFAULT_KIND : value;
+  return value === 'SEARCH_KIND_UNSPECIFIED' ? DEFAULT_SEARCH_KIND : value;
 }
 
 export function normalizeSearchMode(value: SearchMode): SearchMode {
-  return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_MODE : value;
+  return value === 'SEARCH_MODE_UNSPECIFIED' ? DEFAULT_SEARCH_MODE : value;
+}
+
+export function isWildcardAllQuery(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed !== '' && trimmed.replace(/[*%]/g, '').trim() === '';
 }
 
 export const [query, setQuery] = createSignal('');
-export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_KIND);
-export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_MODE);
-export const [topK, setTopK] = createSignal(20);
-export const [minSimilarity, setMinSimilarity] = createSignal(0);
+export const [kind, setKind] = createSignal<SearchKind>(DEFAULT_SEARCH_KIND);
+export const [mode, setMode] = createSignal<SearchMode>(DEFAULT_SEARCH_MODE);
+export const [topK, setTopK] = createSignal(DEFAULT_TOP_K);
+export const [minSimilarity, setMinSimilarity] = createSignal(
+  DEFAULT_MIN_SIMILARITY,
+);
 export const [filters, setFilters] = createStore<SearchFilters>({});
 
 export const [results, setResults] = createStore<SearchResult[]>([]);
@@ -96,6 +111,10 @@ function compactList(values: string[] | undefined): string[] | undefined {
   return next && next.length > 0 ? Array.from(new Set(next)) : undefined;
 }
 
+function compactSourceMacs(source: SearchFilters): string[] | undefined {
+  return compactList([source.source_mac ?? '', ...(source.source_macs ?? [])]);
+}
+
 export function cleanFilters(source: SearchFilters): SearchFilters {
   const next: SearchFilters = {};
   const locations = compactList(source.location_ids);
@@ -108,9 +127,13 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
   if (frameSubtypes) next.frame_subtypes = frameSubtypes;
   if (tags) next.tags = tags;
   if (source.ssid?.trim()) next.ssid = source.ssid.trim();
-  if (source.source_mac?.trim()) next.source_mac = source.source_mac.trim();
-  const sourceMacs = compactList(source.source_macs);
-  if (sourceMacs) next.source_macs = sourceMacs;
+  const sourceMacs = compactSourceMacs(source);
+  if (sourceMacs?.length === 1) {
+    const [sourceMac] = sourceMacs;
+    if (sourceMac) next.source_mac = sourceMac;
+  } else if (sourceMacs && sourceMacs.length > 1) {
+    next.source_macs = sourceMacs;
+  }
   if (source.observed_after) next.observed_after = source.observed_after;
   if (source.observed_before) next.observed_before = source.observed_before;
   if (source.threat_only) next.threat_only = true;
@@ -126,10 +149,12 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
 }
 
 export function buildSearchRequest(): SearchRequest {
+  const trimmedQuery = query().trim();
+  const wildcardAll = isWildcardAllQuery(trimmedQuery);
   const request: SearchRequest = {
-    query: query().trim(),
+    query: trimmedQuery,
     kind: normalizeSearchKind(kind()),
-    mode: normalizeSearchMode(mode()),
+    mode: wildcardAll ? 'SEARCH_MODE_SPARSE' : normalizeSearchMode(mode()),
     top_k: topK(),
     session_id: tabSessionId(),
   };
@@ -144,6 +169,14 @@ export function buildSearchRequest(): SearchRequest {
   }
 
   return request;
+}
+
+export function resetSearchControlsFromUrlDefaults() {
+  setQuery('');
+  setKind(DEFAULT_SEARCH_KIND);
+  setMode(DEFAULT_SEARCH_MODE);
+  setTopK(DEFAULT_TOP_K);
+  setMinSimilarity(DEFAULT_MIN_SIMILARITY);
 }
 
 export function pushHistory(value: string) {

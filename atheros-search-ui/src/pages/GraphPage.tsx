@@ -1,10 +1,12 @@
 import {
+  batch,
   createEffect,
   createMemo,
   on,
   onCleanup,
   onMount,
   Show,
+  startTransition,
 } from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { GraphControls } from '~/components/graph/GraphControls';
@@ -29,6 +31,7 @@ import '~/styles/graph.css';
 export default function GraphPage() {
   let svgRef: SVGSVGElement | undefined;
   let filterReloadTimer: number | undefined;
+  let rebuildQueued = false;
   const { load } = useGraph();
 
   useSuggest();
@@ -83,11 +86,7 @@ export default function GraphPage() {
     onCleanup(() => window.removeEventListener('keydown', handleKeydown));
   });
 
-  createEffect(() => {
-    graphNodes();
-    graphEdges();
-    graph.rebuild();
-  });
+  createEffect(on([graphNodes, graphEdges], queueGraphRebuild));
 
   createEffect(
     on(
@@ -103,6 +102,18 @@ export default function GraphPage() {
   );
 
   onCleanup(() => window.clearTimeout(filterReloadTimer));
+
+  function queueGraphRebuild() {
+    if (rebuildQueued) return;
+    rebuildQueued = true;
+
+    queueMicrotask(() => {
+      rebuildQueued = false;
+      void startTransition(() => {
+        batch(() => graph.rebuild());
+      });
+    });
+  }
 
   return (
     <main id="main-content" class="graph-page" tabIndex={-1}>
