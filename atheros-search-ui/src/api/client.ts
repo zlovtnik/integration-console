@@ -25,7 +25,7 @@ type TimestampCarrier = Partial<Record<TimestampFieldName, unknown>>;
 
 export type OutgoingTimestampIssue = {
   path: string;
-  value: string;
+  value: unknown;
 };
 
 export type OutgoingTimestampReporter = (
@@ -139,8 +139,9 @@ function sanitizeTimestampCarrier<T extends TimestampCarrier>(
   const issues: OutgoingTimestampIssue[] = [];
 
   for (const field of TIMESTAMP_FIELD_NAMES) {
+    if (!(field in source)) continue;
     const value = source[field];
-    if (typeof value !== 'string' || value === '' || isRfc3339(value)) {
+    if (typeof value === 'string' && isRfc3339(value)) {
       continue;
     }
 
@@ -449,7 +450,7 @@ export function normalizeInventoryResponse(
     total_registered_count: firstNumber(
       raw.total_registered_count,
       raw.totalRegisteredCount,
-      normalizedNodes.length,
+      normalizedNodes.filter((node) => node.kind === 'device').length,
     ),
   };
 }

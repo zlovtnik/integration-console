@@ -202,11 +202,86 @@ function nodePassesFilters(node: InventoryNode, filters: InventoryFilters) {
   return true;
 }
 
+function collectDeviceAssociations(devices: InventoryNode[]) {
+  const ownerIds = new Set<string>();
+  const locationIds = new Set<string>();
+  const clusterIds = new Set<string>();
+  const deviceIds = new Set<string>();
+
+  for (const device of devices) {
+    deviceIds.add(device.id);
+    if (device.owner_id) ownerIds.add(device.owner_id);
+    if (device.location_id) locationIds.add(device.location_id);
+    if (device.similarity_cluster_id)
+      clusterIds.add(device.similarity_cluster_id);
+  }
+
+  return { ownerIds, locationIds, clusterIds, deviceIds };
+}
+
+function ownerNodeId(node: InventoryNode): string {
+  return node.id.startsWith('owner:')
+    ? node.id.slice('owner:'.length)
+    : node.id;
+}
+
+function locationNodeId(node: InventoryNode): string {
+  if (node.location_id) return node.location_id;
+  return node.id.startsWith('location:')
+    ? node.id.slice('location:'.length)
+    : node.id;
+}
+
+function clusterNodeId(node: InventoryNode): string {
+  if (node.similarity_cluster_id) return node.similarity_cluster_id;
+  return node.id.startsWith('cluster:')
+    ? node.id.slice('cluster:'.length)
+    : node.id;
+}
+
+function nodeAssociatedWithDevices(
+  node: InventoryNode,
+  associations: ReturnType<typeof collectDeviceAssociations>,
+) {
+  if (node.kind === 'owner') {
+    return associations.ownerIds.has(ownerNodeId(node));
+  }
+  if (node.kind === 'location_asset') {
+    return associations.locationIds.has(locationNodeId(node));
+  }
+  if (node.kind === 'cluster') {
+    return associations.clusterIds.has(clusterNodeId(node));
+  }
+  if (node.kind === 'merge_candidate') {
+    return MOCK_EDGES.some(
+      (edge) =>
+        edge.kind === 'merge_candidate' &&
+        ((edge.source === node.id && associations.deviceIds.has(edge.target)) ||
+          (edge.target === node.id && associations.deviceIds.has(edge.source))),
+    );
+  }
+  return true;
+}
+
 export function mockInventoryResponse(
   filters: InventoryFilters,
 ): InventoryResponse {
-  const limit = filters.limit ?? 400;
-  const nodes = MOCK_NODES.filter((node) => nodePassesFilters(node, filters));
+  const limit = Math.min(Math.max(filters.limit ?? 400, 0), 400);
+  const filteredDevices = MOCK_NODES.filter(
+    (node) => node.kind === 'device' && nodePassesFilters(node, filters),
+  );
+  const associations = collectDeviceAssociations(filteredDevices);
+  const restrictToFilteredDevices = Boolean(
+    filters.location_ids?.length || filters.owner_ids?.length,
+  );
+  const nodes = MOCK_NODES.filter((node) => {
+    if (!nodePassesFilters(node, filters)) return false;
+    if (node.kind === 'device') return true;
+    return (
+      !restrictToFilteredDevices ||
+      nodeAssociatedWithDevices(node, associations)
+    );
+  });
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = MOCK_EDGES.filter(
     (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),

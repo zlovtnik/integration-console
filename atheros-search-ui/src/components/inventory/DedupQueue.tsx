@@ -49,8 +49,8 @@ export function DedupQueue(props: {
     decision: MergeDecision,
   ) => void | Promise<void>;
 }) {
-  const [busyCandidateId, setBusyCandidateId] = createSignal<string | null>(
-    null,
+  const [busyCandidateIds, setBusyCandidateIds] = createSignal<Set<string>>(
+    new Set(),
   );
   const queueItems = createMemo<QueueItem[]>(() => {
     const nodes = new Map(inventoryNodes().map((node) => [node.id, node]));
@@ -73,13 +73,20 @@ export function DedupQueue(props: {
   });
 
   async function decide(candidateId: string, decision: MergeDecision) {
-    setBusyCandidateId(candidateId);
+    setBusyCandidateIds((prev) => new Set(prev).add(candidateId));
     try {
       await props.onDecision(candidateId, decision);
     } finally {
-      setBusyCandidateId(null);
+      setBusyCandidateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(candidateId);
+        return next;
+      });
     }
   }
+
+  const isCandidateBusy = (candidateId: string) =>
+    busyCandidateIds().has(candidateId);
 
   return (
     <section
@@ -118,13 +125,15 @@ export function DedupQueue(props: {
           <For each={queueItems()}>
             {(item) => (
               <div class="dedup-queue-row" role="row">
-                <button
-                  type="button"
-                  class="dedup-candidate-link"
-                  onClick={() => props.onSelect(item.candidate.id)}
-                >
-                  {item.candidate.label}
-                </button>
+                <div class="dedup-candidate-cell" role="cell">
+                  <button
+                    type="button"
+                    class="dedup-candidate-link"
+                    onClick={() => props.onSelect(item.candidate.id)}
+                  >
+                    {item.candidate.label}
+                  </button>
+                </div>
                 <span class="dedup-identity-list" role="cell">
                   {deviceLabels(item.devices)}
                 </span>
@@ -144,7 +153,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Merge ${item.candidate.label}`}
-                    disabled={busyCandidateId() === item.candidate.id}
+                    disabled={isCandidateBusy(item.candidate.id)}
                     onClick={() => void decide(item.candidate.id, 'merge')}
                   >
                     <Check size={16} aria-hidden="true" />
@@ -153,7 +162,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Mark ${item.candidate.label} as not a match`}
-                    disabled={busyCandidateId() === item.candidate.id}
+                    disabled={isCandidateBusy(item.candidate.id)}
                     onClick={() => void decide(item.candidate.id, 'not_match')}
                   >
                     <Split size={16} aria-hidden="true" />
@@ -162,7 +171,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Defer ${item.candidate.label}`}
-                    disabled={busyCandidateId() === item.candidate.id}
+                    disabled={isCandidateBusy(item.candidate.id)}
                     onClick={() =>
                       void decide(item.candidate.id, 'needs_more_data')
                     }

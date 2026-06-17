@@ -61,6 +61,7 @@ export function useInventoryGraph(
     pinnedNodeIds: options.pinnedNodeIds,
   });
   let visibilityEffectReady = false;
+  let renderedEdges: InventoryEdge[] = [];
 
   function build() {
     const model = buildInventoryRenderModel(
@@ -73,18 +74,19 @@ export function useInventoryGraph(
     const prepared = layout.prepare(model.nodes);
     if (!prepared) return;
     const { svg, container, width, height, simNodes, nodeById } = prepared;
-    const simEdges = model.edges
-      .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
-      .map((edge): InventorySimEdge => {
-        const next: InventorySimEdge = {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          kind: edge.kind,
-        };
-        if (edge.weight !== undefined) next.weight = edge.weight;
-        return next;
-      });
+    renderedEdges = model.edges.filter(
+      (edge) => nodeById.has(edge.source) && nodeById.has(edge.target),
+    );
+    const simEdges = renderedEdges.map((edge): InventorySimEdge => {
+      const next: InventorySimEdge = {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        kind: edge.kind,
+      };
+      if (edge.weight !== undefined) next.weight = edge.weight;
+      return next;
+    });
 
     const defs = svg.append('defs');
     [
@@ -303,7 +305,7 @@ export function useInventoryGraph(
     const related = new Set<string>();
     if (selected) {
       related.add(selected);
-      for (const edge of edges()) {
+      for (const edge of renderedEdges) {
         if (edge.source === selected) related.add(edge.target);
         if (edge.target === selected) related.add(edge.source);
       }

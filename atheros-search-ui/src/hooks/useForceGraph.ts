@@ -359,7 +359,7 @@ export { createSimNodes };
 
 function nodeLaneX(node: GraphNode, width: number): number {
   const lanes: Record<NodeKind, number> = {
-    cluster: 0.18,
+    cluster: 0.3,
     device: 0.34,
     client: 0.52,
     ap: 0.72,

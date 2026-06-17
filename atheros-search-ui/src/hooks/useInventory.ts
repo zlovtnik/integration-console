@@ -72,12 +72,15 @@ export function useInventory() {
 
   async function decideMerge(candidateId: string, decision: MergeDecision) {
     const undo = decision === 'merge' ? captureMergeUndo(candidateId) : null;
-    removeMergeCandidate(candidateId);
 
     try {
       await api.mergeDecision(candidateId, decision);
+      removeMergeCandidate(candidateId);
     } catch (err) {
-      if (backendEndpointMissing(err)) return undo?.id ?? null;
+      if (backendEndpointMissing(err)) {
+        removeMergeCandidate(candidateId);
+        return undo?.id ?? null;
+      }
       if (undo) restoreMergeUndo(undo.id);
       setInventoryError((err as Error).message || 'Merge decision failed.');
       return null;
@@ -92,13 +95,12 @@ export function useInventory() {
 
     try {
       await api.mergeDecision(undo.candidateId, 'undo_merge');
+      return true;
     } catch (err) {
-      if (!backendEndpointMissing(err)) {
-        setInventoryError((err as Error).message || 'Undo merge failed.');
-      }
+      if (backendEndpointMissing(err)) return true;
+      setInventoryError((err as Error).message || 'Undo merge failed.');
+      return false;
     }
-
-    return true;
   }
 
   function cancel() {

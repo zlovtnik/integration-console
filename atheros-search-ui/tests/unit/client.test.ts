@@ -151,6 +151,29 @@ describe('api client normalization', () => {
       weight: 0.91,
     });
   });
+
+  it('falls back to device count for missing total registered inventory count', () => {
+    const response = normalizeInventoryResponse({
+      nodes: [
+        {
+          id: 'owner:security',
+          kind: 'owner',
+          label: 'Security',
+          active: true,
+        },
+        {
+          id: 'device:badge-printer',
+          kind: 'device',
+          label: 'badge-printer',
+          active: true,
+        },
+      ],
+      edges: [],
+    });
+
+    expect(response.node_count).toBe(2);
+    expect(response.total_registered_count).toBe(1);
+  });
 });
 
 describe('api client outgoing timestamp validation', () => {
@@ -187,6 +210,35 @@ describe('api client outgoing timestamp validation', () => {
     });
 
     expect(request.filters?.observed_after).toBe(observedAfter);
+  });
+
+  it('drops empty and non-string search timestamp fields before serialization', () => {
+    const reporter = vi.fn();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    setOutgoingTimestampReporter(reporter);
+
+    const request = prepareSearchRequest({
+      query: 'probe',
+      filters: {
+        ssid: 'lab',
+        observed_after: 1700000000,
+        observed_before: '',
+      } as unknown as SearchFilters,
+    });
+
+    expect(request.filters).toMatchObject({ ssid: 'lab' });
+    expect(request.filters?.observed_after).toBeUndefined();
+    expect(request.filters?.observed_before).toBeUndefined();
+    expect(reporter).toHaveBeenCalledWith('search', [
+      {
+        path: 'filters.observed_after',
+        value: 1700000000,
+      },
+      {
+        path: 'filters.observed_before',
+        value: '',
+      },
+    ]);
   });
 
   it('drops malformed graph timestamp fields before serialization', () => {

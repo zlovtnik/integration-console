@@ -70,6 +70,8 @@ export function MergeCandidatePanel(props: {
     setBusyDecision(decision);
     try {
       await props.onDecision(decision);
+    } catch (err) {
+      console.error('Merge decision failed.', err);
     } finally {
       setBusyDecision(null);
     }

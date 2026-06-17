@@ -10,6 +10,8 @@ import {
   type InventoryViewMode,
 } from '~/stores/inventoryStore';
 
+const DEFAULT_MIN_DEDUP_CONFIDENCE = 0.75;
+
 function asList(value: string | string[] | undefined): string[] | undefined {
   if (!value) return undefined;
   const list = Array.isArray(value) ? value : [value];
@@ -44,7 +46,9 @@ export function useInventoryUrlSync() {
         limit:
           Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 400,
         min_dedup_confidence:
-          Number.isFinite(parsedMin) && parsedMin >= 0 ? parsedMin : 0.75,
+          Number.isFinite(parsedMin) && parsedMin >= 0
+            ? parsedMin
+            : DEFAULT_MIN_DEDUP_CONFIDENCE,
       };
       const locationIds = asList(params.loc);
       const ownerIds = asList(params.owner);
@@ -76,7 +80,8 @@ export function useInventoryUrlSync() {
         : undefined,
       active: inventoryFilters.active_only ? '1' : undefined,
       min:
-        (inventoryFilters.min_dedup_confidence ?? 0) > 0
+        (inventoryFilters.min_dedup_confidence ??
+          DEFAULT_MIN_DEDUP_CONFIDENCE) !== DEFAULT_MIN_DEDUP_CONFIDENCE
           ? String(inventoryFilters.min_dedup_confidence)
           : undefined,
       tag: inventoryFilters.tags?.length ? inventoryFilters.tags : undefined,

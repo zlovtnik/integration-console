@@ -33,9 +33,10 @@ export function useForceLayout<
 
   function prepare(sourceNodes: T[]): ForceLayoutBuild<T> | null {
     const el = svgRef();
+    stop();
     if (!el) return null;
 
-    stop();
+    const zoomTransform = d3.zoomTransform(el);
     d3.select(el).selectAll('*').remove();
 
     const bounds = el.getBoundingClientRect();
@@ -49,7 +50,10 @@ export function useForceLayout<
     nodeById = new Map(simNodes.map((node) => [node.id, node]));
 
     const svg = d3.select<SVGSVGElement, unknown>(el);
-    const container = svg.append('g').attr('class', 'graph-viewport');
+    const container = svg
+      .append('g')
+      .attr('class', 'graph-viewport')
+      .attr('transform', zoomTransform.toString());
     zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.05, 6])
@@ -178,15 +182,22 @@ export function createSimNodes<T extends ForceLayoutNode>(
   return sourceNodes.map((node) => {
     const next: SimNodeDatum<T> = { ...node };
     const previous = previousNodeById.get(node.id);
+    const previousPosition = finitePosition(previous?.x, previous?.y);
 
-    if (hasFinitePosition(previous)) {
-      next.x = previous.x;
-      next.y = previous.y;
+    if (previousPosition) {
+      next.x = previousPosition.x;
+      next.y = previousPosition.y;
     }
 
-    if (pinned.has(node.id) && hasFinitePosition(previous)) {
-      next.fx = previous.x;
-      next.fy = previous.y;
+    if (pinned.has(node.id)) {
+      const pinnedPosition =
+        finitePosition(previous?.fx, previous?.fy) ?? previousPosition;
+      if (pinnedPosition) {
+        next.x = pinnedPosition.x;
+        next.y = pinnedPosition.y;
+        next.fx = pinnedPosition.x;
+        next.fy = pinnedPosition.y;
+      }
     }
 
     return next;
@@ -196,9 +207,16 @@ export function createSimNodes<T extends ForceLayoutNode>(
 function hasFinitePosition<T extends ForceLayoutNode>(
   node: SimNodeDatum<T> | undefined,
 ): node is SimNodeDatum<T> & { x: number; y: number } {
-  return (
-    node !== undefined && Number.isFinite(node.x) && Number.isFinite(node.y)
-  );
+  return finitePosition(node?.x, node?.y) !== null;
+}
+
+function finitePosition(
+  x: number | null | undefined,
+  y: number | null | undefined,
+): { x: number; y: number } | null {
+  return Number.isFinite(x) && Number.isFinite(y)
+    ? { x: x as number, y: y as number }
+    : null;
 }
 
 export function finiteCoord(value: number | undefined): number {

@@ -19,7 +19,7 @@
 
 .graph-control-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: var(--space-3);
   min-width: 0;
 }
@@ -381,12 +381,14 @@
     align-items: stretch;
   }
 
-  .graph-control-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .graph-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 959px) {
+  .graph-control-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -401,10 +403,6 @@
     max-height: min(52vh, 420px);
     overflow-y: auto;
     overscroll-behavior: contain;
-  }
-
-  .graph-control-grid {
-    grid-template-columns: 1fr;
   }
 
   .graph-kind-filter {
@@ -444,5 +442,11 @@
     height: min(70vh, 620px);
     border-top: 1px solid var(--color-border);
     border-left: 0;
+  }
+}
+
+@media (max-width: 599px) {
+  .graph-control-grid {
+    grid-template-columns: 1fr;
   }
 }
