@@ -1,0 +1,272 @@
+.inventory-page {
+  position: relative;
+}
+
+.inventory-control-grid {
+  grid-template-columns: repeat(4, minmax(136px, 1fr));
+}
+
+.inventory-grouping,
+.inventory-view-mode {
+  min-width: max-content;
+}
+
+.inventory-actions {
+  align-items: center;
+}
+
+.inventory-canvas-wrap {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--color-border) 38%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-border) 32%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 32px 32px;
+}
+
+.inventory-loading,
+.inventory-error,
+.inventory-empty {
+  position: absolute;
+  top: var(--space-4);
+  left: 50%;
+  z-index: 10;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transform: translateX(-50%);
+}
+
+.inventory-error {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: color-mix(
+    in srgb,
+    var(--color-danger) 50%,
+    var(--color-border)
+  );
+}
+
+.inventory-empty {
+  color: var(--color-text-tertiary);
+}
+
+.inventory-node.inactive:not(.selected):not(.related) {
+  opacity: 0.34;
+}
+
+.inventory-node.aggregate text {
+  fill: var(--color-text-primary);
+}
+
+.inventory-node.merge-review .inventory-node-ring {
+  stroke-opacity: 0.7;
+}
+
+.inventory-merge-halo {
+  animation: inventory-merge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes inventory-merge-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.35;
+  }
+
+  50% {
+    stroke-opacity: 0.9;
+  }
+}
+
+.inventory-undo-toast {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: calc(var(--z-drawer) + 1);
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: var(--space-3);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-focus);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.inventory-tag-list,
+.inventory-mac-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+}
+
+.inventory-tag-list li,
+.inventory-mac-list li {
+  padding: 2px var(--space-2);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.inventory-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.inventory-candidate-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.inventory-candidate-card h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.inventory-decision-actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dedup-queue {
+  min-height: 0;
+  padding: var(--space-5);
+  overflow: auto;
+  background: var(--color-bg);
+}
+
+.dedup-queue-heading {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.dedup-queue-table {
+  display: grid;
+  min-width: 820px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dedup-queue-row {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.2fr)
+    minmax(136px, auto);
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 48px;
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.dedup-queue-row:first-child {
+  border-top: 0;
+}
+
+.dedup-queue-row--head {
+  min-height: 36px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  background: var(--color-bg-alt);
+}
+
+.dedup-candidate-link {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.dedup-candidate-cell {
+  min-width: 0;
+}
+
+.dedup-candidate-link:hover {
+  color: var(--color-accent);
+}
+
+.dedup-identity-list {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dedup-row-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+@media (max-width: 1279px) {
+  .inventory-control-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .inventory-control-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-grouping,
+  .inventory-view-mode,
+  .inventory-actions .btn {
+    width: 100%;
+  }
+
+  .inventory-candidate-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-undo-toast {
+    right: var(--space-4);
+    bottom: var(--space-4);
+    left: var(--space-4);
+    max-width: none;
+    justify-content: space-between;
+  }
+}

@@ -10,19 +10,22 @@ export function ScoreBar(props: {
     SearchResult,
     'score' | 'cosine_similarity' | 'keyword_rank' | 'threat_boost'
   >;
+  label?: string;
+  variant?: 'breakdown' | 'single';
 }) {
   const scorePercent = () => clamp(props.result.score) * 100;
   const denseScore = () => Math.max(0, props.result.cosine_similarity);
   const sparseScore = () => Math.max(0, props.result.keyword_rank);
   const threatScore = () => Math.max(0, props.result.threat_boost);
   const segmentTotal = () => denseScore() + sparseScore() + threatScore();
-  const hasBreakdown = () => segmentTotal() > 0;
+  const hasBreakdown = () => props.variant !== 'single' && segmentTotal() > 0;
   const segmentWidth = (value: number) =>
     hasBreakdown() ? `${(Math.max(0, value) / segmentTotal()) * 100}%` : '0%';
   const label = () =>
-    hasBreakdown()
+    props.label ??
+    (hasBreakdown()
       ? `Score ${scorePercent().toFixed(1)}%`
-      : `Score ${scorePercent().toFixed(1)}%, no score breakdown`;
+      : `Score ${scorePercent().toFixed(1)}%, no score breakdown`);
 
   return (
     <div class="score-meter">
@@ -60,24 +63,26 @@ export function ScoreBar(props: {
         </span>
       </div>
 
-      <details class="score-legend">
-        <summary class="score-legend-toggle">Score breakdown</summary>
-        <div class="score-legend-body">
-          <Show
-            when={hasBreakdown()}
-            fallback={
-              <span class="score-breakdown-empty">no score breakdown</span>
-            }
-          >
-            <span class="score-seg--dense score-swatch" />
-            <span>Semantic match</span>
-            <span class="score-seg--sparse score-swatch" />
-            <span>Keyword match</span>
-            <span class="score-seg--threat score-swatch" />
-            <span>Threat boost</span>
-          </Show>
-        </div>
-      </details>
+      <Show when={props.variant !== 'single'}>
+        <details class="score-legend">
+          <summary class="score-legend-toggle">Score breakdown</summary>
+          <div class="score-legend-body">
+            <Show
+              when={hasBreakdown()}
+              fallback={
+                <span class="score-breakdown-empty">no score breakdown</span>
+              }
+            >
+              <span class="score-seg--dense score-swatch" />
+              <span>Semantic match</span>
+              <span class="score-seg--sparse score-swatch" />
+              <span>Keyword match</span>
+              <span class="score-seg--threat score-swatch" />
+              <span>Threat boost</span>
+            </Show>
+          </div>
+        </details>
+      </Show>
     </div>
   );
 }

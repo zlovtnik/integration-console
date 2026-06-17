@@ -22,6 +22,13 @@ import {
 import { fetchSuggestions } from '~/hooks/useSuggest';
 import { suggestLoaded, suggestions } from '~/stores/suggestStore';
 import { debounce } from '~/utils/debounce';
+import {
+  compareRfc3339,
+  localInputToRfc3339,
+  rfc3339ToLocalInput,
+} from '~/utils/timestamp';
+
+const MAX_SECURITY_FLAGS_MASK = 2_147_483_647;
 
 function splitList(value: string): string[] | undefined {
   const values = value
@@ -37,6 +44,21 @@ function joinList(value: string[] | undefined): string {
 
 function clampTopK(value: number): number {
   return Math.max(1, Math.min(200, Math.round(value)));
+}
+
+function parseSecurityFlagsMask(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const parsed = Number(trimmed);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 0 ||
+    parsed > MAX_SECURITY_FLAGS_MASK
+  ) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function FilterSection(props: {
@@ -92,7 +114,7 @@ export function FilterPanel(props: {
   const drawerOpen = createMemo(() => props.open && isDrawer());
   const dateRangeError = createMemo(() => {
     if (!filters.observed_after || !filters.observed_before) return '';
-    return filters.observed_after > filters.observed_before
+    return compareRfc3339(filters.observed_after, filters.observed_before) > 0
       ? 'After must be earlier than before.'
       : '';
   });
@@ -101,11 +123,16 @@ export function FilterPanel(props: {
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     return now.toISOString().slice(0, 16);
   });
+  const observedAfterInput = createMemo(() =>
+    rfc3339ToLocalInput(filters.observed_after),
+  );
+  const observedBeforeInput = createMemo(() =>
+    rfc3339ToLocalInput(filters.observed_before),
+  );
   const observedAfterMax = createMemo(() => {
-    if (!filters.observed_before) return currentLocalMax();
-    return filters.observed_before < currentLocalMax()
-      ? filters.observed_before
-      : currentLocalMax();
+    const before = observedBeforeInput();
+    if (!before) return currentLocalMax();
+    return before < currentLocalMax() ? before : currentLocalMax();
   });
   const requestSuggestions = debounce((prefix: string) => {
     void fetchSuggestions(prefix.trim());
@@ -427,13 +454,13 @@ export function FilterPanel(props: {
               </span>
               <input
                 type="datetime-local"
-                value={filters.observed_after ?? ''}
+                value={observedAfterInput()}
                 max={observedAfterMax()}
                 aria-invalid={Boolean(dateRangeError()) || undefined}
                 onInput={(event) =>
                   setFilters(
                     'observed_after',
-                    event.currentTarget.value || undefined,
+                    localInputToRfc3339(event.currentTarget.value),
                   )
                 }
               />
@@ -446,14 +473,14 @@ export function FilterPanel(props: {
               </span>
               <input
                 type="datetime-local"
-                value={filters.observed_before ?? ''}
-                min={filters.observed_after ?? undefined}
+                value={observedBeforeInput()}
+                min={observedAfterInput() || undefined}
                 max={currentLocalMax()}
                 aria-invalid={Boolean(dateRangeError()) || undefined}
                 onInput={(event) =>
                   setFilters(
                     'observed_before',
-                    event.currentTarget.value || undefined,
+                    localInputToRfc3339(event.currentTarget.value),
                   )
                 }
               />
@@ -517,17 +544,15 @@ export function FilterPanel(props: {
               <input
                 type="number"
                 min="0"
+                max={MAX_SECURITY_FLAGS_MASK}
+                step="1"
                 value={filters.security_flags_mask ?? ''}
-                onInput={(event) => {
-                  const parsedValue =
-                    event.currentTarget.value === ''
-                      ? undefined
-                      : Number(event.currentTarget.value);
+                onInput={(event) =>
                   setFilters(
                     'security_flags_mask',
-                    Number.isFinite(parsedValue) ? parsedValue : undefined,
-                  );
-                }}
+                    parseSecurityFlagsMask(event.currentTarget.value),
+                  )
+                }
               />
             </label>
 

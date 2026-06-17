@@ -33,6 +33,32 @@ describe('createSimNodes', () => {
     expect(node?.y).toBeCloseTo(48.8, 1);
   });
 
+  it('prefers pinned fx and fy coordinates across rebuilds', () => {
+    const previous = new Map<string, SimNode>([
+      [
+        graphNode.id,
+        {
+          ...graphNode,
+          x: 10,
+          y: 20,
+          fx: 132.4,
+          fy: 48.8,
+        },
+      ],
+    ]);
+
+    const [node] = createSimNodes(
+      [graphNode],
+      new Set([graphNode.id]),
+      previous,
+    );
+
+    expect(node?.fx).toBeCloseTo(132.4, 1);
+    expect(node?.fy).toBeCloseTo(48.8, 1);
+    expect(node?.x).toBeCloseTo(132.4, 1);
+    expect(node?.y).toBeCloseTo(48.8, 1);
+  });
+
   it('seeds unpinned nodes without fixing them', () => {
     const previous = new Map<string, SimNode>([
       [

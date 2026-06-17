@@ -15,6 +15,10 @@ export const routes: RouteDefinition[] = [
     component: lazy(() => import('~/pages/GraphPage')),
   },
   {
+    path: '/inventory',
+    component: lazy(() => import('~/pages/InventoryPage')),
+  },
+  {
     path: '**',
     component: lazy(() => import('~/pages/NotFoundPage')),
   },

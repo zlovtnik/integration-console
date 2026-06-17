@@ -1,8 +1,16 @@
 import { env } from '~/env';
+import { isRfc3339 } from '~/utils/timestamp';
 import type {
   ExplainResponse,
   GraphFilters,
   GraphResponse,
+  InventoryEdge,
+  InventoryFilters,
+  InventoryNode,
+  InventoryNodeKind,
+  InventoryResponse,
+  MergeDecision,
+  MergeDecisionResponse,
   SearchRequest,
   SearchResponse,
   SearchResult,
@@ -10,11 +18,27 @@ import type {
 } from './types';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const TIMESTAMP_FIELD_NAMES = ['observed_after', 'observed_before'] as const;
+
+type TimestampFieldName = (typeof TIMESTAMP_FIELD_NAMES)[number];
+type TimestampCarrier = Partial<Record<TimestampFieldName, unknown>>;
+
+export type OutgoingTimestampIssue = {
+  path: string;
+  value: unknown;
+};
+
+export type OutgoingTimestampReporter = (
+  context: string,
+  issues: readonly OutgoingTimestampIssue[],
+) => void;
 
 type ApiErrorPayload = {
   code?: string;
   message?: string;
 };
+
+let outgoingTimestampReporter: OutgoingTimestampReporter | undefined;
 
 type RawSearchResult = Partial<SearchResult> & {
   sourceKey?: unknown;
@@ -43,6 +67,34 @@ type RawSearchResponse = Omit<Partial<SearchResponse>, 'results'> & {
   results?: unknown;
 };
 
+type RawInventoryNode = Partial<InventoryNode> & {
+  knownMacs?: unknown;
+  displayName?: unknown;
+  ownerId?: unknown;
+  locationId?: unknown;
+  firstRegistered?: unknown;
+  lastSeen?: unknown;
+  similarityClusterId?: unknown;
+  dedupConfidence?: unknown;
+};
+
+type RawInventoryEdge = Partial<InventoryEdge> & {
+  sourceId?: unknown;
+  targetId?: unknown;
+};
+
+type RawInventoryResponse = Omit<
+  Partial<InventoryResponse>,
+  'nodes' | 'edges'
+> & {
+  generatedAt?: unknown;
+  nodeCount?: unknown;
+  edgeCount?: unknown;
+  totalRegisteredCount?: unknown;
+  nodes?: unknown;
+  edges?: unknown;
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -69,6 +121,79 @@ export function buildUrl(
 
   const query = search.toString();
   return query ? `${path}?${query}` : path;
+}
+
+export function setOutgoingTimestampReporter(
+  reporter: OutgoingTimestampReporter | undefined,
+) {
+  outgoingTimestampReporter = reporter;
+}
+
+function sanitizeTimestampCarrier<T extends TimestampCarrier>(
+  source: T | undefined,
+  basePath: string,
+): { value: T | undefined; issues: OutgoingTimestampIssue[] } {
+  if (!source) return { value: source, issues: [] };
+
+  let next: T | undefined;
+  const issues: OutgoingTimestampIssue[] = [];
+
+  for (const field of TIMESTAMP_FIELD_NAMES) {
+    if (!(field in source)) continue;
+    const value = source[field];
+    if (typeof value === 'string' && isRfc3339(value)) {
+      continue;
+    }
+
+    issues.push({ path: `${basePath}.${field}`, value });
+    next = next ?? { ...source };
+    delete next[field];
+  }
+
+  return { value: next ?? source, issues };
+}
+
+function reportOutgoingTimestampIssues(
+  context: string,
+  issues: readonly OutgoingTimestampIssue[],
+) {
+  if (issues.length === 0) return;
+
+  outgoingTimestampReporter?.(context, issues);
+  if (import.meta.env.DEV) {
+    console.error('Invalid outgoing RFC 3339 timestamp fields were dropped.', {
+      context,
+      issues,
+    });
+  }
+}
+
+export function prepareSearchRequest(
+  body: SearchRequest,
+  context = 'search',
+): SearchRequest {
+  const sanitized = sanitizeTimestampCarrier(body.filters, 'filters');
+  if (sanitized.issues.length === 0) return body;
+
+  reportOutgoingTimestampIssues(context, sanitized.issues);
+  const next: SearchRequest = { ...body };
+  if (sanitized.value && Object.keys(sanitized.value).length > 0) {
+    next.filters = sanitized.value;
+  } else {
+    delete next.filters;
+  }
+  return next;
+}
+
+export function prepareGraphFilters(
+  filters: GraphFilters = {},
+  context = 'graph',
+): GraphFilters {
+  const sanitized = sanitizeTimestampCarrier(filters, 'filters');
+  if (sanitized.issues.length === 0) return filters;
+
+  reportOutgoingTimestampIssues(context, sanitized.issues);
+  return sanitized.value ?? {};
 }
 
 function parseApiErrorBody(rawBody: string): ApiErrorPayload | undefined {
@@ -114,6 +239,20 @@ function firstNumber(...values: unknown[]): number {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
   }
   return 0;
+}
+
+function optionalNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function firstBoolean(defaultValue: boolean, ...values: unknown[]): boolean {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+  }
+  return defaultValue;
 }
 
 function stringArray(value: unknown): string[] {
@@ -217,6 +356,105 @@ export function normalizeSearchResponse(
   };
 }
 
+const INVENTORY_NODE_KINDS: InventoryNodeKind[] = [
+  'device',
+  'owner',
+  'location_asset',
+  'cluster',
+  'merge_candidate',
+];
+
+function inventoryNodeKind(value: unknown): InventoryNodeKind {
+  return typeof value === 'string' &&
+    INVENTORY_NODE_KINDS.includes(value as InventoryNodeKind)
+    ? (value as InventoryNodeKind)
+    : 'device';
+}
+
+function normalizeInventoryNode(raw: RawInventoryNode): InventoryNode {
+  const node: InventoryNode = {
+    id: firstString(raw.id),
+    kind: inventoryNodeKind(raw.kind),
+    label: firstString(raw.label, raw.display_name, raw.displayName, raw.mac),
+    active: firstBoolean(false, raw.active),
+  };
+  const mac = firstString(raw.mac);
+  const displayName = firstString(raw.display_name, raw.displayName);
+  const ownerId = firstString(raw.owner_id, raw.ownerId);
+  const locationId = firstString(raw.location_id, raw.locationId);
+  const firstRegistered = firstString(
+    raw.first_registered,
+    raw.firstRegistered,
+  );
+  const lastSeen = firstString(raw.last_seen, raw.lastSeen);
+  const similarityClusterId = firstString(
+    raw.similarity_cluster_id,
+    raw.similarityClusterId,
+  );
+  const confidence = optionalNumber(raw.dedup_confidence, raw.dedupConfidence);
+  const knownMacs = stringArray(raw.known_macs ?? raw.knownMacs);
+  const tags = stringArray(raw.tags);
+
+  if (mac) node.mac = mac;
+  if (knownMacs.length > 0) node.known_macs = knownMacs;
+  if (displayName) node.display_name = displayName;
+  if (ownerId) node.owner_id = ownerId;
+  if (locationId) node.location_id = locationId;
+  if (firstRegistered) node.first_registered = firstRegistered;
+  if (lastSeen) node.last_seen = lastSeen;
+  if (similarityClusterId) node.similarity_cluster_id = similarityClusterId;
+  if (confidence !== undefined) node.dedup_confidence = confidence;
+  if (tags.length > 0) node.tags = tags;
+
+  return node;
+}
+
+function normalizeInventoryEdge(raw: RawInventoryEdge): InventoryEdge {
+  const edge: InventoryEdge = {
+    id: firstString(raw.id),
+    source: firstString(raw.source, raw.sourceId),
+    target: firstString(raw.target, raw.targetId),
+    kind: firstString(raw.kind) as InventoryEdge['kind'],
+  };
+  const weight = optionalNumber(raw.weight);
+  if (weight !== undefined) edge.weight = weight;
+  return edge;
+}
+
+export function normalizeInventoryResponse(
+  raw: RawInventoryResponse,
+): InventoryResponse {
+  const nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
+  const edges = Array.isArray(raw.edges) ? raw.edges : [];
+  const normalizedNodes = nodes.map((node) =>
+    normalizeInventoryNode(node as RawInventoryNode),
+  );
+  const normalizedEdges = edges.map((edge) =>
+    normalizeInventoryEdge(edge as RawInventoryEdge),
+  );
+
+  return {
+    nodes: normalizedNodes,
+    edges: normalizedEdges,
+    generated_at: firstString(raw.generated_at, raw.generatedAt),
+    node_count: firstNumber(
+      raw.node_count,
+      raw.nodeCount,
+      normalizedNodes.length,
+    ),
+    edge_count: firstNumber(
+      raw.edge_count,
+      raw.edgeCount,
+      normalizedEdges.length,
+    ),
+    total_registered_count: firstNumber(
+      raw.total_registered_count,
+      raw.totalRegisteredCount,
+      normalizedNodes.filter((node) => node.kind === 'device').length,
+    ),
+  };
+}
+
 function abortSignalWithTimeout(
   signal: AbortSignal | undefined,
   timeoutMs: number,
@@ -304,7 +542,7 @@ export const api = {
     normalizeSearchResponse(
       await request<RawSearchResponse>(
         '/v1/search',
-        { method: 'POST', body: JSON.stringify(body) },
+        { method: 'POST', body: JSON.stringify(prepareSearchRequest(body)) },
         signal,
       ),
     ),
@@ -333,7 +571,27 @@ export const api = {
   graph: (filters: GraphFilters = {}, signal?: AbortSignal) =>
     request<GraphResponse>(
       '/v1/graph',
-      { method: 'POST', body: JSON.stringify(filters) },
+      { method: 'POST', body: JSON.stringify(prepareGraphFilters(filters)) },
+      signal,
+    ),
+
+  inventory: async (filters: InventoryFilters, signal?: AbortSignal) =>
+    normalizeInventoryResponse(
+      await request<RawInventoryResponse>(
+        '/v1/inventory',
+        { method: 'POST', body: JSON.stringify(filters) },
+        signal,
+      ),
+    ),
+
+  mergeDecision: (
+    candidateId: string,
+    decision: MergeDecision | 'undo_merge',
+    signal?: AbortSignal,
+  ) =>
+    request<MergeDecisionResponse>(
+      `/v1/inventory/merge-candidates/${encodeURIComponent(candidateId)}/decision`,
+      { method: 'POST', body: JSON.stringify({ decision }) },
       signal,
     ),
 

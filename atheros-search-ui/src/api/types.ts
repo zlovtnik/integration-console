@@ -1,3 +1,5 @@
+import type { Rfc3339Timestamp } from '~/utils/timestamp';
+
 export const SEARCH_KINDS = [
   'SEARCH_KIND_UNSPECIFIED',
   'SEARCH_KIND_EVENT',
@@ -25,8 +27,8 @@ export interface SearchFilters {
   source_mac?: string;
   source_macs?: string[];
   frame_subtypes?: string[];
-  observed_after?: string;
-  observed_before?: string;
+  observed_after?: Rfc3339Timestamp;
+  observed_before?: Rfc3339Timestamp;
   threat_only?: boolean;
   handshake_only?: boolean;
   security_flags_mask?: number;
@@ -92,6 +94,71 @@ export interface SuggestFiltersResponse {
   location_ids: string[];
   sensor_ids: string[];
   frame_subtypes: string[];
+}
+
+export type InventoryNodeKind =
+  | 'device'
+  | 'owner'
+  | 'location_asset'
+  | 'cluster'
+  | 'merge_candidate';
+
+export interface InventoryNode {
+  id: string;
+  kind: InventoryNodeKind;
+  label: string;
+  mac?: string;
+  known_macs?: string[];
+  display_name?: string;
+  owner_id?: string;
+  location_id?: string;
+  first_registered?: string;
+  last_seen?: string;
+  active: boolean;
+  similarity_cluster_id?: string;
+  dedup_confidence?: number;
+  tags?: string[];
+}
+
+export interface InventoryEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind:
+    | 'owns'
+    | 'located_at'
+    | 'cluster_member'
+    | 'merge_candidate'
+    | 'same_device';
+  weight?: number;
+}
+
+export interface InventoryFilters {
+  grouping: 'registry' | 'cmdb' | 'similarity';
+  location_ids?: string[];
+  owner_ids?: string[];
+  active_only?: boolean;
+  min_dedup_confidence?: number;
+  tags?: string[];
+  limit?: number;
+}
+
+export interface InventoryResponse {
+  nodes: InventoryNode[];
+  edges: InventoryEdge[];
+  generated_at: string;
+  node_count: number;
+  edge_count: number;
+  total_registered_count: number;
+}
+
+export type MergeDecision = 'merge' | 'not_match' | 'needs_more_data';
+
+export interface MergeDecisionResponse {
+  candidate_id: string;
+  decision: MergeDecision | 'undo_merge';
+  accepted: boolean;
+  undo_until?: string;
 }
 
 export interface GraphNode {
@@ -173,8 +240,8 @@ export interface GraphFilters {
   ssid?: string;
   kinds?: NodeKind[];
   threat_only?: boolean;
-  observed_after?: string;
-  observed_before?: string;
+  observed_after?: Rfc3339Timestamp;
+  observed_before?: Rfc3339Timestamp;
   limit?: number;
 }
 
