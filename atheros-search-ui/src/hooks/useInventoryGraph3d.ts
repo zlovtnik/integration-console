@@ -492,7 +492,7 @@ export function useInventoryGraph3d(
   onMount(build);
   createEffect(on(() => options.visibleKinds?.(), applyVisibility));
   createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
-  createEffect(on(() => options.pinnedNodeIds?.(), () => build()));
+  createEffect(on(() => options.pinnedNodeIds?.(), () => build(), { defer: true }));
   onCleanup(stop);
 
   return { rebuild: build, resetZoom, stop };
