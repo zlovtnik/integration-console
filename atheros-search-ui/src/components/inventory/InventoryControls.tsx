@@ -4,10 +4,14 @@ import {
   INVENTORY_LIMITS,
   inventoryFilters,
   inventoryLoading,
+  inventoryMacQuery,
   inventoryMeta,
+  inventoryRenderMode,
   inventoryViewMode,
   resetInventoryFilters,
   setInventoryFilters,
+  setInventoryMacQuery,
+  setInventoryRenderMode,
   setInventoryViewMode,
 } from '~/stores/inventoryStore';
 import type { InventoryFilters } from '~/api/types';
@@ -111,6 +115,16 @@ export function InventoryControls(props: {
         </label>
 
         <label class="field graph-field">
+          <span>MAC</span>
+          <input
+            value={inventoryMacQuery()}
+            placeholder="aa:bb:cc:dd:ee:ff"
+            spellcheck={false}
+            onInput={(event) => setInventoryMacQuery(event.currentTarget.value)}
+          />
+        </label>
+
+        <label class="field graph-field">
           <span>Confidence {confidencePercent()}%</span>
           <input
             type="range"
@@ -174,6 +188,32 @@ export function InventoryControls(props: {
               onChange={() => setInventoryViewMode('dedup_queue')}
             />
             <span>Queue</span>
+          </label>
+        </fieldset>
+
+        <fieldset
+          class="segmented-control inventory-render-mode"
+          role="radiogroup"
+          aria-label="Inventory render mode"
+        >
+          <legend class="sr-only">Inventory render mode</legend>
+          <label class="seg-option">
+            <input
+              type="radio"
+              name="inventory-render"
+              checked={inventoryRenderMode() === '2d'}
+              onChange={() => setInventoryRenderMode('2d')}
+            />
+            <span>2D</span>
+          </label>
+          <label class="seg-option">
+            <input
+              type="radio"
+              name="inventory-render"
+              checked={inventoryRenderMode() === '3d'}
+              onChange={() => setInventoryRenderMode('3d')}
+            />
+            <span>3D</span>
           </label>
         </fieldset>
 

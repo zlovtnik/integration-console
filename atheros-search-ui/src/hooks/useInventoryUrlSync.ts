@@ -4,9 +4,14 @@ import { reconcile } from 'solid-js/store';
 import type { InventoryFilters } from '~/api/types';
 import {
   inventoryFilters,
+  inventoryMacQuery,
+  inventoryRenderMode,
   inventoryViewMode,
   setInventoryFilters,
+  setInventoryMacQuery,
+  setInventoryRenderMode,
   setInventoryViewMode,
+  type InventoryRenderMode,
   type InventoryViewMode,
 } from '~/stores/inventoryStore';
 
@@ -31,6 +36,10 @@ function grouping(value: string | undefined): InventoryFilters['grouping'] {
 
 function viewMode(value: string | undefined): InventoryViewMode {
   return value === 'dedup_queue' ? 'dedup_queue' : 'graph';
+}
+
+function renderMode(value: string | undefined): InventoryRenderMode {
+  return value === '3d' ? '3d' : '2d';
 }
 
 export function useInventoryUrlSync() {
@@ -61,6 +70,8 @@ export function useInventoryUrlSync() {
 
       setInventoryFilters(reconcile(nextFilters));
       setInventoryViewMode(viewMode(first(params.view)));
+      setInventoryRenderMode(renderMode(first(params.render)));
+      setInventoryMacQuery(first(params.mac)?.trim() ?? '');
       setReady(true);
     });
   });
@@ -91,6 +102,8 @@ export function useInventoryUrlSync() {
           : undefined,
       view:
         inventoryViewMode() === 'dedup_queue' ? inventoryViewMode() : undefined,
+      render: inventoryRenderMode() === '3d' ? '3d' : undefined,
+      mac: inventoryMacQuery().trim() || undefined,
     };
 
     setParams(next, { replace: true });

@@ -1,5 +1,9 @@
 FROM oven/bun:1 AS builder
 WORKDIR /app
+ARG VITE_API_BASE=
+ARG VITE_APP_TITLE="atheros search"
+ENV VITE_API_BASE=$VITE_API_BASE \
+    VITE_APP_TITLE=$VITE_APP_TITLE
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY . .

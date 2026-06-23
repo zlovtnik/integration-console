@@ -2,17 +2,30 @@
   position: relative;
 }
 
+.inventory-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .inventory-control-grid {
-  grid-template-columns: repeat(4, minmax(136px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
 }
 
 .inventory-grouping,
-.inventory-view-mode {
-  min-width: max-content;
+.inventory-view-mode,
+.inventory-render-mode {
+  width: max-content;
+  max-width: 100%;
 }
 
 .inventory-actions {
+  justify-content: flex-start;
   align-items: center;
+}
+
+.inventory-actions .graph-stat {
+  margin-left: auto;
 }
 
 .inventory-canvas-wrap {
@@ -61,6 +74,26 @@
 
 .inventory-empty {
   color: var(--color-text-tertiary);
+}
+
+.inventory-empty--mac {
+  top: calc(var(--space-4) + 42px);
+}
+
+.inventory-canvas-3d {
+  position: relative;
+  outline: none;
+}
+
+.inventory-canvas-3d:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-border-focus);
+}
+
+.inventory-3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
 }
 
 .inventory-node.inactive:not(.selected):not(.related) {
@@ -243,19 +276,45 @@
 
 @media (max-width: 1279px) {
   .inventory-control-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   }
 }
 
 @media (max-width: 720px) {
+  .inventory-page.graph-page {
+    display: block;
+    height: auto;
+    min-height: calc(100vh - var(--nav-height));
+    overflow: auto;
+  }
+
+  .inventory-controls.graph-controls {
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
+
+  .inventory-canvas-wrap {
+    height: 70vh;
+    min-height: 520px;
+  }
+
   .inventory-control-grid {
     grid-template-columns: 1fr;
   }
 
   .inventory-grouping,
   .inventory-view-mode,
-  .inventory-actions .btn {
+  .inventory-render-mode,
+  .inventory-actions .btn,
+  .inventory-actions .graph-stat,
+  .inventory-actions .graph-limit-field {
     width: 100%;
+  }
+
+  .inventory-actions .graph-stat {
+    justify-content: center;
+    margin-left: 0;
   }
 
   .inventory-candidate-grid {
