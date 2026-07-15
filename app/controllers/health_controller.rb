@@ -106,7 +106,7 @@ class HealthController < ApplicationController
   private
 
   def redis_status
-    redis = Redis.new(url: ENV.fetch("INTEGRATION_CONSOLE_REDIS_URL", "redis://127.0.0.1:6379/1"))
+    redis = Redis.new(**IntegrationConsole::RedisConfig.options)
     pong = redis.ping
     { ok: pong == "PONG", message: pong }
   rescue StandardError => error

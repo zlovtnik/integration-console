@@ -9,7 +9,7 @@ class WirelessHeatmap < SyncRecord
 
   def self.refresh!(redis: nil)
     owns_redis = redis.nil?
-    redis ||= Redis.new(url: ENV.fetch("INTEGRATION_CONSOLE_REDIS_URL", "redis://127.0.0.1:6379/1"))
+    redis ||= Redis.new(**IntegrationConsole::RedisConfig.options)
     lock_key = "heatmap:refresh:lock"
     token = SecureRandom.uuid
     lock_ttl = IntegrationConsole::CacheTtl.heatmap.to_i + 10

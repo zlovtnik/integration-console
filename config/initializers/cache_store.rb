@@ -1,3 +1,5 @@
+require Rails.root.join("app/lib/integration_console/redis_config")
+
 module IntegrationConsole
   module CacheTtl
     module_function
@@ -31,10 +33,9 @@ Rails.application.config.cache_store = if Rails.env.test?
 else
   [
     :redis_cache_store,
-    {
-      url: ENV.fetch("INTEGRATION_CONSOLE_REDIS_URL", "redis://127.0.0.1:6379/1"),
+    IntegrationConsole::RedisConfig.options.merge(
       namespace: "ic",
       expires_in: 60.seconds
-    }
+    )
   ]
 end
