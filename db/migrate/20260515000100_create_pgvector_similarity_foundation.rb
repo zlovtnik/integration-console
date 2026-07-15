@@ -1,5 +1,7 @@
 class CreatePgvectorSimilarityFoundation < ActiveRecord::Migration[7.2]
   def up
+    return if vector_foundation_installed?
+
     execute vector_foundation_sql
   end
 
@@ -32,6 +34,14 @@ class CreatePgvectorSimilarityFoundation < ActiveRecord::Migration[7.2]
   end
 
   private
+
+  def vector_foundation_installed?
+    select_value(<<~SQL)
+      SELECT to_regclass('public.vec_embeddings') IS NOT NULL
+         AND to_regclass('public.vec_similarity_pairs') IS NOT NULL
+         AND to_regprocedure('vec_install_cron_jobs()') IS NOT NULL
+    SQL
+  end
 
   def vector_foundation_sql
     path = vector_foundation_source_path
