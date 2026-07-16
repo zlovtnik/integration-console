@@ -49,15 +49,24 @@ class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
       name: "fk_sync_errors_batch_id",
       if_not_exists: true
 
-    add_index :sync_jobs, :stream_name, name: "sync_jobs_stream_name_idx", if_not_exists: true
-    add_index :sync_jobs, [:status, :created_at], name: "sync_jobs_status_created_at_idx", if_not_exists: true
-    add_index :sync_batches, [:job_id, :batch_no], name: "sync_batches_job_batch_no_idx", if_not_exists: true
-    add_index :sync_batches, :status, name: "sync_batches_status_idx", if_not_exists: true
-    add_index :sync_errors, :job_id, name: "sync_errors_job_id_idx", if_not_exists: true
-    add_index :sync_errors, :batch_id, name: "sync_errors_batch_id_idx", if_not_exists: true
-    add_index :sensors, :location_id, name: "idx_sensors_location_id", if_not_exists: true
-    add_index :sensor_alerts, [:severity, :resolved_at], name: "idx_sensor_alerts_severity_resolved_at", if_not_exists: true
-    add_index :redpanda_traffic_samples, [:sensor_id, :sampled_at], name: "idx_redpanda_traffic_samples_sensor_sampled_at", if_not_exists: true
+    add_index :sync_jobs, :stream_name,
+      name: "sync_jobs_stream_name_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sync_jobs, [:status, :created_at],
+      name: "sync_jobs_status_created_at_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sync_batches, [:job_id, :batch_no],
+      name: "sync_batches_job_batch_no_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sync_batches, :status,
+      name: "sync_batches_status_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sync_errors, :job_id,
+      name: "sync_errors_job_id_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sync_errors, :batch_id,
+      name: "sync_errors_batch_id_idx", if_not_exists: true, algorithm: :concurrently
+    add_index :sensors, :location_id,
+      name: "idx_sensors_location_id", if_not_exists: true, algorithm: :concurrently
+    add_index :sensor_alerts, [:severity, :resolved_at],
+      name: "idx_sensor_alerts_severity_resolved_at", if_not_exists: true, algorithm: :concurrently
+    add_index :redpanda_traffic_samples, [:sensor_id, :sampled_at],
+      name: "idx_redpanda_traffic_samples_sensor_sampled_at", if_not_exists: true, algorithm: :concurrently
 
     reversible do |dir|
       dir.up { raise_on_duplicate_open_alerts! }
@@ -68,7 +77,8 @@ class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
       unique: true,
       where: "resolved_at IS NULL",
       name: "idx_sensor_alerts_open_unique",
-      if_not_exists: true
+      if_not_exists: true,
+      algorithm: :concurrently
   end
 
   private
