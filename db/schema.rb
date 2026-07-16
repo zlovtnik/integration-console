@@ -214,8 +214,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "updated_at", default: -> { "now()" }, null: false
     t.index ["dedupe_key"], name: "sync_batches_dedupe_idx", unique: true
-    t.index ["job_id", "batch_no"], name: "idx_sync_batches_job_batch_no"
-    t.index ["status"], name: "idx_sync_batches_status"
+    t.index ["job_id", "batch_no"], name: "sync_batches_job_batch_no_idx"
+    t.index ["status"], name: "sync_batches_status_idx"
     t.check_constraint "status = ANY (ARRAY['pending'::text, 'processing'::text, 'dispatched'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_batches_status"
   end
 
@@ -230,8 +230,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.text "error_class", null: false
     t.text "error_text", null: false
     t.timestamptz "created_at", default: -> { "now()" }, null: false
-    t.index ["batch_id"], name: "idx_sync_errors_batch_id"
-    t.index ["job_id"], name: "idx_sync_errors_job_id"
+    t.index ["batch_id"], name: "sync_errors_batch_id_idx"
+    t.index ["job_id"], name: "sync_errors_job_id_idx"
   end
 
   create_table "sync_jobs", primary_key: "job_id", id: :uuid, default: nil, force: :cascade do |t|
@@ -241,8 +241,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_14_000100) do
     t.timestamptz "created_at", default: -> { "now()" }, null: false
     t.timestamptz "started_at"
     t.timestamptz "finished_at"
-    t.index ["status", "created_at"], name: "idx_sync_jobs_status_created_at"
-    t.index ["stream_name"], name: "idx_sync_jobs_stream_name"
+    t.index ["status", "created_at"], name: "sync_jobs_status_created_at_idx"
+    t.index ["stream_name"], name: "sync_jobs_stream_name_idx"
     t.check_constraint "status = ANY (ARRAY['pending'::text, 'running'::text, 'completed'::text, 'failed'::text])", name: "chk_sync_jobs_status"
   end
 

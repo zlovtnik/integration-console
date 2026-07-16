@@ -1,4 +1,6 @@
 class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
+  disable_ddl_transaction!
+
   def change
     add_column :sync_batches, :created_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
     add_column :sync_batches, :updated_at, :timestamptz, null: false, default: -> { "now()" }, if_not_exists: true
@@ -47,12 +49,12 @@ class HardenSyncPlaneSchema < ActiveRecord::Migration[7.2]
       name: "fk_sync_errors_batch_id",
       if_not_exists: true
 
-    add_index :sync_jobs, :stream_name, name: "idx_sync_jobs_stream_name", if_not_exists: true
-    add_index :sync_jobs, [:status, :created_at], name: "idx_sync_jobs_status_created_at", if_not_exists: true
-    add_index :sync_batches, [:job_id, :batch_no], name: "idx_sync_batches_job_batch_no", if_not_exists: true
-    add_index :sync_batches, :status, name: "idx_sync_batches_status", if_not_exists: true
-    add_index :sync_errors, :job_id, name: "idx_sync_errors_job_id", if_not_exists: true
-    add_index :sync_errors, :batch_id, name: "idx_sync_errors_batch_id", if_not_exists: true
+    add_index :sync_jobs, :stream_name, name: "sync_jobs_stream_name_idx", if_not_exists: true
+    add_index :sync_jobs, [:status, :created_at], name: "sync_jobs_status_created_at_idx", if_not_exists: true
+    add_index :sync_batches, [:job_id, :batch_no], name: "sync_batches_job_batch_no_idx", if_not_exists: true
+    add_index :sync_batches, :status, name: "sync_batches_status_idx", if_not_exists: true
+    add_index :sync_errors, :job_id, name: "sync_errors_job_id_idx", if_not_exists: true
+    add_index :sync_errors, :batch_id, name: "sync_errors_batch_id_idx", if_not_exists: true
     add_index :sensors, :location_id, name: "idx_sensors_location_id", if_not_exists: true
     add_index :sensor_alerts, [:severity, :resolved_at], name: "idx_sensor_alerts_severity_resolved_at", if_not_exists: true
     add_index :redpanda_traffic_samples, [:sensor_id, :sampled_at], name: "idx_redpanda_traffic_samples_sensor_sampled_at", if_not_exists: true
