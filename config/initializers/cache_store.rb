@@ -1,5 +1,3 @@
-require Rails.root.join("app/lib/integration_console/redis_config")
-
 module IntegrationConsole
   module CacheTtl
     module_function
@@ -31,11 +29,5 @@ end
 Rails.application.config.cache_store = if Rails.env.test?
   :memory_store
 else
-  [
-    :redis_cache_store,
-    IntegrationConsole::RedisConfig.options.merge(
-      namespace: "ic",
-      expires_in: 60.seconds
-    )
-  ]
+  [:solid_cache_store, { namespace: "ic", expires_in: 60.seconds }]
 end

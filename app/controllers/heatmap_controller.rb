@@ -89,7 +89,7 @@ class HeatmapController < ApplicationController
       filters: params[:filters].to_s
     }.to_json
 
-    "heatmap:payload:#{Digest::SHA1.hexdigest(source)}"
+    IntegrationConsole::HeatmapCache.key("heatmap:payload", Digest::SHA1.hexdigest(source))
   end
 
   def location_views(rows)

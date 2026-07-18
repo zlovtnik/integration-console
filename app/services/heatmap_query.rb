@@ -82,7 +82,7 @@ class HeatmapQuery
   end
 
   def cached_visual_rows
-    cache_key = "heatmap:visual:#{Digest::SHA1.hexdigest(filters.to_s)}"
+    cache_key = IntegrationConsole::HeatmapCache.key("heatmap:visual", Digest::SHA1.hexdigest(filters.to_s))
     Rails.cache.fetch(cache_key, expires_in: IntegrationConsole::CacheTtl.heatmap) do
       visual_rows
     end

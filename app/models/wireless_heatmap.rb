@@ -1,46 +1,41 @@
-require "redis"
-require "securerandom"
-
 class WirelessHeatmap < SyncRecord
   self.table_name = "mv_wireless_heatmap"
   self.primary_key = "location_id"
 
+  REFRESH_LOCK_KEY = 6_334_815_069_226_278_729
+
   scope :ordered_by_events, -> { order(event_count: :desc) }
 
-  def self.refresh!(redis: nil)
-    owns_redis = redis.nil?
-    redis ||= Redis.new(**IntegrationConsole::RedisConfig.options)
-    lock_key = "heatmap:refresh:lock"
-    token = SecureRandom.uuid
-    lock_ttl = IntegrationConsole::CacheTtl.heatmap.to_i + 10
-    acquired = redis.set(lock_key, token, nx: true, ex: lock_ttl)
-    return false unless acquired
+  def self.refresh!
+    connection_pool.with_connection do |connection|
+      acquired = connection.select_value("SELECT pg_try_advisory_lock(#{REFRESH_LOCK_KEY})")
+      return false unless ActiveModel::Type::Boolean.new.cast(acquired)
 
-    refresh_materialized_view
-    Rails.cache.delete_matched("heatmap:payload:*")
-    true
-  ensure
-    redis.del(lock_key) if acquired && redis.get(lock_key) == token
-    redis.close if owns_redis && redis.respond_to?(:close)
+      begin
+        refresh_materialized_view(connection)
+        IntegrationConsole::HeatmapCache.bump!
+        true
+      ensure
+        connection.select_value("SELECT pg_advisory_unlock(#{REFRESH_LOCK_KEY})")
+      end
+    end
   end
 
   def self.last_refreshed_at
     maximum(:last_seen_at)
   end
 
-  def self.refresh_materialized_view
-    connection_pool.with_connection do |conn|
-      conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY #{conn.quote_table_name(table_name)}")
-    end
+  def self.refresh_materialized_view(connection = nil)
+    return connection_pool.with_connection { |active_connection| refresh_materialized_view(active_connection) } unless connection
+
+    connection.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY #{connection.quote_table_name(table_name)}")
   rescue ActiveRecord::StatementInvalid => error
     raise unless missing_concurrent_refresh_index?(error)
 
     Rails.logger.warn(
       "Falling back to non-concurrent wireless heatmap refresh because the materialized view is missing its unique index"
     )
-    connection_pool.with_connection do |conn|
-      conn.execute("REFRESH MATERIALIZED VIEW #{conn.quote_table_name(table_name)}")
-    end
+    connection.execute("REFRESH MATERIALIZED VIEW #{connection.quote_table_name(table_name)}")
   end
 
   def self.missing_concurrent_refresh_index?(error)

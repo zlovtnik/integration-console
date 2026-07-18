@@ -7,7 +7,7 @@ repository instructions.
 
 ## Project Shape
 - This directory is a git submodule for the Rails 7.2 integration console.
-- Ruby is `3.4.4`; Rails uses PostgreSQL, Redis, ActionCable, MinIO/S3 exports,
+- Ruby is `3.4.4`; Rails uses PostgreSQL, Solid Cache, Solid Cable, MinIO/S3 exports,
   OpenTelemetry, Turbo, Stimulus, Vite, and Svelte 5.
 - `app/controllers/`, `app/models/`, `app/services/`, and `app/channels/` hold
   the Rails application behavior.
@@ -55,5 +55,5 @@ repository instructions.
   helpers, or views.
 - Run `bun run build` when touching `app/frontend/`, Vite config, package
   dependencies, or frontend entrypoints.
-- If tests need Postgres, Redis, MinIO, or Redpanda that are not running, state
+- If tests need Postgres, MinIO, or Redpanda that are not running, state
   exactly what was skipped and why.

@@ -4,7 +4,6 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
   require "opentelemetry/instrumentation/rails"
   require "opentelemetry/instrumentation/active_record"
   require "opentelemetry/instrumentation/rack"
-  require "opentelemetry/instrumentation/redis"
   require "opentelemetry/instrumentation/pg"
 
   ENV["OTEL_TRACES_SAMPLER"] ||= "always_on"
@@ -21,7 +20,6 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
     install.call("OpenTelemetry::Instrumentation::Rails")
     install.call("OpenTelemetry::Instrumentation::ActiveRecord")
     install.call("OpenTelemetry::Instrumentation::Rack")
-    install.call("OpenTelemetry::Instrumentation::Redis")
     install.call("OpenTelemetry::Instrumentation::PG", db_statement: :obfuscate)
   end
 

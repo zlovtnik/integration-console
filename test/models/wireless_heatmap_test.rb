@@ -1,24 +1,6 @@
 require "test_helper"
 
 class WirelessHeatmapTest < ActiveSupport::TestCase
-  class LockedRedis
-    def set(*) = false
-    def get(*) = nil
-    def del(*) = true
-  end
-
-  class UnlockedRedis
-    attr_reader :token
-
-    def set(_key, token, **_options)
-      @token = token
-      true
-    end
-
-    def get(*) = token
-    def del(*) = true
-  end
-
   class MissingConcurrentIndexConnection
     attr_reader :statements
 
@@ -34,6 +16,11 @@ class WirelessHeatmapTest < ActiveSupport::TestCase
         PG::ObjectNotInPrerequisiteState: ERROR: cannot refresh materialized view "public.mv_wireless_heatmap" concurrently
         HINT: Create a unique index with no WHERE clause on one or more columns of the materialized view.
       MSG
+    end
+
+    def select_value(statement)
+      statements << statement
+      true
     end
 
     def quote_table_name(name)
@@ -56,20 +43,30 @@ class WirelessHeatmapTest < ActiveSupport::TestCase
     ensure_wireless_heatmap_materialized_view
   end
 
-  test "refresh skips when redis mutex is already held" do
-    assert_equal false, WirelessHeatmap.refresh!(redis: LockedRedis.new)
+  test "refresh skips when postgres advisory lock is already held" do
+    connection = MissingConcurrentIndexConnection.new
+    def connection.select_value(statement)
+      statements << statement
+      false
+    end
+
+    WirelessHeatmap.stub(:connection_pool, FakeConnectionPool.new(connection)) do
+      assert_equal false, WirelessHeatmap.refresh!
+    end
   end
 
   test "refresh falls back when concurrent index is missing" do
     fake_connection = MissingConcurrentIndexConnection.new
 
     WirelessHeatmap.stub(:connection_pool, FakeConnectionPool.new(fake_connection)) do
-      assert_equal true, WirelessHeatmap.refresh!(redis: UnlockedRedis.new)
+      assert_equal true, WirelessHeatmap.refresh!
     end
 
     assert_equal [
+      "SELECT pg_try_advisory_lock(#{WirelessHeatmap::REFRESH_LOCK_KEY})",
       "REFRESH MATERIALIZED VIEW CONCURRENTLY \"mv_wireless_heatmap\"",
-      "REFRESH MATERIALIZED VIEW \"mv_wireless_heatmap\""
+      "REFRESH MATERIALIZED VIEW \"mv_wireless_heatmap\"",
+      "SELECT pg_advisory_unlock(#{WirelessHeatmap::REFRESH_LOCK_KEY})"
     ], fake_connection.statements
   end
 end

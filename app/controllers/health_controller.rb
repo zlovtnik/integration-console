@@ -20,7 +20,8 @@ class HealthController < ApplicationController
   def show
     redpanda = Redpanda::HealthCheck.new.call
     checks = {
-      redis: redis_status,
+      cache: cache_status,
+      cable: cable_status,
       minio: minio_status,
       heatmap: heatmap_status,
       redpanda: {
@@ -105,14 +106,22 @@ class HealthController < ApplicationController
 
   private
 
-  def redis_status
-    redis = Redis.new(**IntegrationConsole::RedisConfig.options)
-    pong = redis.ping
-    { ok: pong == "PONG", message: pong }
+  def cache_status
+    key = "health:cache:#{SecureRandom.uuid}"
+    Rails.cache.write(key, "ok", expires_in: 30.seconds)
+    { ok: Rails.cache.read(key) == "ok", adapter: "solid_cache" }
   rescue StandardError => error
-    { ok: false, message: error.message }
+    { ok: false, adapter: "solid_cache", message: error.message }
   ensure
-    redis&.close
+    Rails.cache.delete(key) if key
+  end
+
+  def cable_status
+    connection = ActiveRecord::Base.connection
+    exists = connection.data_source_exists?("solid_cable_messages")
+    { ok: exists, adapter: "solid_cable", message: ("solid_cable_messages is missing" unless exists) }
+  rescue StandardError => error
+    { ok: false, adapter: "solid_cable", message: error.message }
   end
 
   def minio_status

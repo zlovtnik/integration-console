@@ -15,26 +15,21 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     refresh_wireless_heatmap_materialized_view
   end
 
-  test "health reports redis minio and heatmap status" do
-    redis = Object.new
-    def redis.ping = "PONG"
-    def redis.close = true
-
+  test "health reports postgres cache cable minio and heatmap status" do
     s3 = Object.new
     def s3.head_bucket(bucket:) = true
 
     Redpanda::HealthCheck.stub(:new, ->(*) { fake_redpanda_health(status: "ok") }) do
-      Redis.stub(:new, redis) do
-        Aws::S3::Client.stub(:new, s3) do
-          get health_url(format: :json)
-        end
+      Aws::S3::Client.stub(:new, s3) do
+        get health_url(format: :json)
       end
     end
 
     assert_response :success
     payload = JSON.parse(response.body)
     assert_equal "ok", payload.fetch("status")
-    assert payload.dig("checks", "redis", "ok")
+    assert payload.dig("checks", "cache", "ok")
+    assert payload.dig("checks", "cable", "ok")
     assert payload.dig("checks", "minio", "ok")
     assert payload.dig("checks", "heatmap", "lastRefreshedAt").present?
     assert payload.dig("checks", "redpanda", "ok")
