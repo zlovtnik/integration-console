@@ -277,9 +277,9 @@ module Redpanda
         groups = [
           { name: ENV.fetch("INTEGRATION_CONSOLE_REDPANDA_GROUP_ID", "integration-console"), topics: configured_topics },
           { name: ENV.fetch("WIRELESS_WORKER_REDPANDA_GROUP_ID", "integration-console-wireless-worker"), topics: wireless_topics },
-          { name: ENV.fetch("SYNC_SCAN_CONSUMER", "zig-coordinator-scan"), topics: [ENV.fetch("SYNC_SCAN_TOPIC", "sync.scan.request")] },
-          { name: ENV.fetch("SYNC_LOAD_CONSUMER", "oracle-worker-load"), topics: [ENV.fetch("SYNC_LOAD_TOPIC", "sync.oracle.load")] },
-          { name: ENV.fetch("SYNC_RESULT_CONSUMER", "zig-coordinator-result"), topics: [ENV.fetch("SYNC_RESULT_TOPIC", "sync.oracle.result")] }
+          { name: ENV.fetch("SYNC_SCAN_CONSUMER", "octopus-scan"), topics: [ENV.fetch("SYNC_SCAN_TOPIC", "sync.scan.request")] },
+          { name: ENV.fetch("SYNC_LOAD_CONSUMER", "octopus-load"), topics: [ENV.fetch("SYNC_LOAD_TOPIC", "sync.oracle.load")] },
+          { name: ENV.fetch("SYNC_RESULT_CONSUMER", "octopus-result"), topics: [ENV.fetch("SYNC_RESULT_TOPIC", "sync.oracle.result")] }
         ]
         ZIG_WIRELESS_CONSUMERS.each do |env_name, (default_group, topic)|
           groups << { name: ENV.fetch(env_name, default_group), topics: [topic] }

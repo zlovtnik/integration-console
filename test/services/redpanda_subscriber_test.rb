@@ -184,7 +184,7 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
   test "redpanda health check reports topic and consumer lag ok" do
     health = Redpanda::HealthCheck.new(
       expected_topics: ["sync.scan.request"],
-      consumer_groups: [{ name: "zig-coordinator-scan", topics: ["sync.scan.request"] }],
+      consumer_groups: [{ name: "octopus-scan", topics: ["sync.scan.request"] }],
       broker_probe: ->(_servers) { true },
       metadata_fetcher: -> { FakeMetadata.new([{ topic_name: "sync.scan.request", partitions: [{ partition_id: 0 }] }]) },
       consumer_factory: ->(_group) { FakeLagConsumer.new({ "sync.scan.request" => { 0 => 3 } }) },
@@ -201,7 +201,7 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
   test "redpanda health check degrades when lag exceeds threshold" do
     health = Redpanda::HealthCheck.new(
       expected_topics: ["sync.scan.request"],
-      consumer_groups: [{ name: "zig-coordinator-scan", topics: ["sync.scan.request"] }],
+      consumer_groups: [{ name: "octopus-scan", topics: ["sync.scan.request"] }],
       broker_probe: ->(_servers) { true },
       metadata_fetcher: -> { FakeMetadata.new([{ topic_name: "sync.scan.request", partitions: [{ partition_id: 0 }] }]) },
       consumer_factory: ->(_group) { FakeLagConsumer.new({ "sync.scan.request" => { 0 => 11 } }) },

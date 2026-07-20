@@ -55,7 +55,7 @@ class CreatePgvectorSimilarityFoundation < ActiveRecord::Migration[7.2]
   def vector_foundation_source_path
     candidates = [
       Rails.root.join("db/sql/coordinator_postgres.sql"),
-      Rails.root.join("..", "..", "services", "zig-coordinator", "schema", "postgres.sql")
+      Rails.root.join("..", "..", "services", "octopus", "schema", "postgres.sql")
     ]
     candidates.find { |path| File.exist?(path) } || raise("coordinator postgres schema not found")
   end

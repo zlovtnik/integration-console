@@ -125,7 +125,7 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
       status: status,
       broker: { status: "ok", reachable: true, bootstrapServers: ["127.0.0.1:9092"] },
       topics: [{ name: "sync.scan.request", status: topic_status, partitions: 3 }],
-      consumerGroups: [{ name: "zig-coordinator-scan", status: status == "ok" ? "ok" : "degraded", lag: lag, maxLag: 1000, topics: [] }],
+      consumerGroups: [{ name: "octopus-scan", status: status == "ok" ? "ok" : "degraded", lag: lag, maxLag: 1000, topics: [] }],
       samples: [],
       fetchedAt: Time.current.iso8601
     }
