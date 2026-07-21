@@ -10,7 +10,7 @@ class IntegrationConfigTest < ActiveSupport::TestCase
     config = IntegrationConfig.create!(
       name: "Warehouse Sync",
       source_type: "redpanda",
-      destination_type: "postgres",
+      destination_type: "tidb",
       params: { "url" => "127.0.0.1:9092" }
     )
 
@@ -22,7 +22,7 @@ class IntegrationConfigTest < ActiveSupport::TestCase
     config = IntegrationConfig.new(
       name: "Bad",
       source_type: "http",
-      destination_type: "postgres",
+      destination_type: "tidb",
       params: { "method" => "PATCH" }
     )
 
@@ -33,16 +33,16 @@ class IntegrationConfigTest < ActiveSupport::TestCase
   test "encrypts params at rest" do
     config = IntegrationConfig.create!(
       name: "Secret Sync",
-      source_type: "postgres",
+      source_type: "tidb",
       destination_type: "http",
-      params: { "url" => "postgres://secret@example/db" }
+      params: { "url" => "mysql2://secret@example/integration" }
     )
 
     raw = IntegrationConfig.connection.select_value(
       "SELECT params FROM integration_configs WHERE id = #{IntegrationConfig.connection.quote(config.id)}"
     )
 
-    assert_equal "postgres://secret@example/db", config.reload.params.fetch("url")
-    assert_not_includes raw, "postgres://secret@example/db"
+    assert_equal "mysql2://secret@example/integration", config.reload.params.fetch("url")
+    assert_not_includes raw, "mysql2://secret@example/integration"
   end
 end

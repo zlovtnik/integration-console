@@ -38,7 +38,9 @@ class DevicesController < ApplicationController
 
   def create
     @device = Device.new(device_params)
-    if @device.save
+    if @device.valid?
+      acknowledgement = dispatch_device_command("device.upsert", @device)
+      @device = command_projection!(Device, acknowledgement.core_entity_id.presence || @device.mac_id)
       respond_to do |format|
         format.html { redirect_to devices_path, notice: "MAC identifier saved", status: :see_other }
         format.json { render json: { device: device_payload(@device), redirectUrl: devices_path }, status: :created }
@@ -55,7 +57,11 @@ class DevicesController < ApplicationController
 
   def update
     @device = Device.find(params[:id])
-    if @device.update(device_params)
+    previous_mac_id = @device.mac_id
+    @device.assign_attributes(device_params)
+    if @device.valid?
+      acknowledgement = dispatch_device_command("device.upsert", @device, aggregate_key: previous_mac_id)
+      @device = command_projection!(Device, acknowledgement.core_entity_id.presence || @device.mac_id)
       respond_to do |format|
         format.html { redirect_to devices_path, notice: "MAC identifier updated", status: :see_other }
         format.json { render json: { device: device_payload(@device), redirectUrl: devices_path } }
@@ -66,7 +72,8 @@ class DevicesController < ApplicationController
   end
 
   def destroy
-    Device.find(params[:id]).destroy!
+    device = Device.find(params[:id])
+    dispatch_device_command("device.delete", device)
     respond_to do |format|
       format.html { redirect_to devices_path, notice: "MAC identifier removed", status: :see_other }
       format.json { head :no_content }
@@ -74,6 +81,30 @@ class DevicesController < ApplicationController
   end
 
   private
+
+  def dispatch_device_command(command_type, device, aggregate_key: device.mac_id)
+    payload = if command_type == "device.delete"
+      { mac_id: device.mac_id }
+    else
+      {
+        mac_id: device.mac_id,
+        previous_mac_id: (aggregate_key if aggregate_key != device.mac_id),
+        display_name: device.display_name,
+        username: device.username,
+        hostname: device.hostname,
+        os_hint: device.os_hint,
+        mac_hint: device.mac_hint,
+        notes: device.notes
+      }.compact
+    end
+
+    dispatch_console_command(
+      command_type:,
+      aggregate_type: "device",
+      aggregate_key:,
+      payload:
+    )
+  end
 
   def device_params
     params.require(:device).permit(:display_name, :username, :hostname, :os_hint, :mac_hint, :notes)

@@ -23,16 +23,6 @@ module Redpanda
       wireless.probe.flush
     ].freeze
 
-    ZIG_WIRELESS_CONSUMERS = {
-      "WIRELESS_BACKLOG_SAVE_CONSUMER" => ["wireless-backlog-save", "wireless.backlog.save"],
-      "WIRELESS_BACKLOG_LIST_CONSUMER" => ["wireless-backlog-list", "wireless.backlog.list"],
-      "WIRELESS_BACKLOG_SYNCED_CONSUMER" => ["wireless-backlog-synced", "wireless.backlog.synced"],
-      "WIRELESS_BACKLOG_PRUNE_CONSUMER" => ["wireless-backlog-prune", "wireless.backlog.prune"],
-      "WIRELESS_MAC_LOOKUP_CONSUMER" => ["wireless-mac-lookup", "wireless.mac.lookup"],
-      "WIRELESS_NETWORKS_AUTHORIZED_CONSUMER" => ["wireless-networks-authorized", "wireless.networks.authorized"],
-      "WIRELESS_PROBE_FLUSH_CONSUMER" => ["wireless-probe-flush", "wireless.probe.flush"]
-    }.freeze
-
     DEFAULT_TIMEOUT_MS = 2_000
     SAMPLE_FRESHNESS = 5.minutes
 
@@ -267,23 +257,16 @@ module Redpanda
     end
 
     def expected_topics
-      @expected_topics ||= (CORE_TOPICS + ORACLE_STREAM_TOPICS + Redpanda::Subscriber.configured_topics).filter_map(&:presence).uniq.sort
+      @expected_topics ||= (CORE_TOPICS + ORACLE_STREAM_TOPICS).filter_map(&:presence).uniq.sort
     end
 
     def expected_consumer_groups
       @consumer_groups ||= begin
-        configured_topics = Redpanda::Subscriber.configured_topics
-        wireless_topics = Redpanda::WirelessWorker::CONSUMER_CONFIG.values.filter_map { |config| config[:topic] }
         groups = [
-          { name: ENV.fetch("INTEGRATION_CONSOLE_REDPANDA_GROUP_ID", "integration-console"), topics: configured_topics },
-          { name: ENV.fetch("WIRELESS_WORKER_REDPANDA_GROUP_ID", "integration-console-wireless-worker"), topics: wireless_topics },
-          { name: ENV.fetch("SYNC_SCAN_CONSUMER", "octopus-scan"), topics: [ENV.fetch("SYNC_SCAN_TOPIC", "sync.scan.request")] },
-          { name: ENV.fetch("SYNC_LOAD_CONSUMER", "octopus-load"), topics: [ENV.fetch("SYNC_LOAD_TOPIC", "sync.oracle.load")] },
-          { name: ENV.fetch("SYNC_RESULT_CONSUMER", "octopus-result"), topics: [ENV.fetch("SYNC_RESULT_TOPIC", "sync.oracle.result")] }
+          { name: ENV["SYNC_SCAN_CONSUMER"], topics: [ENV.fetch("SYNC_SCAN_TOPIC", "sync.scan.request")] },
+          { name: ENV["SYNC_LOAD_CONSUMER"], topics: [ENV.fetch("SYNC_LOAD_TOPIC", "sync.oracle.load")] },
+          { name: ENV["SYNC_RESULT_CONSUMER"], topics: [ENV.fetch("SYNC_RESULT_TOPIC", "sync.oracle.result")] }
         ]
-        ZIG_WIRELESS_CONSUMERS.each do |env_name, (default_group, topic)|
-          groups << { name: ENV.fetch(env_name, default_group), topics: [topic] }
-        end
         groups.map { |group| { name: group.fetch(:name), topics: group.fetch(:topics).filter_map(&:presence).uniq } }
           .reject { |group| group[:name].blank? || group[:topics].empty? }
       end
@@ -296,7 +279,7 @@ module Redpanda
         "bootstrap.servers" => normalized_servers.join(","),
         "group.id" => group_id,
         "enable.auto.commit" => false,
-        "auto.offset.reset" => "earliest"
+        "auto.offset.reset" => "error"
       ).consumer
     end
 

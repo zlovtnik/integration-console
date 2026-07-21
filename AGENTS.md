@@ -7,12 +7,13 @@ repository instructions.
 
 ## Project Shape
 - This directory is a git submodule for the Rails 7.2 integration console.
-- Ruby is `3.4.4`; Rails uses PostgreSQL, Solid Cache, Solid Cable, MinIO/S3 exports,
+- Ruby is `3.4.4`; Rails uses external TiDB through `mysql2`, ephemeral Redis cache/ActionCable, MinIO/S3 exports,
   OpenTelemetry, Turbo, Stimulus, Vite, and Svelte 5.
 - `app/controllers/`, `app/models/`, `app/services/`, and `app/channels/` hold
   the Rails application behavior.
 - `app/frontend/` contains the Rails-mounted Svelte/JavaScript UI.
-- `db/migrate/` is for console-owned Rails database objects.
+- Runtime schemas are canonical under the parent repository's `sql/tidb/` tree;
+  `db/legacy_postgresql_migrate/` is historical and non-executable.
 - `test/` is the Minitest suite.
 - `atheros-search-ui/` is a separate standalone SolidJS application with its
   own instructions.
@@ -22,14 +23,14 @@ repository instructions.
 - `ApplicationRecord` models own console tables. `SyncRecord` models are
   read-only views into the shared sync database; do not bypass that read-only
   boundary with writes from Rails.
-- Shared sync schema changes belong in the parent repo's `sql/` tree, not in
-  Rails migrations. Rails migrations should stay focused on console-owned data.
+- All runtime schema changes belong in the parent repo's `sql/tidb/` tree. Rails
+  verifies the pinned readiness ledger and never applies runtime DDL.
 - Keep query timeouts and cache TTL behavior explicit. Prefer existing helpers
   such as `IntegrationConsole::CacheTtl`, `DashboardCache`, and `ExportStore`.
 - Keep MinIO export keys deterministic and sanitized; do not put raw user input
   directly into object keys or response headers.
-- Keep ActionCable broadcasts and Redpanda subscriber behavior idempotent where
-  retries are possible.
+- Keep ActionCable broadcasts and console command/ack behavior idempotent where
+  retries are possible. Octopus owns the former Rails subscriber/worker loops.
 - Do not log secrets, API keys, full MAC addresses, or encryption material.
   Respect `INTEGRATION_CONSOLE_FULL_MACS` behavior for MAC display.
 
@@ -44,7 +45,7 @@ repository instructions.
 
 ## Commands
 - Install/update dependencies: `bundle install` and `bun install`.
-- Prepare local DBs: `bin/rails db:prepare`.
+- Verify externally applied schemas: `bin/schema-readiness`.
 - Rails tests: `bin/rails test` or `bin/rails test test/path/to_test.rb`.
 - System tests: `bin/rails test:system`.
 - Rails asset build: `bun run build`.
@@ -55,5 +56,5 @@ repository instructions.
   helpers, or views.
 - Run `bun run build` when touching `app/frontend/`, Vite config, package
   dependencies, or frontend entrypoints.
-- If tests need Postgres, MinIO, or Redpanda that are not running, state
+- If tests need TiDB, Redis, MinIO, or Redpanda that are not running, state
   exactly what was skipped and why.

@@ -11,8 +11,8 @@ class BacklogStatus < SyncRecord
 
   def self.status_counts
     counts = select(
-      "COUNT(*) FILTER (WHERE status = 'pending') AS pending_count",
-      "COUNT(*) FILTER (WHERE status IN ('sync_failed','failed')) AS failed_count"
+      "SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count",
+      "SUM(CASE WHEN status IN ('sync_failed','failed') THEN 1 ELSE 0 END) AS failed_count"
     ).take
 
     {

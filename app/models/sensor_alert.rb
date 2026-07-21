@@ -1,4 +1,4 @@
-class SensorAlert < ApplicationRecord
+class SensorAlert < SyncRecord
   ALLOWED_PAYLOAD_KEYS = %w[
     sensor_id
     location_id

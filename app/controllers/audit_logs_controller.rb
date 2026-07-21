@@ -7,7 +7,7 @@ class AuditLogsController < ApplicationController
     sensor_id location_id frame_type frame_subtype ssid source_mac bssid
     destination_bssid app_protocol src_ip dst_ip username wps_device_name
     wps_manufacturer wps_model_name device_fingerprint
-  ].to_h { |field| [field, "COALESCE(#{field}, payload->>'#{field}')"] }.freeze
+  ].to_h { |field| [field, "COALESCE(#{field}, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.#{field}')))"] }.freeze
 
   around_action :with_audit_statement_timeout, only: %i[index recent]
 
@@ -282,10 +282,11 @@ class AuditLogsController < ApplicationController
 
   def with_audit_statement_timeout
     connection = AuditLog.connection
-    previous_timeout = connection.select_value("SHOW statement_timeout")
-    connection.execute("SET statement_timeout TO '8000ms'")
+    previous_timeout = connection.select_value("SELECT @@SESSION.MAX_EXECUTION_TIME")
+    timeout = ENV.fetch("STATEMENT_TIMEOUT_MS", "8000").to_i.clamp(1, 60_000)
+    connection.execute("SET SESSION MAX_EXECUTION_TIME = #{timeout}")
     yield
   ensure
-    connection&.execute("SET statement_timeout TO #{connection.quote(previous_timeout)}") if previous_timeout
+    connection&.execute("SET SESSION MAX_EXECUTION_TIME = #{previous_timeout.to_i}") unless previous_timeout.nil?
   end
 end

@@ -1,5 +1,4 @@
-class AuthorizedWirelessNetwork < ApplicationRecord
-  encrypts :psk
+class AuthorizedWirelessNetwork < SyncRecord
 
   normalizes :ssid, :bssid, :location_id, with: ->(value) { value.to_s.strip.presence }
   normalizes :bssid, with: ->(value) { value.to_s.strip.downcase.presence }

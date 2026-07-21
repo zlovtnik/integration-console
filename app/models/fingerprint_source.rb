@@ -1,14 +1,14 @@
-class FingerprintSource < ApplicationRecord
+class FingerprintSource < SyncRecord
   self.table_name = "sync_events"
   self.primary_key = "device_fingerprint"
 
-  FINGERPRINT_SQL = "COALESCE(device_fingerprint, payload->>'device_fingerprint')".freeze
-  SOURCE_MAC_SQL = "COALESCE(source_mac, payload->>'source_mac')".freeze
-  SSID_SQL = "COALESCE(ssid, payload->>'ssid')".freeze
-  BSSID_SQL = "COALESCE(bssid, payload->>'bssid')".freeze
-  DESTINATION_BSSID_SQL = "COALESCE(destination_bssid, payload->>'destination_bssid')".freeze
-  LOCATION_SQL = "COALESCE(location_id, payload->>'location_id')".freeze
-  SENSOR_SQL = "COALESCE(sensor_id, payload->>'sensor_id')".freeze
+  FINGERPRINT_SQL = "COALESCE(device_fingerprint, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.device_fingerprint')))".freeze
+  SOURCE_MAC_SQL = "COALESCE(source_mac, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.source_mac')))".freeze
+  SSID_SQL = "COALESCE(ssid, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ssid')))".freeze
+  BSSID_SQL = "COALESCE(bssid, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.bssid')))".freeze
+  DESTINATION_BSSID_SQL = "COALESCE(destination_bssid, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.destination_bssid')))".freeze
+  LOCATION_SQL = "COALESCE(location_id, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.location_id')))".freeze
+  SENSOR_SQL = "COALESCE(sensor_id, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sensor_id')))".freeze
 
   scope :wireless, -> { where(stream_name: "wireless.audit") }
   scope :with_fingerprint, -> {
@@ -21,8 +21,8 @@ class FingerprintSource < ApplicationRecord
 
     safe = ActiveRecord::Base.sanitize_sql_like(sanitized)
     where(
-      "#{FINGERPRINT_SQL} ILIKE :q OR #{SOURCE_MAC_SQL} ILIKE :q OR #{SSID_SQL} ILIKE :q OR #{BSSID_SQL} ILIKE :q OR #{LOCATION_SQL} ILIKE :q OR #{SENSOR_SQL} ILIKE :q",
-      q: "%#{safe}%"
+      "LOWER(#{FINGERPRINT_SQL}) LIKE :q OR LOWER(#{SOURCE_MAC_SQL}) LIKE :q OR LOWER(#{SSID_SQL}) LIKE :q OR LOWER(#{BSSID_SQL}) LIKE :q OR LOWER(#{LOCATION_SQL}) LIKE :q OR LOWER(#{SENSOR_SQL}) LIKE :q",
+      q: "%#{safe.downcase}%"
     )
   }
 
@@ -30,12 +30,12 @@ class FingerprintSource < ApplicationRecord
     with_fingerprint.select(
       "#{FINGERPRINT_SQL} AS device_fingerprint",
       "COUNT(DISTINCT #{SOURCE_MAC_SQL}) AS source_count",
-      "ARRAY_AGG(DISTINCT #{SOURCE_MAC_SQL} ORDER BY #{SOURCE_MAC_SQL}) FILTER (WHERE #{SOURCE_MAC_SQL} IS NOT NULL AND #{SOURCE_MAC_SQL} != '') AS source_macs",
-      "ARRAY_AGG(DISTINCT #{SSID_SQL} ORDER BY #{SSID_SQL}) FILTER (WHERE #{SSID_SQL} IS NOT NULL AND #{SSID_SQL} != '') AS ssids",
-      "ARRAY_AGG(DISTINCT #{BSSID_SQL} ORDER BY #{BSSID_SQL}) FILTER (WHERE #{BSSID_SQL} IS NOT NULL AND #{BSSID_SQL} != '') AS bssids",
-      "ARRAY_AGG(DISTINCT #{DESTINATION_BSSID_SQL} ORDER BY #{DESTINATION_BSSID_SQL}) FILTER (WHERE #{DESTINATION_BSSID_SQL} IS NOT NULL AND #{DESTINATION_BSSID_SQL} != '') AS destination_bssids",
-      "ARRAY_AGG(DISTINCT #{LOCATION_SQL} ORDER BY #{LOCATION_SQL}) FILTER (WHERE #{LOCATION_SQL} IS NOT NULL AND #{LOCATION_SQL} != '') AS location_ids",
-      "ARRAY_AGG(DISTINCT #{SENSOR_SQL} ORDER BY #{SENSOR_SQL}) FILTER (WHERE #{SENSOR_SQL} IS NOT NULL AND #{SENSOR_SQL} != '') AS sensor_ids",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{SOURCE_MAC_SQL}, '') ORDER BY #{SOURCE_MAC_SQL} SEPARATOR ',') AS source_macs",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{SSID_SQL}, '') ORDER BY #{SSID_SQL} SEPARATOR ',') AS ssids",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{BSSID_SQL}, '') ORDER BY #{BSSID_SQL} SEPARATOR ',') AS bssids",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{DESTINATION_BSSID_SQL}, '') ORDER BY #{DESTINATION_BSSID_SQL} SEPARATOR ',') AS destination_bssids",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{LOCATION_SQL}, '') ORDER BY #{LOCATION_SQL} SEPARATOR ',') AS location_ids",
+      "GROUP_CONCAT(DISTINCT NULLIF(#{SENSOR_SQL}, '') ORDER BY #{SENSOR_SQL} SEPARATOR ',') AS sensor_ids",
       "MIN(observed_at) AS first_seen",
       "MAX(observed_at) AS last_seen"
     ).group(Arel.sql(FINGERPRINT_SQL))
@@ -43,27 +43,27 @@ class FingerprintSource < ApplicationRecord
 
   # Read aggregated array columns
   def source_mac_list
-    Array(read_attribute(:source_macs)).compact
+    list_attribute(:source_macs)
   end
 
   def ssid_list
-    Array(read_attribute(:ssids)).compact
+    list_attribute(:ssids)
   end
 
   def bssid_list
-    Array(read_attribute(:bssids)).compact
+    list_attribute(:bssids)
   end
 
   def destination_bssid_list
-    Array(read_attribute(:destination_bssids)).compact
+    list_attribute(:destination_bssids)
   end
 
   def location_list
-    Array(read_attribute(:location_ids)).compact
+    list_attribute(:location_ids)
   end
 
   def sensor_list
-    Array(read_attribute(:sensor_ids)).compact
+    list_attribute(:sensor_ids)
   end
 
   # For DataGrid row rendering
@@ -80,5 +80,12 @@ class FingerprintSource < ApplicationRecord
       first_seen: first_seen,
       last_seen: last_seen
     }
+  end
+
+  private
+
+  def list_attribute(name)
+    value = read_attribute(name)
+    value.is_a?(Array) ? value.compact : value.to_s.split(",").reject(&:empty?)
   end
 end

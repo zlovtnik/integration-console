@@ -5,8 +5,8 @@ class WirelessDeviceInventory < SyncRecord
   scope :recent, -> { order(last_occurred_at: :desc) }
   scope :search, ->(query) {
     query.blank? ? none : where(
-      "source_mac ILIKE :q OR COALESCE(location_id, '') ILIKE :q OR COALESCE(sensor_id, '') ILIKE :q OR COALESCE(ssid, '') ILIKE :q OR COALESCE(destination_bssid, '') ILIKE :q OR COALESCE(ip_addresses, '') ILIKE :q OR COALESCE(hostnames, '') ILIKE :q OR COALESCE(services, '') ILIKE :q OR COALESCE(dns_names, '') ILIKE :q OR COALESCE(registered_username, '') ILIKE :q OR COALESCE(display_name, '') ILIKE :q",
-      q: "%#{sanitize_sql_like(query)}%"
+      "LOWER(source_mac) LIKE :q OR LOWER(COALESCE(location_id, '')) LIKE :q OR LOWER(COALESCE(sensor_id, '')) LIKE :q OR LOWER(COALESCE(ssid, '')) LIKE :q OR LOWER(COALESCE(destination_bssid, '')) LIKE :q OR LOWER(COALESCE(ip_addresses, '')) LIKE :q OR LOWER(COALESCE(hostnames, '')) LIKE :q OR LOWER(COALESCE(services, '')) LIKE :q OR LOWER(COALESCE(dns_names, '')) LIKE :q OR LOWER(COALESCE(registered_username, '')) LIKE :q OR LOWER(COALESCE(display_name, '')) LIKE :q",
+      q: "%#{sanitize_sql_like(query.to_s.downcase)}%"
     )
   }
 end

@@ -32,19 +32,7 @@ module Redpanda
     end
 
     def run_forever
-      owns_client = @client.nil?
-      @client ||= build_consumer
-      topics.each { |topic| @client.subscribe(topic) }
-      start_wireless_worker if @run_wireless_worker
-      loop do
-        message = poll_next_message
-        handle(message.topic, message.payload) if message
-      end
-    ensure
-      @wireless_worker&.stop
-      @wireless_worker_thread&.join(2)
-      @client&.close if owns_client
-      @client = nil if owns_client
+      raise LegacyRailsProcessorRetired, LegacyRailsProcessorRetired::MESSAGE
     end
 
     def subscribe_configured
@@ -82,7 +70,7 @@ module Redpanda
         "bootstrap.servers" => @bootstrap_servers,
         "group.id" => ENV.fetch("INTEGRATION_CONSOLE_REDPANDA_GROUP_ID", "integration-console"),
         "enable.auto.commit" => true,
-        "auto.offset.reset" => "latest"
+        "auto.offset.reset" => "error"
       ).consumer
     end
 

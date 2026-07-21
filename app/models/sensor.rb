@@ -1,4 +1,4 @@
-class Sensor < ApplicationRecord
+class Sensor < SyncRecord
   STALE_AFTER = 5.minutes
 
   after_commit { DashboardCache.expire! }

@@ -7,7 +7,7 @@ class IntegrationRunTest < ActiveSupport::TestCase
     @config = IntegrationConfig.create!(
       name: "Wireless Sync",
       source_type: "redpanda",
-      destination_type: "postgres",
+      destination_type: "tidb",
       stream_name: "wireless.audit",
       params: { "topic" => "wireless.audit" }
     )

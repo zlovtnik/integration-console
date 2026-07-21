@@ -75,22 +75,18 @@ class SyncPlaneHealth < SyncRecord
     quoted_names = IMPORTANT_RELATIONS.keys.map { |name| connection.quote(name) }.join(", ")
     rows = connection.exec_query(<<~SQL.squish)
       SELECT
-        class.relname AS name,
-        CASE class.relkind
-          WHEN 'r' THEN 'table'
-          WHEN 'v' THEN 'view'
-          WHEN 'm' THEN 'materialized view'
-          ELSE class.relkind::text
+        table_name AS name,
+        CASE table_type
+          WHEN 'BASE TABLE' THEN 'table'
+          WHEN 'VIEW' THEN 'view'
+          ELSE LOWER(table_type)
         END AS kind,
-        COALESCE(stats.n_live_tup, 0)::bigint AS estimated_rows,
-        pg_total_relation_size(class.oid)::bigint AS total_bytes
-      FROM pg_class class
-      JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
-      LEFT JOIN pg_stat_user_tables stats ON stats.relid = class.oid
-      WHERE namespace.nspname = current_schema()
-        AND class.relname IN (#{quoted_names})
-        AND class.relkind IN ('r', 'v', 'm')
-      ORDER BY array_position(ARRAY[#{quoted_names}]::text[], class.relname::text)
+        COALESCE(table_rows, 0) AS estimated_rows,
+        COALESCE(data_length, 0) + COALESCE(index_length, 0) AS total_bytes
+      FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name IN (#{quoted_names})
+      ORDER BY FIELD(table_name, #{quoted_names})
     SQL
 
     rows.map do |row|

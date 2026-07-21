@@ -154,9 +154,13 @@ class DashboardController < ApplicationController
     tag_json = '["threat:pmf_deauth_attack"]'
     scope = AuditLog.wireless.where("observed_at > ?", 24.hours.ago)
     if AuditLog.column_names.include?("tags")
-      scope.where("(tags @> ?::jsonb OR payload->'tags' @> ?::jsonb)", tag_json, tag_json).count
+      scope.where(
+        "JSON_CONTAINS(tags, ?) OR JSON_CONTAINS(JSON_EXTRACT(payload, '$.tags'), ?)",
+        tag_json,
+        tag_json
+      ).count
     else
-      scope.where("payload->'tags' @> ?::jsonb", tag_json).count
+      scope.where("JSON_CONTAINS(JSON_EXTRACT(payload, '$.tags'), ?)", tag_json).count
     end
   end
 

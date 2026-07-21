@@ -12,11 +12,11 @@ class FingerprintSourcesController < ApplicationController
 
   FILTERS = {
     "device_fingerprint" => "device_fingerprint",
-    "source_mac" => { expression: "source_macs::text" },
-    "ssid" => { expression: "ssids::text" },
-    "bssid" => { expression: "bssids::text" },
-    "location_id" => { expression: "location_ids::text" },
-    "sensor_id" => { expression: "sensor_ids::text" },
+    "source_mac" => { expression: "source_macs" },
+    "ssid" => { expression: "ssids" },
+    "bssid" => { expression: "bssids" },
+    "location_id" => { expression: "location_ids" },
+    "sensor_id" => { expression: "sensor_ids" },
     "source_count" => { column: "source_count", type: :number },
     "first_seen" => { column: "first_seen", type: :date },
     "last_seen" => { column: "last_seen", type: :date }

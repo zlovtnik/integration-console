@@ -39,11 +39,6 @@ module Redpanda
         topic: "wireless.networks.authorized",
         replies_to: "wireless.networks.authorized.reply",
       },
-      "wireless-probe-flush" => {
-        stream_env: "WIRELESS_PROBE_STREAM",
-        stream_default: "WIRELESS_PROBE_STREAM",
-        topic: "wireless.probe.flush",
-      },
     }.freeze
 
     FETCH_TIMEOUT = 0.5
@@ -75,28 +70,7 @@ module Redpanda
     end
 
     def run_forever
-      @running = true
-      owns_client = @client.nil?
-      @client ||= build_consumer
-      CONSUMER_CONFIG.each_value { |config| @client.subscribe(config[:topic]) }
-
-      Rails.logger.info("[WirelessWorker] Starting wireless worker loop with #{CONSUMER_CONFIG.size} consumers")
-
-      while @running
-        begin
-          process_next_message
-        rescue => e
-          Rails.logger.error("[WirelessWorker] Error in worker loop: #{e.class} #{e.message}")
-          Rails.logger.error("[WirelessWorker] #{e.backtrace.first(5).join("\n")}")
-        end
-
-        touch_health
-        sleep @poll_interval if @running
-      end
-    ensure
-      @client&.close if owns_client && @client.respond_to?(:close)
-      @client = nil if owns_client
-      Rails.logger.info("[WirelessWorker] Wireless worker loop stopped")
+      raise LegacyRailsProcessorRetired, LegacyRailsProcessorRetired::MESSAGE
     end
 
     def stop
@@ -110,7 +84,7 @@ module Redpanda
         "bootstrap.servers" => @bootstrap_servers,
         "group.id" => ENV.fetch("WIRELESS_WORKER_REDPANDA_GROUP_ID", "integration-console-wireless-worker"),
         "enable.auto.commit" => true,
-        "auto.offset.reset" => "earliest"
+        "auto.offset.reset" => "error"
       ).consumer
     end
 
@@ -144,8 +118,6 @@ module Redpanda
         handle_mac_lookup(msg, payload, config)
       when "wireless-networks-authorized"
         handle_networks_authorized(msg, payload, config)
-      when "wireless-probe-flush"
-        handle_probe_flush(msg, payload, config)
       else
         Rails.logger.warn("[WirelessWorker] Unknown consumer: #{consumer_name}")
         msg.ack
@@ -272,19 +244,5 @@ module Redpanda
       msg.ack
     end
 
-    def handle_probe_flush(msg, payload, _config)
-      observations = payload["observations"]
-      observations = [observations] unless observations.is_a?(Array)
-
-      count = 0
-      observations.each do |obs|
-        next if obs["mac_address"].blank?
-        WirelessProbeObservation.upsert_observation(obs)
-        count += 1
-      end
-
-      Rails.logger.info("[WirelessWorker] Upserted #{count} probe observations")
-      msg.ack
-    end
   end
 end

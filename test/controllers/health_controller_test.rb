@@ -15,7 +15,7 @@ class HealthControllerTest < ActionDispatch::IntegrationTest
     refresh_wireless_heatmap_materialized_view
   end
 
-  test "health reports postgres cache cable minio and heatmap status" do
+  test "health reports schema cache cable minio and heatmap status" do
     s3 = Object.new
     def s3.head_bucket(bucket:) = true
 

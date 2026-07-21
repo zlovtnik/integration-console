@@ -49,18 +49,18 @@ class RedpandaSubscriberTest < ActiveSupport::TestCase
   end
 
   test "configured topics come from enabled redpanda integration params" do
-    IntegrationConfig.create!(name: "Sync Request", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "postgres", params: { topic: "wireless.audit" })
-    IntegrationConfig.create!(name: "Disabled Trace", source_type: "redpanda", destination_type: "postgres", enabled: false, params: { topic: "wifi.alert.handshake" })
-    IntegrationConfig.create!(name: "HTTP Sink", source_type: "http", destination_type: "postgres", params: { method: "POST" })
+    IntegrationConfig.create!(name: "Sync Request", source_type: "redpanda", destination_type: "tidb", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "tidb", params: { topic: "wireless.audit" })
+    IntegrationConfig.create!(name: "Disabled Trace", source_type: "redpanda", destination_type: "tidb", enabled: false, params: { topic: "wifi.alert.handshake" })
+    IntegrationConfig.create!(name: "HTTP Sink", source_type: "http", destination_type: "tidb", params: { method: "POST" })
 
     assert_equal ["sync.scan.request", "wireless.audit"], Redpanda::Subscriber.configured_topics.sort
   end
 
   test "subscribes once per configured topic" do
-    IntegrationConfig.create!(name: "Proxy Scan", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Atheros Scan", source_type: "redpanda", destination_type: "postgres", params: { topic: "sync.scan.request" })
-    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "postgres", params: { topic: "wireless.audit" })
+    IntegrationConfig.create!(name: "Proxy Scan", source_type: "redpanda", destination_type: "tidb", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Atheros Scan", source_type: "redpanda", destination_type: "tidb", params: { topic: "sync.scan.request" })
+    IntegrationConfig.create!(name: "Wireless Audit", source_type: "redpanda", destination_type: "tidb", params: { topic: "wireless.audit" })
     client = FakeClient.new
 
     Redpanda::Subscriber.new(client: client).subscribe_configured

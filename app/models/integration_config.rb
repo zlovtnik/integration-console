@@ -1,4 +1,6 @@
 class IntegrationConfig < ApplicationRecord
+  include ApplicationUuid
+
   attribute :params, :json, default: -> { {} }
   encrypts :params
 

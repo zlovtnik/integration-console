@@ -1,4 +1,4 @@
-class Device < ApplicationRecord
+class Device < SyncRecord
   self.primary_key = "mac_id"
 
   normalizes :wg_pubkey, :claim_token_hash, :display_name, :username, :hostname, :os_hint, :notes,

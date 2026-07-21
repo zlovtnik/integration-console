@@ -8,7 +8,7 @@ class AuditLog < SyncRecord
     sensor_id source_mac bssid destination_bssid ssid wps_device_name
     wps_manufacturer wps_model_name device_fingerprint app_protocol src_ip
     dst_ip username
-  ].map { |field| "LOWER(COALESCE(#{field}, payload->>'#{field}', '')) LIKE :q" }.freeze
+  ].map { |field| "LOWER(COALESCE(#{field}, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.#{field}')), '')) LIKE :q" }.freeze
 
   # Scopes
   scope :wireless, -> { where(stream_name: "wireless.audit") }

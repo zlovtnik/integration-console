@@ -1,4 +1,6 @@
 class IntegrationRun < ApplicationRecord
+  include ApplicationUuid
+
   class InvalidTransitionError < StandardError; end
 
   STATUSES = %w[pending running completed failed cancelled].freeze

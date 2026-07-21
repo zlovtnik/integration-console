@@ -39,7 +39,7 @@ class IntegrationsController < ApplicationController
   end
 
   def new
-    integration = IntegrationConfig.new(enabled: true, source_type: "redpanda", destination_type: "postgres")
+    integration = IntegrationConfig.new(enabled: true, source_type: "redpanda", destination_type: "tidb")
     @integration_detail_payload = integration_detail_payload(integration, mode: "new")
     render :show
   end
@@ -344,9 +344,8 @@ class IntegrationsController < ApplicationController
     IntegrationRun
       .includes(:integration_config)
       .where(integration_config_id: integration_ids)
-      .select("DISTINCT ON (integration_config_id) integration_runs.*")
-      .order("integration_config_id, created_at DESC")
-      .index_by(&:integration_config_id)
+      .order(created_at: :desc)
+      .each_with_object({}) { |run, latest| latest[run.integration_config_id] ||= run }
   rescue ActiveRecord::StatementInvalid, ActiveRecord::ConnectionNotEstablished
     {}
   end

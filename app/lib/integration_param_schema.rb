@@ -5,7 +5,7 @@ module IntegrationParamSchema
       "topic" => { "type" => "string", "label" => "Topic", "placeholder" => "wireless.audit" },
       "consumer_name" => { "type" => "string", "label" => "Consumer" }
     },
-    "postgres" => {
+    "tidb" => {
       "url" => { "type" => "password", "label" => "Connection URL" },
       "table" => { "type" => "string", "label" => "Table" },
       "batch_size" => { "type" => "integer", "label" => "Batch size", "default" => 1000 }

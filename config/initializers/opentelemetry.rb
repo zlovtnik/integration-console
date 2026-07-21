@@ -4,7 +4,7 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
   require "opentelemetry/instrumentation/rails"
   require "opentelemetry/instrumentation/active_record"
   require "opentelemetry/instrumentation/rack"
-  require "opentelemetry/instrumentation/pg"
+  require "opentelemetry/instrumentation/redis"
 
   ENV["OTEL_TRACES_SAMPLER"] ||= "always_on"
 
@@ -20,7 +20,7 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
     install.call("OpenTelemetry::Instrumentation::Rails")
     install.call("OpenTelemetry::Instrumentation::ActiveRecord")
     install.call("OpenTelemetry::Instrumentation::Rack")
-    install.call("OpenTelemetry::Instrumentation::PG", db_statement: :obfuscate)
+    install.call("OpenTelemetry::Instrumentation::Redis")
   end
 
   OTEL_DB_TRACER = OpenTelemetry.tracer_provider.tracer("integration-console.active_record")
@@ -39,7 +39,7 @@ if ENV["OTEL_EXPORTER_OTLP_ENDPOINT"].present? || ENV["OTEL_EXPORTER_OTLP_TRACES
       "db.client.operation",
       start_timestamp: started,
       attributes: {
-        "db.system" => "postgresql",
+        "db.system" => "mysql",
         "db.operation" => operation,
         "db.name" => integration_console_db_name.call,
         "status" => payload[:exception].present? ? "error" : "ok",

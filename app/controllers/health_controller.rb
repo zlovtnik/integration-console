@@ -20,6 +20,7 @@ class HealthController < ApplicationController
   def show
     redpanda = Redpanda::HealthCheck.new.call
     checks = {
+      schemas: schema_status,
       cache: cache_status,
       cable: cable_status,
       minio: minio_status,
@@ -106,22 +107,30 @@ class HealthController < ApplicationController
 
   private
 
+  def schema_status
+    status = IntegrationConsole::SchemaReadiness.status
+    { ok: status.fetch(:ok), domains: status.fetch(:checks) }
+  rescue StandardError => error
+    { ok: false, message: error.message }
+  end
+
   def cache_status
     key = "health:cache:#{SecureRandom.uuid}"
     Rails.cache.write(key, "ok", expires_in: 30.seconds)
-    { ok: Rails.cache.read(key) == "ok", adapter: "solid_cache" }
+    { ok: Rails.cache.read(key) == "ok", adapter: "redis" }
   rescue StandardError => error
-    { ok: false, adapter: "solid_cache", message: error.message }
+    { ok: false, adapter: "redis", message: error.message }
   ensure
     Rails.cache.delete(key) if key
   end
 
   def cable_status
-    connection = ActiveRecord::Base.connection
-    exists = connection.data_source_exists?("solid_cable_messages")
-    { ok: exists, adapter: "solid_cable", message: ("solid_cable_messages is missing" unless exists) }
+    client = Redis.new(url: ENV.fetch("REDIS_URL"), connect_timeout: 1, read_timeout: 1, write_timeout: 1)
+    { ok: client.ping == "PONG", adapter: "redis" }
   rescue StandardError => error
-    { ok: false, adapter: "solid_cable", message: error.message }
+    { ok: false, adapter: "redis", message: error.message }
+  ensure
+    client&.close
   end
 
   def minio_status
@@ -212,11 +221,12 @@ class HealthController < ApplicationController
   end
 
   def with_health_statement_timeout
-    connection = ActiveRecord::Base.connection
-    previous_timeout = connection.select_value("SHOW statement_timeout")
-    connection.execute("SET statement_timeout TO '8000ms'")
+    connection = SyncRecord.connection
+    previous_timeout = connection.select_value("SELECT @@SESSION.MAX_EXECUTION_TIME")
+    timeout = ENV.fetch("STATEMENT_TIMEOUT_MS", "8000").to_i.clamp(1, 60_000)
+    connection.execute("SET SESSION MAX_EXECUTION_TIME = #{timeout}")
     yield
   ensure
-    connection&.execute("SET statement_timeout TO #{connection.quote(previous_timeout)}") if previous_timeout
+    connection&.execute("SET SESSION MAX_EXECUTION_TIME = #{previous_timeout.to_i}") unless previous_timeout.nil?
   end
 end

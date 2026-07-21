@@ -2,20 +2,22 @@
 
 Rails management interface for the wireless sensor sync plane.
 
-## Local configuration
+## Runtime configuration
 
-- `DATABASE_URL` stores console-owned tables. In the compose stack this defaults to the existing `sync` Postgres database.
-- `SYNC_DATABASE_URL` reads existing sync-plane tables and views. Defaults to `DATABASE_URL`.
-- `SYNC_DB_POOL` controls the read-side sync database connection pool. Defaults to `RAILS_MAX_THREADS` or `5`.
-- `STATEMENT_TIMEOUT` controls sync database statement timeouts in milliseconds. Defaults to `8000`.
-- `LOCK_TIMEOUT` controls sync database lock wait timeouts in milliseconds. Defaults to `2000`.
-- `SYNC_REDPANDA_BOOTSTRAP_SERVERS` points at Redpanda.
-- Solid Cache and Solid Cable persist cache entries and ActionCable broadcasts in `DATABASE_URL`.
+- `DATABASE_URL` is a required `mysql2://` URL for the `integration_console` TiDB database.
+- `SYNC_DATABASE_URL` is a separate required `mysql2://` URL selecting `octopus_core`. Its Rails account receives only explicit read grants on approved core and `atheros_search` projections. There is no URL fallback between these connections.
+- Production TiDB URLs must use a non-root least-privilege Rails account and `ssl_mode=VERIFY_IDENTITY`; one Rails identity may be used for both database URLs.
+- `SYNC_DB_POOL` controls the read-side TiDB connection pool. It defaults to `RAILS_MAX_THREADS` or `5`.
+- `STATEMENT_TIMEOUT_MS` controls the TiDB session maximum statement execution time. It defaults to `8000`.
+- `REDIS_URL` is required for the non-authoritative cache and ActionCable fan-out. Redis loss degrades cache/cable health but does not lose commands, runs, or configuration.
+- `ACTION_CABLE_CHANNEL_PREFIX` must match the prefix used by the Octopus Redis fan-out processor.
+- `SYNC_REDPANDA_BOOTSTRAP_SERVERS` points at Redpanda for read-only health and the remaining publishing compatibility paths.
+- `SYNC_SCAN_CONSUMER`, `SYNC_LOAD_CONSUMER`, and `SYNC_RESULT_CONSUMER` identify the new versioned Octopus consumer groups shown by health checks.
+- `INTEGRATION_CONSOLE_SCHEMA_VERSION` / `INTEGRATION_CONSOLE_SCHEMA_CHECKSUM`, `OCTOPUS_CORE_SCHEMA_VERSION` / `OCTOPUS_CORE_SCHEMA_CHECKSUM`, and `ATHEROS_SEARCH_SCHEMA_VERSION` / `ATHEROS_SEARCH_SCHEMA_CHECKSUM` pin the externally applied canonical manifests.
 - `INTEGRATION_CONSOLE_CACHE_TTL_INVENTORY` controls inventory JSON fragment cache TTL. Defaults to `60` seconds.
 - `INTEGRATION_CONSOLE_CACHE_TTL_AUDIT_RECENT` controls recent audit JSON cache TTL. Defaults to `10` seconds.
 - `INTEGRATION_CONSOLE_CACHE_TTL_DASHBOARD` controls dashboard card cache TTL. Defaults to `15` seconds.
 - `INTEGRATION_CONSOLE_FULL_MACS=true` allows full MAC display in audit logs; otherwise MACs are masked.
-- `HEATMAP_REFRESH_INTERVAL_SECONDS` controls the materialized heatmap refresh worker interval. Defaults to `300` seconds.
 - `MINIO_ENDPOINT` points at the S3-compatible export cache. In Compose this defaults to `http://minio:9000`.
 - `MINIO_ACCESS_KEY_ID` and `MINIO_SECRET_ACCESS_KEY` authenticate to MinIO.
 - `MINIO_BUCKET` stores cached CSV exports. Defaults to `integration-console-exports`.
@@ -34,7 +36,7 @@ the Rails app when export requests run; objects older than 1 hour are deleted.
 ```sh
 bundle install
 bun install
-bin/rails db:prepare
+bin/schema-readiness
 bun run build
 bin/rails test
 bin/rails server
@@ -54,20 +56,10 @@ Or run both with a Procfile runner:
 bin/dev
 ```
 
-Run the worker with:
+Do not run `db:prepare` against the runtime databases. The canonical schemas are
+applied from the parent repository's `sql/tidb/` manifests by the dedicated DDL
+job. Rails only checks the pinned schema ledger with `bin/schema-readiness`.
 
-```sh
-bin/rails runner 'Redpanda::Subscriber.new.run_forever'
-```
-
-Run the heartbeat monitor periodically with:
-
-```sh
-bin/rails runner 'SensorHeartbeatMonitor.new.call'
-```
-
-Refresh heatmap aggregates every 5 minutes in production-like deployments:
-
-```sh
-bin/rails runner 'WirelessHeatmap.refresh!'
-```
+The former Rails Redpanda subscriber, wireless worker, heartbeat loop, and
+heatmap refresh loop are retired startup paths. Octopus owns those processors
+and the heatmap is now a physical, incrementally maintained projection table.

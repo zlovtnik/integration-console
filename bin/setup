@@ -9,5 +9,5 @@ Dir.chdir(APP_ROOT) do
   else
     system("bun install")
   end
-  system("bin/rails db:prepare")
+  system("bin/schema-readiness")
 end

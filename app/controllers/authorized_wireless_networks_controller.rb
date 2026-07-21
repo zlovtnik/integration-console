@@ -35,7 +35,9 @@ class AuthorizedWirelessNetworksController < ApplicationController
 
   def create
     @authorized_wireless_network = AuthorizedWirelessNetwork.new(authorized_wireless_network_params)
-    if @authorized_wireless_network.save
+    if @authorized_wireless_network.valid?
+      acknowledgement = dispatch_authorized_network_command("authorized_network.upsert", @authorized_wireless_network)
+      @authorized_wireless_network = command_projection!(AuthorizedWirelessNetwork, acknowledgement.core_entity_id)
       respond_to do |format|
         format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network saved", status: :see_other }
         format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: wireless_authorized_networks_path }, status: :created }
@@ -52,7 +54,10 @@ class AuthorizedWirelessNetworksController < ApplicationController
 
   def update
     @authorized_wireless_network = AuthorizedWirelessNetwork.find(params[:id])
-    if @authorized_wireless_network.update(authorized_wireless_network_params)
+    @authorized_wireless_network.assign_attributes(authorized_wireless_network_params)
+    if @authorized_wireless_network.valid?
+      acknowledgement = dispatch_authorized_network_command("authorized_network.upsert", @authorized_wireless_network)
+      @authorized_wireless_network = command_projection!(AuthorizedWirelessNetwork, acknowledgement.core_entity_id.presence || @authorized_wireless_network.id)
       respond_to do |format|
         format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network updated", status: :see_other }
         format.json { render json: { network: authorized_wireless_network_payload(@authorized_wireless_network), redirectUrl: wireless_authorized_networks_path } }
@@ -63,7 +68,8 @@ class AuthorizedWirelessNetworksController < ApplicationController
   end
 
   def destroy
-    AuthorizedWirelessNetwork.find(params[:id]).destroy!
+    network = AuthorizedWirelessNetwork.find(params[:id])
+    dispatch_authorized_network_command("authorized_network.delete", network)
     respond_to do |format|
       format.html { redirect_to wireless_authorized_networks_path, notice: "Authorized wireless network removed", status: :see_other }
       format.json { head :no_content }
@@ -71,6 +77,35 @@ class AuthorizedWirelessNetworksController < ApplicationController
   end
 
   private
+
+  def dispatch_authorized_network_command(command_type, network)
+    aggregate_key = network.id&.to_s.presence || new_authorized_network_key(network)
+    payload = if command_type == "authorized_network.delete"
+      { id: network.id }
+    else
+      {
+        id: network.id,
+        ssid: network.ssid,
+        bssid: network.bssid,
+        location_id: network.location_id,
+        label: network.label,
+        enabled: network.enabled,
+        notes: network.notes
+      }.compact
+    end
+
+    dispatch_console_command(
+      command_type:,
+      aggregate_type: "authorized_network",
+      aggregate_key:,
+      payload:
+    )
+  end
+
+  def new_authorized_network_key(network)
+    identity = [network.location_id, network.ssid, network.bssid].map(&:to_s).join("\0")
+    "new:#{Digest::SHA256.hexdigest(identity)}"
+  end
 
   def authorized_wireless_network_params
     params.require(:authorized_wireless_network).permit(:ssid, :bssid, :location_id, :label, :enabled, :notes)

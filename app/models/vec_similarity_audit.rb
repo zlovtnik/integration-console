@@ -1,5 +1,5 @@
 class VecSimilarityAudit < SyncRecord
-  self.table_name = "v_vec_similarity_audit"
+  self.table_name = "atheros_search.v_vec_similarity_audit"
   self.primary_key = "pair_id"
 
   scope :recent, -> { order(computed_at: :desc) }

@@ -204,7 +204,7 @@ class HeatmapQuery
     return [nil, []] if text_value.blank?
 
     normalized = text_value.downcase
-    expression = "LOWER(CAST(#{column} AS TEXT))"
+    expression = "LOWER(CAST(#{column} AS CHAR))"
 
     case operator
     when "equals"
@@ -249,7 +249,7 @@ class HeatmapQuery
   end
 
   def empty_clause(column, negate)
-    clause = "(#{column} IS NULL OR CAST(#{column} AS TEXT) = '')"
+    clause = "(#{column} IS NULL OR CAST(#{column} AS CHAR) = '')"
     negate ? ["NOT #{clause}", []] : [clause, []]
   end
 

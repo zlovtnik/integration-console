@@ -6,12 +6,12 @@ ENV BUNDLE_PATH=/bundle \
     RAILS_ENV=production \
     RAILS_LOG_TO_STDOUT=1 \
     RAILS_SERVE_STATIC_FILES=1 \
-    TZ=America/New_York
+    TZ=UTC
 
 WORKDIR /app
 
 RUN apt-get update -qq \
-  && apt-get install -y --no-install-recommends build-essential libpq-dev libyaml-dev pkg-config curl unzip tzdata \
+  && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev libyaml-dev pkg-config curl unzip tzdata \
   && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://bun.sh/install | bash \
   && ln -sf /usr/local/bun/bin/bun /usr/local/bin/bun \
@@ -23,8 +23,6 @@ COPY apps/integration-console/package.json apps/integration-console/bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY apps/integration-console ./
-RUN mkdir -p db/sql
-COPY sql/postgres.source.sql ./db/sql/coordinator_postgres.sql
 RUN bun run build
 
 EXPOSE 3000

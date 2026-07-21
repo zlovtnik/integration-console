@@ -16,7 +16,10 @@ Bundler.require(*Rails.groups)
 module IntegrationConsole
   class Application < Rails::Application
     config.load_defaults 7.2
-    config.time_zone = "Eastern Time (US & Canada)"
+    config.time_zone = "UTC"
+    config.active_record.default_timezone = :utc
+    config.active_record.schema_format = :ruby
+    config.active_record.dump_schema_after_migration = false
     config.autoload_paths << Rails.root.join("app/lib")
     config.eager_load_paths << Rails.root.join("app/services")
     config.eager_load_paths << Rails.root.join("app/lib")

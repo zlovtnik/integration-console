@@ -26,8 +26,27 @@ module IntegrationConsole
   end
 end
 
+cache_error_handler = lambda do |method:, returning:, exception:|
+  Rails.logger.warn(
+    "Redis cache #{method} failed; returning #{returning.inspect}: #{exception.class} #{exception.message}"
+  )
+end
+
 Rails.application.config.cache_store = if Rails.env.test?
   :memory_store
+elsif ENV["REDIS_URL"].present?
+  [
+    :redis_cache_store,
+    {
+      url: ENV.fetch("REDIS_URL"),
+      namespace: ENV.fetch("REDIS_CACHE_NAMESPACE", "integration_console:cache"),
+      expires_in: 60.seconds,
+      connect_timeout: ENV.fetch("REDIS_CONNECT_TIMEOUT_SECONDS", "1").to_f,
+      read_timeout: ENV.fetch("REDIS_READ_TIMEOUT_SECONDS", "1").to_f,
+      write_timeout: ENV.fetch("REDIS_WRITE_TIMEOUT_SECONDS", "1").to_f,
+      error_handler: cache_error_handler
+    }
+  ]
 else
-  [:solid_cache_store, { namespace: "ic", expires_in: 60.seconds }]
+  :null_store
 end

@@ -1,4 +1,4 @@
-class RedpandaTrafficSample < ApplicationRecord
+class RedpandaTrafficSample < SyncRecord
   after_commit { DashboardCache.expire! }
 
   validates :topic, presence: true
