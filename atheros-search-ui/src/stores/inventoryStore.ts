@@ -27,6 +27,7 @@ export const INVENTORY_NODE_KINDS: InventoryNodeKind[] = [
 export const INVENTORY_LIMITS = [100, 200, 400, 800] as const;
 
 export type InventoryViewMode = 'graph' | 'dedup_queue';
+export type InventoryRenderMode = '2d' | '3d';
 
 export interface InventoryMergeUndo {
   id: string;
@@ -70,6 +71,9 @@ export const [visibleInventoryKinds, setVisibleInventoryKinds] = createSignal<
 >(defaultVisibleKinds());
 export const [inventoryViewMode, setInventoryViewMode] =
   createSignal<InventoryViewMode>('graph');
+export const [inventoryRenderMode, setInventoryRenderMode] =
+  createSignal<InventoryRenderMode>('2d');
+export const [inventoryMacQuery, setInventoryMacQuery] = createSignal('');
 export const [expandedInventoryGroupIds, setExpandedInventoryGroupIds] =
   createSignal<Set<string>>(new Set());
 export const [recentMergeUndos, setRecentMergeUndos] = createSignal<
@@ -115,6 +119,7 @@ export function resetInventoryFilters() {
       min_dedup_confidence: 0.75,
     }),
   );
+  setInventoryMacQuery('');
   setVisibleInventoryKinds(defaultVisibleKinds());
   setExpandedInventoryGroupIds(new Set<string>());
 }

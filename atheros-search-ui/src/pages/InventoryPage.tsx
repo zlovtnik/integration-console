@@ -6,8 +6,10 @@ import {
   on,
   onCleanup,
   onMount,
+  Match,
   Show,
   startTransition,
+  Switch,
 } from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { DedupQueue } from '~/components/inventory/DedupQueue';
@@ -16,7 +18,11 @@ import { InventoryLegend } from '~/components/inventory/InventoryLegend';
 import { InventoryNodePanel } from '~/components/inventory/InventoryNodePanel';
 import { MergeCandidatePanel } from '~/components/inventory/MergeCandidatePanel';
 import { useInventory } from '~/hooks/useInventory';
-import { useInventoryGraph } from '~/hooks/useInventoryGraph';
+import {
+  filterInventoryByMac,
+  useInventoryGraph,
+} from '~/hooks/useInventoryGraph';
+import { useInventoryGraph3d } from '~/hooks/useInventoryGraph3d';
 import { useInventoryUrlSync } from '~/hooks/useInventoryUrlSync';
 import type { InventoryFilters, MergeDecision } from '~/api/types';
 import {
@@ -25,7 +31,9 @@ import {
   inventoryError,
   inventoryFilters,
   inventoryLoading,
+  inventoryMacQuery,
   inventoryNodes,
+  inventoryRenderMode,
   inventoryViewMode,
   pinnedInventoryNodeIds,
   recentMergeUndos,
@@ -62,16 +70,40 @@ function snapshotFilters(): InventoryFilters {
 
 export default function InventoryPage() {
   let svgRef: SVGSVGElement | undefined;
+  let canvas3dRef: HTMLDivElement | undefined;
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
   const { ready } = useInventoryUrlSync();
   const { load, decideMerge, undoMerge } = useInventory();
   const [activeUndoId, setActiveUndoId] = createSignal<string | null>(null);
 
-  const graph = useInventoryGraph(
+  const macFilteredGraph = createMemo(() =>
+    filterInventoryByMac(inventoryNodes(), inventoryEdges(), inventoryMacQuery()),
+  );
+  const graphNodes = () => macFilteredGraph().nodes;
+  const graphEdges = () => macFilteredGraph().edges;
+
+  const graph2d = useInventoryGraph(
     () => svgRef,
-    inventoryNodes,
-    inventoryEdges,
+    graphNodes,
+    graphEdges,
+    {
+      selectedNodeId: selectedInventoryNodeId,
+      pinnedNodeIds: pinnedInventoryNodeIds,
+      visibleKinds: visibleInventoryKinds,
+      grouping: () => inventoryFilters.grouping,
+      expandedGroupIds: expandedInventoryGroupIds,
+      onNodeClick: (node) =>
+        setSelectedInventoryNodeId((current) =>
+          current === node.id ? null : node.id,
+        ),
+      onAggregateClick: toggleInventoryGroupExpansion,
+    },
+  );
+  const graph3d = useInventoryGraph3d(
+    () => canvas3dRef,
+    graphNodes,
+    graphEdges,
     {
       selectedNodeId: selectedInventoryNodeId,
       pinnedNodeIds: pinnedInventoryNodeIds,
@@ -123,7 +155,7 @@ export default function InventoryPage() {
       if (event.key === 'Escape') {
         setSelectedInventoryNodeId(null);
       } else if (event.key.toLowerCase() === 'r') {
-        graph.resetZoom();
+        resetActiveGraph();
       }
     }
 
@@ -156,7 +188,9 @@ export default function InventoryPage() {
       [
         inventoryNodes,
         inventoryEdges,
+        inventoryMacQuery,
         () => inventoryFilters.grouping,
+        inventoryRenderMode,
         inventoryViewMode,
         expandedInventoryGroupIds,
       ],
@@ -166,6 +200,14 @@ export default function InventoryPage() {
 
   onCleanup(() => window.clearTimeout(filterReloadTimer));
 
+  createEffect(() => {
+    const selectedId = selectedInventoryNodeId();
+    if (!selectedId) return;
+    if (!macFilteredGraph().nodes.some((node) => node.id === selectedId)) {
+      setSelectedInventoryNodeId(null);
+    }
+  });
+
   function queueGraphRebuild() {
     if (rebuildQueued) return;
     rebuildQueued = true;
@@ -173,9 +215,17 @@ export default function InventoryPage() {
     queueMicrotask(() => {
       rebuildQueued = false;
       void startTransition(() => {
-        batch(() => graph.rebuild());
+        batch(() => {
+          graph2d.rebuild();
+          graph3d.rebuild();
+        });
       });
     });
+  }
+
+  function resetActiveGraph() {
+    if (inventoryRenderMode() === '3d') graph3d.resetZoom();
+    else graph2d.resetZoom();
   }
 
   async function handleDecision(candidateId: string, decision: MergeDecision) {
@@ -188,7 +238,8 @@ export default function InventoryPage() {
     if (restored) {
       setActiveUndoId(null);
       setInventoryViewMode('graph');
-      graph.rebuild();
+      graph2d.rebuild();
+      graph3d.rebuild();
     }
   }
 
@@ -196,7 +247,7 @@ export default function InventoryPage() {
     <main id="main-content" class="graph-page inventory-page" tabIndex={-1}>
       <InventoryControls
         onRefresh={() => void load(snapshotFilters())}
-        onResetView={() => graph.resetZoom()}
+        onResetView={resetActiveGraph}
       />
 
       <Show when={activeUndo()}>
@@ -241,11 +292,35 @@ export default function InventoryPage() {
                 No inventory devices match the current filters.
               </div>
             </Show>
-            <svg
-              ref={svgRef}
-              class="graph-canvas inventory-canvas"
-              aria-label="Device inventory graph"
-            />
+            <Show
+              when={
+                !inventoryLoading() &&
+                macFilteredGraph().active &&
+                macFilteredGraph().matchedNodeIds.size === 0
+              }
+            >
+              <div class="inventory-empty inventory-empty--mac" role="status">
+                This MAC is not present in the loaded inventory. Widen filters
+                or increase the limit, then refresh.
+              </div>
+            </Show>
+            <Switch>
+              <Match when={inventoryRenderMode() === '3d'}>
+                <div
+                  ref={canvas3dRef}
+                  class="graph-canvas inventory-canvas inventory-canvas-3d"
+                  role="img"
+                  aria-label="3D device inventory graph"
+                />
+              </Match>
+              <Match when={true}>
+                <svg
+                  ref={svgRef}
+                  class="graph-canvas inventory-canvas"
+                  aria-label="Device inventory graph"
+                />
+              </Match>
+            </Switch>
             <InventoryLegend />
           </div>
         }

@@ -41,14 +41,23 @@ export interface InventoryGraphOptions {
   grouping?: Accessor<InventoryGrouping>;
   expandedGroupIds?: Accessor<Set<string>>;
   aggregateThreshold?: number;
-  onNodeClick?: (node: InventorySimNode) => void;
+  onNodeClick?: (node: InventoryRenderNode) => void;
   onAggregateClick?: (groupId: string) => void;
 }
 
-interface RenderModel {
+export interface RenderModel {
   nodes: InventoryRenderNode[];
   edges: InventoryEdge[];
   aggregated: boolean;
+}
+
+export interface InventoryMacFilterResult {
+  active: boolean;
+  normalizedQuery: string;
+  nodes: InventoryNode[];
+  edges: InventoryEdge[];
+  matchedNodeIds: Set<string>;
+  relatedNodeIds: Set<string>;
 }
 
 export function useInventoryGraph(
@@ -459,6 +468,96 @@ export function buildInventoryRenderModel(
   };
 }
 
+export function filterInventoryByMac(
+  nodes: InventoryNode[],
+  edges: InventoryEdge[],
+  query: string,
+): InventoryMacFilterResult {
+  const normalizedQuery = normalizeInventoryMac(query);
+  const emptyIds = new Set<string>();
+  if (!normalizedQuery) {
+    return {
+      active: false,
+      normalizedQuery,
+      nodes,
+      edges,
+      matchedNodeIds: emptyIds,
+      relatedNodeIds: emptyIds,
+    };
+  }
+
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const matchedNodeIds = new Set(
+    nodes
+      .filter((node) => node.kind === 'device')
+      .filter((node) =>
+        inventoryNodeMacs(node).some(
+          (candidate) => normalizeInventoryMac(candidate) === normalizedQuery,
+        ),
+      )
+      .map((node) => node.id),
+  );
+
+  if (matchedNodeIds.size === 0) {
+    return {
+      active: true,
+      normalizedQuery,
+      nodes: [],
+      edges: [],
+      matchedNodeIds,
+      relatedNodeIds: new Set<string>(),
+    };
+  }
+
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+    const sourceAdj = adjacency.get(edge.source) ?? new Set<string>();
+    sourceAdj.add(edge.target);
+    adjacency.set(edge.source, sourceAdj);
+    const targetAdj = adjacency.get(edge.target) ?? new Set<string>();
+    targetAdj.add(edge.source);
+    adjacency.set(edge.target, targetAdj);
+  }
+
+  const relatedNodeIds = new Set<string>();
+  const queue = Array.from(matchedNodeIds);
+  for (const nodeId of queue) relatedNodeIds.add(nodeId);
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (!current) continue;
+    for (const next of adjacency.get(current) ?? []) {
+      if (relatedNodeIds.has(next)) continue;
+      relatedNodeIds.add(next);
+      queue.push(next);
+    }
+  }
+
+  const filteredNodes = nodes.filter((node) => relatedNodeIds.has(node.id));
+  const filteredEdges = edges.filter(
+    (edge) => relatedNodeIds.has(edge.source) && relatedNodeIds.has(edge.target),
+  );
+
+  return {
+    active: true,
+    normalizedQuery,
+    nodes: filteredNodes,
+    edges: filteredEdges,
+    matchedNodeIds,
+    relatedNodeIds,
+  };
+}
+
+export function normalizeInventoryMac(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^0-9a-f]/g, '');
+}
+
+function inventoryNodeMacs(node: InventoryNode): string[] {
+  return [node.mac, ...(node.known_macs ?? [])].filter(
+    (value): value is string => Boolean(value),
+  );
+}
+
 function inventoryGroupId(
   node: InventoryNode,
   grouping: InventoryGrouping,
@@ -620,7 +719,7 @@ function inventoryNodeAriaLabel(node: InventoryRenderNode): string {
   return `${inventoryNodeKindLabel(node.kind)} ${node.label}`;
 }
 
-function inventoryEdgeColor(kind: string): string {
+export function inventoryEdgeColor(kind: string): string {
   switch (kind) {
     case 'owns':
       return 'var(--color-info)';
@@ -637,7 +736,7 @@ function inventoryEdgeColor(kind: string): string {
   }
 }
 
-function inventoryLinkDistance(kind: string): number {
+export function inventoryLinkDistance(kind: string): number {
   switch (kind) {
     case 'cluster_member':
       return 54;
