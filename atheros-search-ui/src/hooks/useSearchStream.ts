@@ -7,6 +7,7 @@ import {
   prepareSearchRequest,
 } from '~/api/client';
 import { env } from '~/env';
+import { getAccessToken } from '~/auth/session';
 import {
   appendResult,
   clearResults,
@@ -176,11 +177,12 @@ export function useSearchStream() {
     current: AbortController,
     seenKeys: Set<string>,
   ): Promise<{ completed: boolean; envelopeProtocol: boolean }> {
+    const token = await getAccessToken();
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (token) headers.set('Authorization', `Bearer ${token}`);
     const response = await fetch(`${env.apiBase}/v1/search/stream`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(prepareSearchRequest(request, 'search-stream')),
       signal: signalWithTimeout(current.signal, 30_000),
     });

@@ -1,4 +1,5 @@
 import { env } from '~/env';
+import { getAccessToken } from '~/auth/session';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
   ExplainResponse,
@@ -518,6 +519,9 @@ async function request<T>(
     headers.set('Content-Type', 'application/json');
   }
 
+  const token = await getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
   const requestInit: RequestInit = {
     ...init,
     headers,
@@ -526,9 +530,16 @@ async function request<T>(
   const timeout = abortSignalWithTimeout(signal, timeoutMs);
   if (timeout.signal) requestInit.signal = timeout.signal;
 
-  const response = await fetch(`${env.apiBase}${path}`, requestInit).finally(
-    timeout.cleanup,
-  );
+  let response = await fetch(`${env.apiBase}${path}`, requestInit);
+
+  if (response.status === 401) {
+    const refreshed = await getAccessToken(true);
+    if (refreshed) {
+      headers.set('Authorization', `Bearer ${refreshed}`);
+      response = await fetch(`${env.apiBase}${path}`, requestInit);
+    }
+  }
+  timeout.cleanup();
 
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
