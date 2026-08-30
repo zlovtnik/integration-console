@@ -4,6 +4,9 @@ import solidPlugin from 'vite-plugin-solid';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiConnectSrc = env.VITE_API_BASE ? ` ${env.VITE_API_BASE}` : '';
+  const keycloakConnectSrc = env.VITE_KEYCLOAK_URL
+    ? ` ${env.VITE_KEYCLOAK_URL}`
+    : '';
 
   return {
     plugins: [
@@ -11,7 +14,9 @@ export default defineConfig(({ mode }) => {
       {
         name: 'html-csp-api-base',
         transformIndexHtml(html) {
-          return html.replace('__API_CONNECT_SRC__', apiConnectSrc);
+          return html
+            .replace('__API_CONNECT_SRC__', apiConnectSrc)
+            .replace('__KEYCLOAK_CONNECT_SRC__', keycloakConnectSrc);
         },
       },
     ],

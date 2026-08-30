@@ -1,4 +1,5 @@
 import { env } from '~/env';
+import { getAccessToken } from '~/auth/session';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
   ExplainResponse,
@@ -503,6 +504,28 @@ function abortSignalWithTimeout(
   };
 }
 
+export async function authenticatedFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = await getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const requestInit = { ...init, headers };
+  let response = await fetch(input, requestInit);
+
+  if (response.status === 401) {
+    const refreshedToken = await getAccessToken(true);
+    if (refreshedToken) {
+      headers.set('Authorization', `Bearer ${refreshedToken}`);
+      response = await fetch(input, requestInit);
+    }
+  }
+
+  return response;
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -526,9 +549,14 @@ async function request<T>(
   const timeout = abortSignalWithTimeout(signal, timeoutMs);
   if (timeout.signal) requestInit.signal = timeout.signal;
 
-  const response = await fetch(`${env.apiBase}${path}`, requestInit).finally(
-    timeout.cleanup,
-  );
+  let response: Response;
+  try {
+    response = path.startsWith('/v1/')
+      ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit)
+      : await fetch(`${env.apiBase}${path}`, requestInit);
+  } finally {
+    timeout.cleanup();
+  }
 
   if (!response.ok) {
     throw await apiErrorFromResponse(response);

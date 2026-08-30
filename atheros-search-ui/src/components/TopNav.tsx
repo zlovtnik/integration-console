@@ -1,5 +1,13 @@
 import { A, useLocation } from '@solidjs/router';
-import { Activity, Database, Keyboard, Network, Search } from 'lucide-solid';
+import {
+  Activity,
+  Database,
+  Keyboard,
+  LogOut,
+  Network,
+  Search,
+} from 'lucide-solid';
+import { logout } from '~/auth/session';
 import { ApiStatus } from './ApiStatus';
 import { ShortcutsModal } from './ShortcutsModal';
 import { ThemeToggle } from './ThemeToggle';
@@ -65,6 +73,15 @@ export function TopNav() {
             <Keyboard size={18} aria-hidden="true" />
           </button>
           <ThemeToggle />
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => void logout()}
+          >
+            <LogOut size={18} aria-hidden="true" />
+          </button>
         </div>
       </nav>
 

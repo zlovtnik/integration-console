@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getAccessToken } from '~/auth/session';
 import {
+  api,
+  authenticatedFetch,
   apiErrorFromResponse,
   normalizeInventoryResponse,
   normalizeSearchResponse,
@@ -10,9 +13,55 @@ import {
 import type { GraphFilters, SearchFilters } from '~/api/types';
 import { asRfc3339 } from '~/utils/timestamp';
 
+vi.mock('~/auth/session', () => ({
+  getAccessToken: vi.fn(),
+}));
+
 afterEach(() => {
   setOutgoingTimestampReporter(undefined);
+  vi.mocked(getAccessToken).mockReset();
   vi.restoreAllMocks();
+});
+
+describe('api client authentication', () => {
+  it('injects a bearer token and retries once after refreshing on HTTP 401', async () => {
+    const authorizationHeaders: Array<string | null> = [];
+    vi.mocked(getAccessToken)
+      .mockResolvedValueOnce('expired-token')
+      .mockResolvedValueOnce('refreshed-token');
+    vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      authorizationHeaders.push(
+        new Headers(init?.headers).get('Authorization'),
+      );
+      return Promise.resolve(
+        new Response('{}', {
+          status: authorizationHeaders.length === 1 ? 401 : 200,
+        }),
+      );
+    });
+
+    const response = await authenticatedFetch('/v1/search');
+
+    expect(response.status).toBe(200);
+    expect(authorizationHeaders).toEqual([
+      'Bearer expired-token',
+      'Bearer refreshed-token',
+    ]);
+    expect(getAccessToken).toHaveBeenNthCalledWith(1);
+    expect(getAccessToken).toHaveBeenNthCalledWith(2, true);
+  });
+
+  it('keeps the public health check outside token authentication', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"status":"ok"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(api.healthz()).resolves.toEqual({ status: 'ok' });
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
 });
 
 describe('api client normalization', () => {
