@@ -1,6 +1,7 @@
 import { batch, createSignal } from 'solid-js';
 import {
   ApiError,
+  authenticatedFetch,
   apiErrorFromResponse,
   normalizeSearchMeta,
   normalizeSearchResult,
@@ -176,14 +177,17 @@ export function useSearchStream() {
     current: AbortController,
     seenKeys: Set<string>,
   ): Promise<{ completed: boolean; envelopeProtocol: boolean }> {
-    const response = await fetch(`${env.apiBase}/v1/search/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const response = await authenticatedFetch(
+      `${env.apiBase}/v1/search/stream`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(prepareSearchRequest(request, 'search-stream')),
+        signal: signalWithTimeout(current.signal, 30_000),
       },
-      body: JSON.stringify(prepareSearchRequest(request, 'search-stream')),
-      signal: signalWithTimeout(current.signal, 30_000),
-    });
+    );
 
     if (!response.ok) {
       throw await apiErrorFromResponse(response);
