@@ -189,6 +189,8 @@ func validatePostgresVersion(versionNum int) error {
 func (p *Pool) SchemaReady(ctx context.Context) (SchemaReadyStatus, error) {
 	status := SchemaReadyStatus{ExpectedSHA256: p.expectedManifest}
 	var ready bool
+	// The relation may not exist until provisioning finishes. Avoid caching a
+	// failed prepare and subsequent statement-cache cleanup through PgBouncer.
 	err := p.QueryRowContext(ctx, `
 SELECT applied_checksum, ready
 FROM atheros_search.schema_readiness
