@@ -8,3 +8,4 @@
 /public/vite*
 /db/sync_schema.rb
 /.omx/
+.omx/
