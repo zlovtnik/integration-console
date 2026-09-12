@@ -100,7 +100,9 @@ func WaitForSchemaReady(ctx context.Context, store Database, timeout, pollInterv
 	var lastStatus *db.SchemaReadyStatus
 	var lastErr error
 	for {
-		status, err := store.SchemaReady(waitCtx)
+		checkCtx, checkCancel := context.WithTimeout(waitCtx, 5*time.Second)
+		status, err := store.SchemaReady(checkCtx)
+		checkCancel()
 		if err == nil {
 			lastStatus = &status
 			lastErr = nil
@@ -113,8 +115,15 @@ func WaitForSchemaReady(ctx context.Context, store Database, timeout, pollInterv
 			}
 			logger.Debug().Str("schema_status", schemaStatusSummary(status)).Msg("waiting for schema readiness gate")
 		} else {
-			lastErr = err
-			logger.Debug().Err(err).Msg("waiting for schema readiness view")
+			// A deadline (including driver cleanup after a failed statement) must
+			// not hide the database error that explains why startup is blocked.
+			contextError := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+			if lastErr == nil || !contextError {
+				if lastErr == nil || lastErr.Error() != err.Error() {
+					logger.Warn().Err(err).Msg("schema readiness query failed; verify the PostgreSQL data-plane schema executor")
+				}
+				lastErr = err
+			}
 		}
 
 		select {

@@ -194,7 +194,7 @@ SELECT applied_checksum, ready
 FROM atheros_search.schema_readiness
 WHERE domain = 'atheros_search'
 LIMIT 1
-	`).Scan(&status.ManifestSHA256, &ready)
+	`, pgx.QueryExecModeExec).Scan(&status.ManifestSHA256, &ready)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return status, nil
