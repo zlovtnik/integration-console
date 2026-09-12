@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPStatusFromError(t *testing.T) {
@@ -35,4 +39,19 @@ func TestHTTPStatusFromError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteErrorRedactsServerFailures(t *testing.T) {
+	serverFailure := httptest.NewRecorder()
+	writeError(serverFailure, http.StatusInternalServerError, "database password is invalid")
+	require.Equal(t, http.StatusInternalServerError, serverFailure.Code)
+	var serverBody map[string]string
+	require.NoError(t, json.Unmarshal(serverFailure.Body.Bytes(), &serverBody))
+	require.Equal(t, "internal server error", serverBody["error"])
+
+	clientFailure := httptest.NewRecorder()
+	writeError(clientFailure, http.StatusBadRequest, "source_key is required")
+	var clientBody map[string]string
+	require.NoError(t, json.Unmarshal(clientFailure.Body.Bytes(), &clientBody))
+	require.Equal(t, "source_key is required", clientBody["error"])
 }

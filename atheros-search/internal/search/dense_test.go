@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -21,4 +22,9 @@ func TestDenseKindQueryKeepsANNLookupUnfiltered(t *testing.T) {
 	require.Contains(t, query, "JOIN atheros_search.search_documents")
 	require.Contains(t, query, "d.status = 'active'")
 	require.Contains(t, strings.ToLower(query), "::public.vector")
+}
+
+func TestDenseRejectsUninitializedPool(t *testing.T) {
+	_, err := Dense(context.Background(), nil, make([]float32, embeddingDimensions), "model", Options{TopK: 1, Kinds: []string{"event"}})
+	require.EqualError(t, err, "Postgres pool is not initialized")
 }

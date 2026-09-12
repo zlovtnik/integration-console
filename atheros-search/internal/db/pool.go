@@ -194,8 +194,11 @@ SELECT applied_checksum, ready
 FROM atheros_search.schema_readiness
 WHERE domain = 'atheros_search'
 LIMIT 1
-`).Scan(&status.ManifestSHA256, &ready)
+	`).Scan(&status.ManifestSHA256, &ready)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return status, nil
+		}
 		return SchemaReadyStatus{}, fmt.Errorf("Postgres schema readiness query: %w", err)
 	}
 	status.ManifestSHA256 = strings.ToLower(status.ManifestSHA256)

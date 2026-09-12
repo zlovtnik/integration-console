@@ -7,7 +7,7 @@ ingestion, search-document/job preparation, maintained projections and alert
 derivation.
 
 The Integration Console is the SolidJS UI in
-[`apps/integration-console/atheros-search-ui`](../../apps/integration-console/atheros-search-ui/);
+[`apps/integration-console/atheros-search-ui`](../atheros-search-ui/);
 there is no Rails Search console.
 
 ## Runtime responsibilities
@@ -24,7 +24,7 @@ there is no Rails Search console.
   `embedding_jobs` are the bounded-retry dead-letter queue
 
 The service does not apply DDL. Canonical schema lives in
-[`sql/postgres/atheros_search`](../../sql/postgres/atheros_search/).
+[`sql/postgres/atheros_search`](../../../sql/postgres/atheros_search/).
 
 ## Database and readiness
 
@@ -157,7 +157,7 @@ OTLP exporter/provider; `OTEL_EXPORTER_OTLP_ENDPOINT` alone does not export
 spans.
 
 Do not log raw queries, source keys, session IDs, tokens or full MACs. See
-[Atheros Search Privacy](../../docs/atheros-search-privacy.md).
+[Atheros Search Privacy](../../../docs/atheros-search-privacy.md).
 
 ## Development
 

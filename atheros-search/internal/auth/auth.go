@@ -46,11 +46,13 @@ type TokenAuth struct {
 }
 
 const refreshCooldown = 30 * time.Second
+const maxMissingKeys = 1024
 
 type jwtVerifier struct {
 	config      JWTConfig
 	client      *http.Client
 	mu          sync.RWMutex
+	refreshMu   sync.Mutex
 	keys        map[string]*rsa.PublicKey
 	missingKeys map[string]time.Time
 	expiry      time.Time
@@ -180,12 +182,9 @@ func (v *jwtVerifier) verify(ctx context.Context, raw string) (map[string]struct
 	if err := json.Unmarshal(headerBytes, &header); err != nil || header.Algorithm != "RS256" || header.KeyID == "" {
 		return nil, errors.New("JWT must use RS256 with a key ID")
 	}
-	key, err := v.key(ctx, header.KeyID, false)
+	key, err := v.key(ctx, header.KeyID)
 	if err != nil {
-		key, err = v.key(ctx, header.KeyID, true)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
@@ -257,31 +256,26 @@ func audienceContains(raw json.RawMessage, expected string) bool {
 	return false
 }
 
-func (v *jwtVerifier) key(ctx context.Context, keyID string, force bool) (*rsa.PublicKey, error) {
+func (v *jwtVerifier) key(ctx context.Context, keyID string) (*rsa.PublicKey, error) {
+	now := v.now()
 	v.mu.RLock()
 	key := v.keys[keyID]
-	fresh := v.now().Before(v.expiry)
-	if key == nil {
-		if lastMissing, ok := v.missingKeys[keyID]; ok && v.now().Sub(lastMissing) < refreshCooldown {
-			v.mu.RUnlock()
-			return nil, errors.New("JWT key ID is unknown")
-		}
-	}
+	fresh := now.Before(v.expiry)
+	lastMissing, missing := v.missingKeys[keyID]
+	coolingDown := now.Sub(v.lastRefresh) < refreshCooldown
 	v.mu.RUnlock()
-	if key != nil && fresh && !force {
+	if key != nil && fresh {
 		return key, nil
 	}
-	v.mu.RLock()
-	coolingDown := v.now().Sub(v.lastRefresh) < refreshCooldown
-	v.mu.RUnlock()
-	if coolingDown && !force {
-		v.mu.RLock()
-		defer v.mu.RUnlock()
-		key = v.keys[keyID]
-		if key == nil {
-			return nil, errors.New("JWT key ID is unknown")
+	if key == nil && missing && now.Sub(lastMissing) < refreshCooldown {
+		return nil, errors.New("JWT key ID is unknown")
+	}
+	if coolingDown {
+		if key != nil {
+			return key, nil
 		}
-		return key, nil
+		v.recordMissingKey(keyID, now)
+		return nil, errors.New("JWT key ID is unknown")
 	}
 	if err := v.refresh(ctx); err != nil {
 		return nil, err
@@ -290,15 +284,41 @@ func (v *jwtVerifier) key(ctx context.Context, keyID string, force bool) (*rsa.P
 	key = v.keys[keyID]
 	v.mu.RUnlock()
 	if key == nil {
-		v.mu.Lock()
-		v.missingKeys[keyID] = v.now()
-		v.mu.Unlock()
+		v.recordMissingKey(keyID, now)
 		return nil, errors.New("JWT key ID is unknown")
 	}
 	return key, nil
 }
 
+func (v *jwtVerifier) recordMissingKey(keyID string, now time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	oldestID := ""
+	var oldest time.Time
+	for id, recordedAt := range v.missingKeys {
+		if now.Sub(recordedAt) >= refreshCooldown {
+			delete(v.missingKeys, id)
+			continue
+		}
+		if oldestID == "" || recordedAt.Before(oldest) {
+			oldestID, oldest = id, recordedAt
+		}
+	}
+	if len(v.missingKeys) >= maxMissingKeys {
+		delete(v.missingKeys, oldestID)
+	}
+	v.missingKeys[keyID] = now
+}
+
 func (v *jwtVerifier) refresh(ctx context.Context) error {
+	v.refreshMu.Lock()
+	defer v.refreshMu.Unlock()
+	v.mu.RLock()
+	coolingDown := v.now().Sub(v.lastRefresh) < refreshCooldown
+	v.mu.RUnlock()
+	if coolingDown {
+		return nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.config.JWKSURI, nil)
 	if err != nil {
 		return err

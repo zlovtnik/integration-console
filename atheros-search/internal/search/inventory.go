@@ -11,54 +11,54 @@ import (
 )
 
 const (
-	inventoryDefaultLimit         = 400
-	inventoryMaxLimit             = 1000
+	inventoryDefaultLimit = 400
+	inventoryMaxLimit     = 1000
 )
 
 type InventoryGrouping string
 
 const (
-	InventoryGroupingRegistry   InventoryGrouping = "registry"
-	InventoryGroupingCMDB       InventoryGrouping = "cmdb"
+	InventoryGroupingRegistry InventoryGrouping = "registry"
+	InventoryGroupingCMDB     InventoryGrouping = "cmdb"
 )
 
 type InventoryNodeKind string
 
 const (
-	InventoryNodeDevice         InventoryNodeKind = "device"
-	InventoryNodeOwner          InventoryNodeKind = "owner"
-	InventoryNodeLocationAsset  InventoryNodeKind = "location_asset"
+	InventoryNodeDevice        InventoryNodeKind = "device"
+	InventoryNodeOwner         InventoryNodeKind = "owner"
+	InventoryNodeLocationAsset InventoryNodeKind = "location_asset"
 )
 
 type InventoryEdgeKind string
 
 const (
-	InventoryEdgeOwns           InventoryEdgeKind = "owns"
-	InventoryEdgeLocatedAt      InventoryEdgeKind = "located_at"
+	InventoryEdgeOwns      InventoryEdgeKind = "owns"
+	InventoryEdgeLocatedAt InventoryEdgeKind = "located_at"
 )
 
 type InventoryFilters struct {
-	Grouping           InventoryGrouping `json:"grouping"`
-	LocationIDs        []string          `json:"location_ids,omitempty"`
-	OwnerIDs           []string          `json:"owner_ids,omitempty"`
-	ActiveOnly         bool              `json:"active_only,omitempty"`
-	Tags               []string          `json:"tags,omitempty"`
-	Limit              int               `json:"limit,omitempty"`
+	Grouping    InventoryGrouping `json:"grouping"`
+	LocationIDs []string          `json:"location_ids,omitempty"`
+	OwnerIDs    []string          `json:"owner_ids,omitempty"`
+	ActiveOnly  bool              `json:"active_only,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	Limit       int               `json:"limit,omitempty"`
 }
 
 type InventoryNode struct {
-	ID                  string            `json:"id"`
-	Kind                InventoryNodeKind `json:"kind"`
-	Label               string            `json:"label"`
-	MAC                 string            `json:"mac,omitempty"`
-	KnownMACs           []string          `json:"known_macs,omitempty"`
-	DisplayName         string            `json:"display_name,omitempty"`
-	OwnerID             string            `json:"owner_id,omitempty"`
-	LocationID          string            `json:"location_id,omitempty"`
-	FirstRegistered     *time.Time        `json:"first_registered,omitempty"`
-	LastSeen            *time.Time        `json:"last_seen,omitempty"`
-	Active              bool              `json:"active"`
-	Tags                []string          `json:"tags,omitempty"`
+	ID              string            `json:"id"`
+	Kind            InventoryNodeKind `json:"kind"`
+	Label           string            `json:"label"`
+	MAC             string            `json:"mac,omitempty"`
+	KnownMACs       []string          `json:"known_macs,omitempty"`
+	DisplayName     string            `json:"display_name,omitempty"`
+	OwnerID         string            `json:"owner_id,omitempty"`
+	LocationID      string            `json:"location_id,omitempty"`
+	FirstRegistered *time.Time        `json:"first_registered,omitempty"`
+	LastSeen        *time.Time        `json:"last_seen,omitempty"`
+	Active          bool              `json:"active"`
+	Tags            []string          `json:"tags,omitempty"`
 }
 
 type InventoryEdge struct {
@@ -79,16 +79,16 @@ type InventoryResponse struct {
 }
 
 type inventoryDeviceRow struct {
-	MAC                 string
-	DisplayName         string
-	OwnerID             string
-	LocationID          string
-	FirstRegistered     *time.Time
-	LastSeen            *time.Time
-	Active              bool
-	Registered          bool
-	Tags                []string
-	KnownMACs           []string
+	MAC             string
+	DisplayName     string
+	OwnerID         string
+	LocationID      string
+	FirstRegistered *time.Time
+	LastSeen        *time.Time
+	Active          bool
+	Registered      bool
+	Tags            []string
+	KnownMACs       []string
 }
 
 func (s *Service) Inventory(ctx context.Context, filters InventoryFilters) (*InventoryResponse, error) {
@@ -147,50 +147,85 @@ func fetchInventoryDevices(ctx context.Context, tx *sql.Tx, filters InventoryFil
 	if filters.ActiveOnly {
 		clauses = append(clauses, "active")
 	}
-	overfetch := filters.Limit * 4
-	if overfetch > 4000 {
-		overfetch = 4000
-	}
-	args = append(args, overfetch)
-	rows, err := tx.QueryContext(ctx, `
+	addStoredTagClauses(&clauses, &args, filters.Tags)
+	devices := make([]inventoryDeviceRow, 0, filters.Limit)
+	var cursorLastSeen time.Time
+	var cursorMAC string
+	for len(devices) < filters.Limit {
+		pageClauses := append([]string(nil), clauses...)
+		pageArgs := append([]any(nil), args...)
+		if !cursorLastSeen.IsZero() {
+			pageClauses = append(pageClauses, fmt.Sprintf("(last_seen < $%d OR (last_seen = $%d AND mac > $%d))", len(pageArgs)+1, len(pageArgs)+1, len(pageArgs)+2))
+			pageArgs = append(pageArgs, cursorLastSeen, cursorMAC)
+		}
+		pageArgs = append(pageArgs, filters.Limit)
+		rows, err := tx.QueryContext(ctx, `
 SELECT
   mac, COALESCE(display_name, ''), COALESCE(owner_id, ''), COALESCE(location_id, ''),
   first_registered, last_seen, active, registered,
   COALESCE(tags::text, '[]'), COALESCE(known_macs::text, '[]')
 FROM atheros_search.devices
-WHERE `+strings.Join(clauses, " AND ")+`
+WHERE `+strings.Join(pageClauses, " AND ")+`
 ORDER BY last_seen DESC, mac ASC
-LIMIT $`+fmt.Sprint(len(args)), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	devices := make([]inventoryDeviceRow, 0, filters.Limit)
-	for rows.Next() {
-		var row inventoryDeviceRow
-		var first, last sql.NullTime
-		var tagsJSON, knownMACsJSON string
-		if err := rows.Scan(
-			&row.MAC, &row.DisplayName, &row.OwnerID, &row.LocationID,
-			&first, &last, &row.Active, &row.Registered,
-			&tagsJSON, &knownMACsJSON,
-		); err != nil {
+		LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)
+		if err != nil {
 			return nil, err
 		}
-		row.FirstRegistered = nullTimePtr(first)
-		row.LastSeen = nullTimePtr(last)
-		row.Tags = parseTagsJSON(tagsJSON)
-		_ = json.Unmarshal([]byte(knownMACsJSON), &row.KnownMACs)
-		row.Tags = inventoryDeviceTags(&row)
-		if !inventoryTagsMatch(row.Tags, filters.Tags) {
-			continue
+		pageRows := 0
+		for rows.Next() {
+			var row inventoryDeviceRow
+			var first, last sql.NullTime
+			var tagsJSON, knownMACsJSON string
+			if err := rows.Scan(
+				&row.MAC, &row.DisplayName, &row.OwnerID, &row.LocationID,
+				&first, &last, &row.Active, &row.Registered,
+				&tagsJSON, &knownMACsJSON,
+			); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			pageRows++
+			cursorLastSeen = last.Time
+			cursorMAC = row.MAC
+			row.FirstRegistered = nullTimePtr(first)
+			row.LastSeen = nullTimePtr(last)
+			row.Tags = parseTagsJSON(tagsJSON)
+			_ = json.Unmarshal([]byte(knownMACsJSON), &row.KnownMACs)
+			row.Tags = inventoryDeviceTags(&row)
+			if !inventoryTagsMatch(row.Tags, filters.Tags) {
+				continue
+			}
+			devices = append(devices, row)
+			if len(devices) >= filters.Limit {
+				break
+			}
 		}
-		devices = append(devices, row)
-		if len(devices) >= filters.Limit {
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if pageRows < filters.Limit {
 			break
 		}
 	}
-	return devices, rows.Err()
+	return devices, nil
+}
+
+func addStoredTagClauses(clauses *[]string, args *[]any, tags []string) {
+	for _, tag := range tags {
+		if isDerivedInventoryTag(tag) {
+			continue
+		}
+		*clauses = append(*clauses, fmt.Sprintf("EXISTS (SELECT 1 FROM jsonb_array_elements_text(tags) AS stored_tag(value) WHERE lower(stored_tag.value) = $%d)", len(*args)+1))
+		*args = append(*args, tag)
+	}
+}
+
+func isDerivedInventoryTag(tag string) bool {
+	return tag == "device" || tag == "registered" || tag == "active" || strings.HasPrefix(tag, "owner:") || strings.HasPrefix(tag, "location:")
 }
 
 func addInventoryDevice(nodes map[string]InventoryNode, edges map[string]InventoryEdge, device inventoryDeviceRow, grouping InventoryGrouping) {

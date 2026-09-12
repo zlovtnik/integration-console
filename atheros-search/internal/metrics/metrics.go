@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -80,8 +82,12 @@ func (m *Metrics) ObserveSearch(kind, mode, status string, started time.Time, re
 }
 
 func StartServer(ctx context.Context, port int) (*http.Server, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return nil, fmt.Errorf("bind metrics server: %w", err)
+	}
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              listener.Addr().String(),
 		Handler:           promhttp.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -93,7 +99,7 @@ func StartServer(ctx context.Context, port int) (*http.Server, error) {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "athsearch metrics server stopped: %v\n", err)
 		}
 	}()

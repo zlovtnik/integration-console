@@ -1,8 +1,11 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -27,6 +30,20 @@ func TestValidateDriverConfigRequiresDedicatedExternalAtherosSearchDatabase(t *t
 	cfg, err := pgx.ParseConfig("postgresql://search:secret@db.example.test:5432/sync")
 	require.NoError(t, err)
 	require.NoError(t, validateDriverConfig(cfg))
+}
+
+func TestSchemaReadyTreatsMissingRowAsNotReady(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer sqlDB.Close()
+	mock.ExpectQuery("SELECT applied_checksum, ready").WillReturnError(sql.ErrNoRows)
+
+	pool := &Pool{DB: sqlDB, expectedManifest: "expected"}
+	status, err := pool.SchemaReady(context.Background())
+	require.NoError(t, err)
+	require.False(t, status.Ready)
+	require.Equal(t, "expected", status.ExpectedSHA256)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestValidatePostgresVersion(t *testing.T) {

@@ -21,13 +21,13 @@ import (
 type Service struct {
 	searchv1.UnimplementedSearchServiceServer
 
-	Pool                  *sql.DB
-	Embedder              embed.Client
-	Config                config.Config
-	Metrics               *metrics.Metrics
-	Logger                zerolog.Logger
-	SuggCache             SuggestCache
-	suggMu                sync.Mutex
+	Pool      *sql.DB
+	Embedder  embed.Client
+	Config    config.Config
+	Metrics   *metrics.Metrics
+	Logger    zerolog.Logger
+	SuggCache SuggestCache
+	suggMu    sync.Mutex
 }
 
 func NewService(pool *sql.DB, embedder embed.Client, cfg config.Config, m *metrics.Metrics, logger zerolog.Logger) *Service {
@@ -87,13 +87,16 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 		kindForQuery := embed.Kind(kinds[0])
 		text := BuildQueryText(query, kinds[0])
 		vectors, err := s.Embedder.Embed(searchCtx, []string{text}, kindForQuery)
+		if err == nil && len(vectors) == 0 {
+			err = errors.New("embedding backend returned no vectors")
+		}
 		if err != nil {
 			if mode == searchv1.SearchMode_SEARCH_MODE_DENSE {
 				return nil, err
 			}
 			modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
 			fallbackReason = err.Error()
-		} else if len(vectors) > 0 {
+		} else {
 			qvec = vectors[0]
 			denseResults, err = Dense(searchCtx, s.Pool, qvec, s.Config.EmbeddingModel, opts)
 			if err != nil {

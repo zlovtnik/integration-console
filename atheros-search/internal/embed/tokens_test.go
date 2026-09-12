@@ -16,6 +16,11 @@ type vocabTokenizer struct {
 	next  int
 }
 
+type emptyTokenizer struct{}
+
+func (emptyTokenizer) Tokenize(context.Context, string) ([]int, error)   { return nil, nil }
+func (emptyTokenizer) Detokenize(context.Context, []int) (string, error) { return "", nil }
+
 func newVocabTokenizer() *vocabTokenizer {
 	return &vocabTokenizer{ids: make(map[string]int), words: make(map[int]string)}
 }
@@ -86,6 +91,20 @@ func TestChunkTextSplitsExactTokenRanges(t *testing.T) {
 		if rebuilt[i] != original[i] {
 			t.Fatalf("rebuilt token %d = %q, want %q (order or range mismatch)", i, rebuilt[i], original[i])
 		}
+	}
+}
+
+func TestChunkTextRejectsTokenlessNonEmptyText(t *testing.T) {
+	_, err := ChunkText(context.Background(), emptyTokenizer{}, "content")
+	if err == nil {
+		t.Fatal("ChunkText accepted non-empty text without tokens")
+	}
+	chunks, err := ChunkText(context.Background(), emptyTokenizer{}, " \t\n")
+	if err != nil {
+		t.Fatalf("ChunkText empty fallback returned error: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].Text != " \t\n" {
+		t.Fatalf("unexpected empty fallback chunks: %#v", chunks)
 	}
 }
 

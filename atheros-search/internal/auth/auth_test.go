@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -115,4 +116,38 @@ func TestTokenAuthDisabledWhenDigestEmpty(t *testing.T) {
 func TestTokenAuthRejectsWrongDigestLength(t *testing.T) {
 	_, err := NewTokenAuth("deadbeef")
 	require.ErrorContains(t, err, "token digest must decode to 32 bytes")
+}
+
+func TestJWTUnknownKeysHonorRefreshCooldownAndAreBounded(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "RSA", "use": "sig", "kid": "known",
+			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}}})
+	}))
+	defer server.Close()
+
+	authenticator, err := NewJWTTokenAuth(JWTConfig{
+		Issuer: "https://issuer.example.test", JWKSURI: server.URL, Audience: "audience", ClientID: "client",
+	})
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	authenticator.jwt.now = func() time.Time { return now }
+
+	for i := 0; i < maxMissingKeys+10; i++ {
+		_, err := authenticator.jwt.key(context.Background(), fmt.Sprintf("unknown-%d", i))
+		require.EqualError(t, err, "JWT key ID is unknown")
+	}
+	require.Equal(t, 1, requests)
+	require.LessOrEqual(t, len(authenticator.jwt.missingKeys), maxMissingKeys)
+
+	now = now.Add(refreshCooldown + time.Second)
+	_, err = authenticator.jwt.key(context.Background(), "another-unknown")
+	require.EqualError(t, err, "JWT key ID is unknown")
+	require.Equal(t, 2, requests)
 }

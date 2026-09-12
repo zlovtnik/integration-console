@@ -57,7 +57,11 @@ func main() {
 	case "status":
 		err = showStatus(ctx, db, logger)
 	case "reset-stale":
-		err = resetStaleJobs(ctx, db, logger, time.Duration(*staleMinutes)*time.Minute)
+		if *staleMinutes <= 0 {
+			err = fmt.Errorf("stale-minutes must be greater than zero")
+		} else {
+			err = resetStaleJobs(ctx, db, logger, time.Duration(*staleMinutes)*time.Minute)
+		}
 	case "retry-failed":
 		err = retryFailedJobs(ctx, db, logger)
 	default:
@@ -114,11 +118,15 @@ ORDER BY status
 	}
 
 	var total int64
-	_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embedding_jobs").Scan(&total)
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embedding_jobs").Scan(&total); err != nil {
+		return err
+	}
 	logger.Info().Int64("total", total).Msg("")
 
 	var workerCount int64
-	_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM worker_heartbeat").Scan(&workerCount)
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM worker_heartbeat").Scan(&workerCount); err != nil {
+		return err
+	}
 	logger.Info().Int64("heartbeat_rows", workerCount).Msg("Worker heartbeats")
 
 	return nil
@@ -153,8 +161,8 @@ SET status = 'pending',
     lease_expires_at = NULL,
     next_attempt_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
-WHERE status = 'pending'
-   OR (status = 'failed' AND attempt_count < max_attempts)
+WHERE status = 'failed'
+  AND attempt_count < max_attempts
 `)
 	if err != nil {
 		return fmt.Errorf("retry failed jobs: %w", err)

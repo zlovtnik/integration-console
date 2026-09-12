@@ -1,10 +1,10 @@
 FROM golang:1.26-bookworm AS builder
 WORKDIR /src/services/atheros-search
 
-COPY services/atheros-search/go.mod services/atheros-search/go.sum* ./
+COPY apps/integration-console/atheros-search/go.mod apps/integration-console/atheros-search/go.sum ./
 RUN go mod download
 
-COPY services/atheros-search ./
+COPY apps/integration-console/atheros-search ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/atheros-search ./cmd/server
 
 FROM gcr.io/distroless/static-debian12:nonroot

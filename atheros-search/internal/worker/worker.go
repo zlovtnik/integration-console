@@ -151,7 +151,8 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 	go p.renewLeases(renewCtx, jobs, logger)
 
 	completed := 0
-	for _, group := range orderedJobGroups(jobs) {
+	groups := orderedJobGroups(jobs)
+	for index, group := range groups {
 		kind, kindJobs := group.kind, group.jobs
 		texts := make([]string, len(kindJobs))
 		for i := range kindJobs {
@@ -163,8 +164,9 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 				if retryAt.IsZero() {
 					retryAt = time.Now().Add(p.cfg.PollInterval)
 				}
-				logger.Warn().Err(embedErr).Time("retry_at", retryAt).Int("job_count", len(jobs)).Msg("embedding backend unavailable; deferring claimed jobs without consuming attempts")
-				p.deferClaimedJobs(ctx, jobs, retryAt, logger)
+				remaining := remainingJobs(groups[index:])
+				logger.Warn().Err(embedErr).Time("retry_at", retryAt).Int("job_count", len(remaining)).Msg("embedding backend unavailable; deferring claimed jobs without consuming attempts")
+				p.deferClaimedJobs(ctx, remaining, retryAt, logger)
 				return
 			}
 			logger.Error().Err(embedErr).Int("job_count", len(kindJobs)).Str("kind", kind).Msg("embedding batch failed")
@@ -191,6 +193,18 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 	}
 
 	logger.Info().Int("completed", completed).Int("claimed", len(jobs)).Msg("embedding batch completed")
+}
+
+func remainingJobs(groups []jobGroup) []Job {
+	count := 0
+	for _, group := range groups {
+		count += len(group.jobs)
+	}
+	jobs := make([]Job, 0, count)
+	for _, group := range groups {
+		jobs = append(jobs, group.jobs...)
+	}
+	return jobs
 }
 
 type jobGroup struct {

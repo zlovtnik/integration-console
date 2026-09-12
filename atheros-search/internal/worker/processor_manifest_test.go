@@ -21,7 +21,7 @@ func TestSharedManifestAssignsAtherosSearchProcessorsExactlyOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	manifestPath := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "sql", "postgres", "contracts", "processors.json"))
+	manifestPath := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "..", "sql", "postgres", "contracts", "processors.json"))
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read processor manifest: %v", err)
@@ -72,5 +72,17 @@ func TestNormalizeEmbeddingKindSupportsAllWorkerKinds(t *testing.T) {
 		if err != nil || got != kind {
 			t.Fatalf("normalizeEmbeddingKind(%q) = %q, %v", kind, got, err)
 		}
+	}
+}
+
+func TestRemainingJobsStartsAtCurrentGroup(t *testing.T) {
+	groups := []jobGroup{
+		{kind: "event", jobs: []Job{{JobID: "1"}}},
+		{kind: "device", jobs: []Job{{JobID: "2"}, {JobID: "3"}}},
+		{kind: "sequence", jobs: []Job{{JobID: "4"}}},
+	}
+	remaining := remainingJobs(groups[1:])
+	if len(remaining) != 3 || remaining[0].JobID != "2" || remaining[2].JobID != "4" {
+		t.Fatalf("remaining jobs = %#v", remaining)
 	}
 }

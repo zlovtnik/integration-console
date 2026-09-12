@@ -126,7 +126,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Int32("fused_count", resp.FusedResultCount).
 			Int64("query_id", resp.QueryId).
 			Msg("search completed")
-		writeProtoJSON(w, http.StatusOK, resp)
+		writeProtoJSON(w, http.StatusOK, resp, log)
 	})
 	registerJSON(mux, "POST", "/v1/search/stream", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
@@ -230,7 +230,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Float64("fused_score", float64(resp.FusedScore)).
 			Int("boost_reasons", len(resp.BoostReasons)).
 			Msg("explain completed")
-		writeProtoJSON(w, http.StatusOK, resp)
+		writeProtoJSON(w, http.StatusOK, resp, log)
 	})
 	registerJSON(mux, "GET", "/v1/suggest/filters", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
@@ -258,7 +258,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Int("sensor_ids", len(resp.SensorIds)).
 			Int("frame_subtypes", len(resp.FrameSubtypes)).
 			Msg("suggest filters completed")
-		writeProtoJSON(w, http.StatusOK, resp)
+		writeProtoJSON(w, http.StatusOK, resp, log)
 	})
 	registerJSON(mux, "POST", "/v1/inventory", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
@@ -538,10 +538,11 @@ func writeAuthorizationError(w http.ResponseWriter, decision auth.Decision) {
 	writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 }
 
-func writeProtoJSON(w http.ResponseWriter, status int, msg proto.Message) {
+func writeProtoJSON(w http.ResponseWriter, status int, msg proto.Message, logger zerolog.Logger) {
 	encoded, err := protojson.Marshal(msg)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		logger.Error().Err(err).Msg("marshal protobuf response")
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -556,6 +557,9 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
+	if status >= http.StatusInternalServerError {
+		message = "internal server error"
+	}
 	writeJSON(w, status, map[string]string{"error": message})
 }
 

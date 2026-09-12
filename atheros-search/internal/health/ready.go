@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -23,6 +24,9 @@ type Readiness struct {
 	DB                  Database
 	Embedder            embed.Client
 	SchemaReadyRequired bool
+	countsMu            sync.Mutex
+	counts              db.EmbeddingCounts
+	countsExpiresAt     time.Time
 }
 
 func (r *Readiness) Check(ctx context.Context) error {
@@ -43,7 +47,7 @@ func (r *Readiness) Check(ctx context.Context) error {
 			return fmt.Errorf("schema not ready: %s", schemaStatusSummary(status))
 		}
 	}
-	counts, err := r.DB.CountEmbeddings(checkCtx)
+	counts, err := r.embeddingCounts(checkCtx)
 	if err != nil {
 		return fmt.Errorf("count embeddings: %w", err)
 	}
@@ -62,6 +66,21 @@ func (r *Readiness) Check(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (r *Readiness) embeddingCounts(ctx context.Context) (db.EmbeddingCounts, error) {
+	r.countsMu.Lock()
+	defer r.countsMu.Unlock()
+	if time.Now().Before(r.countsExpiresAt) {
+		return r.counts, nil
+	}
+	counts, err := r.DB.CountEmbeddings(ctx)
+	if err != nil {
+		return db.EmbeddingCounts{}, err
+	}
+	r.counts = counts
+	r.countsExpiresAt = time.Now().Add(time.Minute)
+	return counts, nil
 }
 
 func WaitForSchemaReady(ctx context.Context, store Database, timeout, pollInterval time.Duration, logger zerolog.Logger) error {

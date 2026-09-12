@@ -12,7 +12,7 @@ import (
 func TestCanonicalPostgresSchemaMatchesQueryFacade(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
-	root := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../../.."))
+	root := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../../../.."))
 	files := []string{
 		"sql/postgres/atheros_search/01_tables/001_schema_manifest.sql",
 		"sql/postgres/atheros_search/01_tables/002_search_documents.sql",

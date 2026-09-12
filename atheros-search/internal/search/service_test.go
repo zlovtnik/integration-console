@@ -3,13 +3,24 @@ package search
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	athmetrics "github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
+
+type emptyEmbedder struct{}
+
+func (emptyEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32, error) {
+	return nil, nil
+}
+func (emptyEmbedder) Health(context.Context) error { return nil }
 
 func TestSearchRejectsEmptyQuery(t *testing.T) {
 	registry := prometheus.NewRegistry()
@@ -37,6 +48,40 @@ func TestSearchRejectsEmptyQuery(t *testing.T) {
 		}
 	}
 	require.Equal(t, float64(1), errorCount)
+}
+
+func TestSearchRejectsEmptyDenseEmbeddingResult(t *testing.T) {
+	svc := &Service{
+		Embedder: emptyEmbedder{},
+		Config:   config.Config{SearchTimeout: time.Second},
+	}
+	_, err := svc.Search(context.Background(), &searchv1.SearchRequest{
+		Query: "wireless", Kind: searchv1.SearchKind_SEARCH_KIND_EVENT, Mode: searchv1.SearchMode_SEARCH_MODE_DENSE,
+	})
+	require.EqualError(t, err, "embedding backend returned no vectors")
+}
+
+func TestSearchFallsBackToSparseForEmptyEmbeddingResult(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	mock.ExpectQuery("FROM atheros_search.search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"source_id"}))
+	mock.ExpectQuery("INSERT INTO atheros_search.search_queries").
+		WillReturnRows(sqlmock.NewRows([]string{"query_id"}).AddRow(1))
+
+	svc := &Service{
+		Pool:     database,
+		Embedder: emptyEmbedder{},
+		Config:   config.Config{SearchTimeout: time.Second},
+	}
+	response, err := svc.Search(context.Background(), &searchv1.SearchRequest{
+		Query: "wireless", Kind: searchv1.SearchKind_SEARCH_KIND_EVENT, Mode: searchv1.SearchMode_SEARCH_MODE_HYBRID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_SPARSE, response.ModeUsed)
+	require.Equal(t, "embedding backend returned no vectors", response.FallbackReason)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestHasMeaningfulSearchTerms(t *testing.T) {

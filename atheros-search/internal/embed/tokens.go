@@ -3,6 +3,7 @@ package embed
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // DefaultMaxTokens is the llama.cpp model context. Chunks deliberately leave
@@ -31,6 +32,9 @@ func ChunkText(ctx context.Context, tokenizer Tokenizer, text string) ([]TokenCh
 		return nil, fmt.Errorf("tokenize embedding source: %w", err)
 	}
 	if len(tokens) == 0 {
+		if strings.TrimSpace(text) != "" {
+			return nil, fmt.Errorf("tokenize embedding source: no tokens for non-empty text")
+		}
 		return []TokenChunk{{Text: text}}, nil
 	}
 	chunks := make([]TokenChunk, 0, (len(tokens)+ChunkTokenLimit-1)/ChunkTokenLimit)

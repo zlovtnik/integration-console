@@ -40,6 +40,9 @@ func Dense(ctx context.Context, pool *sql.DB, qvec []float32, model string, opts
 }
 
 func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind string, opts Options) ([]RawResult, error) {
+	if err := ensureDB(pool); err != nil {
+		return nil, err
+	}
 	_, ok := supportedSearchKinds[kind]
 	if !ok {
 		return nil, fmt.Errorf("unsupported dense search kind %q", kind)

@@ -8,11 +8,11 @@ import (
 
 func TestNormalizeInventoryFiltersDefaultsAndClamps(t *testing.T) {
 	got, err := normalizeInventoryFilters(InventoryFilters{
-		Grouping:  InventoryGroupingCMDB,
+		Grouping:    InventoryGroupingCMDB,
 		LocationIDs: []string{" lab ", "lab", ""},
-		OwnerIDs: []string{" security ", "security"},
-		Tags:      []string{" Active ", "active"},
-		Limit:     5000,
+		OwnerIDs:    []string{" security ", "security"},
+		Tags:        []string{" Active ", "active"},
+		Limit:       5000,
 	})
 	require.NoError(t, err)
 	require.Equal(t, inventoryMaxLimit, got.Limit)
@@ -29,6 +29,17 @@ func TestNormalizeInventoryFiltersRejectsUnsupportedGrouping(t *testing.T) {
 func TestInventoryDeviceTagsIncludeDerivedOperationalTags(t *testing.T) {
 	device := &inventoryDeviceRow{OwnerID: "Security", LocationID: "Floor-2", Active: true, Registered: true}
 	require.Equal(t, []string{"device", "registered", "active", "owner:security", "location:floor-2"}, inventoryDeviceTags(device))
+}
+
+func TestStoredTagClausesExcludeDerivedTags(t *testing.T) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	addStoredTagClauses(&clauses, &args, []string{"managed", "active", "owner:security", "location:lab", "registered", "device"})
+	require.Len(t, clauses, 2)
+	require.Contains(t, clauses[1], "jsonb_array_elements_text(tags)")
+	require.Equal(t, []any{"managed"}, args)
+	require.True(t, isDerivedInventoryTag("owner:security"))
+	require.False(t, isDerivedInventoryTag("managed"))
 }
 
 func TestInventoryGroupingBuildsCMDBEdges(t *testing.T) {
