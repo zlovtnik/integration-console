@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -152,6 +153,19 @@ func TestRecoverExpiredLeasesIsBounded(t *testing.T) {
 	recovered, err := recoverExpiredLeases(context.Background(), db, 25)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), recovered)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpsertHeartbeatDefaultsMissingMetadataToObject(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectExec("INSERT INTO atheros_search\\.worker_heartbeat").
+		WithArgs("worker-1", "pool", json.RawMessage(`{}`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	require.NoError(t, upsertHeartbeat(context.Background(), db, "worker-1", "pool", nil))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -1,13 +1,16 @@
 package health
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
@@ -15,6 +18,7 @@ import (
 
 type countingDatabase struct {
 	countCalls int
+	counts     db.EmbeddingCounts
 }
 
 func (d *countingDatabase) Health(context.Context) error { return nil }
@@ -25,15 +29,28 @@ func (d *countingDatabase) SchemaReady(context.Context) (db.SchemaReadyStatus, e
 
 func (d *countingDatabase) CountEmbeddings(context.Context) (db.EmbeddingCounts, error) {
 	d.countCalls++
-	return db.EmbeddingCounts{Event: 1, Device: 1}, nil
+	return d.counts, nil
 }
 
 func TestCheckCachesEmbeddingCounts(t *testing.T) {
-	database := &countingDatabase{}
+	database := &countingDatabase{counts: db.EmbeddingCounts{Event: 1, Device: 1}}
 	readiness := &Readiness{DB: database}
 	require.NoError(t, readiness.Check(context.Background()))
 	require.NoError(t, readiness.Check(context.Background()))
 	require.Equal(t, 1, database.countCalls)
+}
+
+func TestCheckLogsEmptyEmbeddingKindsOnlyWhenCountsRefresh(t *testing.T) {
+	database := &countingDatabase{}
+	var output bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&output)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	readiness := &Readiness{DB: database}
+	require.NoError(t, readiness.Check(context.Background()))
+	require.NoError(t, readiness.Check(context.Background()))
+	require.Equal(t, 1, strings.Count(output.String(), "one or more search vector tables are empty"))
 }
 
 type schemaDatabase struct {

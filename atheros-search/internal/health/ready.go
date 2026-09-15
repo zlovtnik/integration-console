@@ -47,11 +47,11 @@ func (r *Readiness) Check(ctx context.Context) error {
 			return fmt.Errorf("schema not ready: %s", schemaStatusSummary(status))
 		}
 	}
-	counts, err := r.embeddingCounts(checkCtx)
+	counts, refreshed, err := r.embeddingCounts(checkCtx)
 	if err != nil {
 		return fmt.Errorf("count embeddings: %w", err)
 	}
-	if emptyKinds := counts.EmptyKinds(); len(emptyKinds) > 0 {
+	if emptyKinds := counts.EmptyKinds(); refreshed && len(emptyKinds) > 0 {
 		log.Warn().
 			Strs("empty_embedding_kinds", emptyKinds).
 			Int64("event_count", counts.Event).
@@ -68,19 +68,19 @@ func (r *Readiness) Check(ctx context.Context) error {
 	return nil
 }
 
-func (r *Readiness) embeddingCounts(ctx context.Context) (db.EmbeddingCounts, error) {
+func (r *Readiness) embeddingCounts(ctx context.Context) (db.EmbeddingCounts, bool, error) {
 	r.countsMu.Lock()
 	defer r.countsMu.Unlock()
 	if time.Now().Before(r.countsExpiresAt) {
-		return r.counts, nil
+		return r.counts, false, nil
 	}
 	counts, err := r.DB.CountEmbeddings(ctx)
 	if err != nil {
-		return db.EmbeddingCounts{}, err
+		return db.EmbeddingCounts{}, false, err
 	}
 	r.counts = counts
 	r.countsExpiresAt = time.Now().Add(time.Minute)
-	return counts, nil
+	return counts, true, nil
 }
 
 func WaitForSchemaReady(ctx context.Context, store Database, timeout, pollInterval time.Duration, logger zerolog.Logger) error {

@@ -268,6 +268,9 @@ func formatVector(v []float32) string {
 }
 
 func upsertHeartbeat(ctx context.Context, db *sql.DB, workerID, workerType string, metadata json.RawMessage) error {
+	if len(metadata) == 0 {
+		metadata = json.RawMessage(`{}`)
+	}
 	_, err := db.ExecContext(ctx, `
 INSERT INTO atheros_search.worker_heartbeat (worker_id, worker_type, last_seen_at, metadata)
 VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
