@@ -121,11 +121,19 @@ export function cleanFilters(source: SearchFilters): SearchFilters {
   const sensors = compactList(source.sensor_ids);
   const frameSubtypes = compactList(source.frame_subtypes);
   const tags = compactList(source.tags);
+  const eventTypes = compactList(source.event_types);
+  const proxyDeviceIds = compactList(source.proxy_device_ids);
+  const classifications = compactList(source.classifications);
 
   if (locations) next.location_ids = locations;
   if (sensors) next.sensor_ids = sensors;
   if (frameSubtypes) next.frame_subtypes = frameSubtypes;
   if (tags) next.tags = tags;
+  if (eventTypes) next.event_types = eventTypes;
+  if (proxyDeviceIds) next.proxy_device_ids = proxyDeviceIds;
+  if (classifications) next.classifications = classifications;
+  if (source.host?.trim()) next.host = source.host.trim();
+  if (typeof source.blocked === 'boolean') next.blocked = source.blocked;
   if (source.ssid?.trim()) next.ssid = source.ssid.trim();
   const sourceMacs = compactSourceMacs(source);
   if (sourceMacs?.length === 1) {

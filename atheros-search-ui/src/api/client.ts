@@ -56,6 +56,10 @@ type RawSearchResult = Partial<SearchResult> & {
   sequenceLogProb?: unknown;
   boostReasons?: unknown;
   detailJson?: unknown;
+  proxyEventType?: unknown;
+  proxyDeviceId?: unknown;
+  windowStart?: unknown;
+  windowEnd?: unknown;
 };
 
 type RawSearchResponse = Omit<Partial<SearchResponse>, 'results'> & {
@@ -256,6 +260,13 @@ function firstBoolean(defaultValue: boolean, ...values: unknown[]): boolean {
   return defaultValue;
 }
 
+function optionalBoolean(...values: unknown[]): boolean | undefined {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string');
@@ -305,6 +316,26 @@ export function normalizeSearchResult(raw: RawSearchResult): SearchResult {
   };
   const observedAt = firstString(raw.observed_at, raw.observedAt);
   if (observedAt) result.observed_at = observedAt;
+  const host = firstString(raw.host);
+  if (host) result.host = host;
+  const blocked = optionalBoolean(raw.blocked);
+  if (blocked !== undefined) result.blocked = blocked;
+  const proxyEventType = firstString(
+    raw.proxy_event_type,
+    raw.proxyEventType,
+  );
+  if (proxyEventType) result.proxy_event_type = proxyEventType;
+  const proxyDeviceId = firstString(
+    raw.proxy_device_id,
+    raw.proxyDeviceId,
+  );
+  if (proxyDeviceId) result.proxy_device_id = proxyDeviceId;
+  const windowStart = firstString(raw.window_start, raw.windowStart);
+  if (windowStart) result.window_start = windowStart;
+  const windowEnd = firstString(raw.window_end, raw.windowEnd);
+  if (windowEnd) result.window_end = windowEnd;
+  const classification = firstString(raw.classification);
+  if (classification) result.classification = classification;
   return result;
 }
 

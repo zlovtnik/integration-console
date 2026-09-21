@@ -402,6 +402,71 @@ export function FilterPanel(props: {
             </datalist>
           </FilterSection>
 
+          <FilterSection title="Proxy traffic">
+            <label class="field">
+              <span>Host</span>
+              <input
+                value={filters.host ?? ''}
+                placeholder="api.example.com"
+                onInput={(event) =>
+                  setFilters('host', event.currentTarget.value || undefined)
+                }
+              />
+            </label>
+
+            <label class="field">
+              <span>Blocked state</span>
+              <select
+                value={
+                  filters.blocked === undefined ? '' : String(filters.blocked)
+                }
+                onChange={(event) =>
+                  setFilters(
+                    'blocked',
+                    event.currentTarget.value === ''
+                      ? undefined
+                      : event.currentTarget.value === 'true',
+                  )
+                }
+              >
+                <option value="">Any</option>
+                <option value="true">Blocked</option>
+                <option value="false">Allowed</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Event types <span class="field-hint">comma-separated</span></span>
+              <input
+                value={joinList(filters.event_types)}
+                onChange={(event) =>
+                  setFilters('event_types', splitList(event.currentTarget.value))
+                }
+              />
+            </label>
+
+            <label class="field">
+              <span>Proxy device IDs <span class="field-hint">comma-separated</span></span>
+              <input
+                value={joinList(filters.proxy_device_ids)}
+                onChange={(event) =>
+                  setFilters('proxy_device_ids', splitList(event.currentTarget.value))
+                }
+              />
+            </label>
+
+            <label class="field">
+              <span>Classifications <span class="field-hint">comma-separated</span></span>
+              <input
+                value={joinList(filters.classifications)}
+                placeholder="analytics, cdn"
+                onChange={(event) =>
+                  setFilters('classifications', splitList(event.currentTarget.value))
+                }
+              />
+            </label>
+          </FilterSection>
+
           <FilterSection title="Frame Types">
             <fieldset class="field">
               <legend class="sr-only">Frame subtypes</legend>

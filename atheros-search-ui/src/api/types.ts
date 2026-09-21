@@ -7,6 +7,8 @@ export const SEARCH_KINDS = [
   'SEARCH_KIND_SEQUENCE',
   'SEARCH_KIND_DEVICE',
   'SEARCH_KIND_CROSS',
+  'SEARCH_KIND_PROXY_EVENT',
+  'SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW',
 ] as const;
 
 export type SearchKind = (typeof SEARCH_KINDS)[number];
@@ -33,6 +35,11 @@ export interface SearchFilters {
   handshake_only?: boolean;
   security_flags_mask?: number;
   tags?: string[];
+  host?: string;
+  blocked?: boolean;
+  event_types?: string[];
+  proxy_device_ids?: string[];
+  classifications?: string[];
 }
 
 export interface SearchRequest {
@@ -65,6 +72,13 @@ export interface SearchResult {
   sequence_log_prob: number;
   boost_reasons: string[];
   detail_json: string;
+  host?: string;
+  blocked?: boolean;
+  proxy_event_type?: string;
+  proxy_device_id?: string;
+  window_start?: string;
+  window_end?: string;
+  classification?: string;
 }
 
 export interface SearchResponse {

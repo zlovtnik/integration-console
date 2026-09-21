@@ -24,6 +24,16 @@ const KINDS: { value: SearchKind; label: string; title: string }[] = [
     title: 'Per-device profiles and identity',
   },
   {
+    value: 'SEARCH_KIND_PROXY_EVENT',
+    label: 'Proxy event',
+    title: 'Individual proxy allow and block events',
+  },
+  {
+    value: 'SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW',
+    label: 'Blocked window',
+    title: 'Closed hourly blocked-host summaries',
+  },
+  {
     value: 'SEARCH_KIND_CROSS',
     label: 'Cross',
     title: 'Search across all types simultaneously',
