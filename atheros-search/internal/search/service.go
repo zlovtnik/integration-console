@@ -84,8 +84,8 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 	var fallbackReason string
 
 	if mode == searchv1.SearchMode_SEARCH_MODE_DENSE || mode == searchv1.SearchMode_SEARCH_MODE_HYBRID {
-		kindForQuery := embed.Kind(kinds[0])
-		text := BuildQueryText(query, kinds[0])
+		kindForQuery := embed.Kind(embeddingKindForSourceKind(kinds[0]))
+		text := BuildQueryText(query, embeddingKindForSourceKind(kinds[0]))
 		vectors, err := s.Embedder.Embed(searchCtx, []string{text}, kindForQuery)
 		if err == nil && len(vectors) == 0 {
 			err = errors.New("embedding backend returned no vectors")
@@ -236,8 +236,12 @@ func requestKinds(kind searchv1.SearchKind) ([]string, error) {
 		return nil, errors.New("sequence search has been retired")
 	case searchv1.SearchKind_SEARCH_KIND_DEVICE:
 		return []string{"device"}, nil
+	case searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT:
+		return []string{"proxy_event"}, nil
+	case searchv1.SearchKind_SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW:
+		return []string{"proxy_blocked_host_window"}, nil
 	case searchv1.SearchKind_SEARCH_KIND_CROSS:
-		return config.SupportedDBKinds(), nil
+		return []string{"event", "device", "proxy_event", "proxy_blocked_host_window"}, nil
 	default:
 		return nil, errors.New("unsupported search kind")
 	}
@@ -267,6 +271,10 @@ func responseKind(kind searchv1.SearchKind) string {
 		return "retired"
 	case searchv1.SearchKind_SEARCH_KIND_DEVICE:
 		return "device"
+	case searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT:
+		return "proxy_event"
+	case searchv1.SearchKind_SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW:
+		return "proxy_blocked_host_window"
 	case searchv1.SearchKind_SEARCH_KIND_CROSS:
 		return "cross"
 	default:
@@ -313,10 +321,21 @@ func toProtoResult(result RawResult) *searchv1.SearchResult {
 		SequenceLogProb:  result.SequenceLogProb,
 		BoostReasons:     result.BoostReasons,
 		DetailJson:       result.DetailJSON,
+		Host:             result.Host,
+		Blocked:          result.Blocked,
+		ProxyEventType:   result.ProxyEventType,
+		ProxyDeviceId:    result.ProxyDeviceID,
+		Classification:   result.Classification,
 		Highlights:       map[string]string{},
 	}
 	if result.ObservedAt != nil {
 		out.ObservedAt = timestamppb.New(*result.ObservedAt)
+	}
+	if result.WindowStart != nil {
+		out.WindowStart = timestamppb.New(*result.WindowStart)
+	}
+	if result.WindowEnd != nil {
+		out.WindowEnd = timestamppb.New(*result.WindowEnd)
 	}
 	return out
 }

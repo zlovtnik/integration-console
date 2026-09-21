@@ -14,8 +14,19 @@ import (
 const embeddingDimensions = 768
 
 var supportedSearchKinds = map[string]struct{}{
-	"event":  {},
-	"device": {},
+	"event":                     {},
+	"device":                    {},
+	"proxy_event":               {},
+	"proxy_blocked_host_window": {},
+}
+
+func embeddingKindForSourceKind(kind string) string {
+	switch kind {
+	case "proxy_event", "proxy_blocked_host_window":
+		return "event"
+	default:
+		return kind
+	}
 }
 
 func Dense(ctx context.Context, pool *sql.DB, qvec []float32, model string, opts Options) ([]RawResult, error) {
@@ -57,7 +68,7 @@ func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind st
 	vector := VectorLiteral(qvec)
 	query := denseKindQuery()
 
-	rows, err := pool.QueryContext(ctx, query, vector, overfetch, model, kind)
+	rows, err := pool.QueryContext(ctx, query, vector, overfetch, model, embeddingKindForSourceKind(kind), kind)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +96,7 @@ func denseKindQuery() string {
 	return `
 SELECT
   d.source_id,
-  CASE d.source_kind WHEN 'event' THEN 'wireless_observations' ELSE 'devices' END,
+	  d.source_table,
   d.source_kind,
   COALESCE(d.source_mac, ''),
   COALESCE(d.location_id, ''),
@@ -98,20 +109,32 @@ SELECT
   COALESCE(d.filters -> 'tags', '[]'::jsonb)::text,
   COALESCE(d.detail_json::text, '{}'),
   COALESCE(d.security_flags, 0),
-  COALESCE(d.handshake_captured, false)
+	  COALESCE(d.handshake_captured, false),
+	  COALESCE(d.host, ''),
+	  d.blocked,
+	  COALESCE(d.proxy_event_type, ''),
+	  COALESCE(CAST(d.proxy_device_id AS TEXT), ''),
+	  d.window_start,
+	  d.window_end,
+	  COALESCE(d.classification, '')
 FROM (
   SELECT
-    document_id,
-    embedding_model,
-    embedding <=> $1::public.vector AS cosine_distance
-  FROM atheros_search.embeddings
-  WHERE embedding_model = $3
-    AND embedding_kind = $4
-  ORDER BY embedding <=> $1::public.vector ASC
+    embedding_row.document_id,
+    embedding_row.embedding_model,
+    embedding_row.embedding <=> $1::public.vector AS cosine_distance
+  FROM atheros_search.embeddings embedding_row
+  JOIN atheros_search.search_documents candidate
+    ON candidate.document_id = embedding_row.document_id
+   AND candidate.source_kind = $5
+   AND candidate.status = 'active'
+  WHERE embedding_row.embedding_model = $3
+    AND embedding_row.embedding_kind = $4
+  ORDER BY embedding_row.embedding <=> $1::public.vector ASC
   LIMIT $2
 ) nearest
 JOIN atheros_search.search_documents d ON d.document_id = nearest.document_id
 WHERE d.status = 'active'
+  AND d.source_kind = $5
 ORDER BY nearest.cosine_distance ASC, d.source_id ASC`
 }
 
@@ -121,7 +144,8 @@ type scanner interface {
 
 func scanDenseResult(row scanner) (RawResult, error) {
 	var result RawResult
-	var observed sql.NullTime
+	var observed, windowStart, windowEnd sql.NullTime
+	var blocked sql.NullBool
 	var tagsJSON, detailJSON string
 	var securityFlags int64
 	var handshake bool
@@ -141,6 +165,13 @@ func scanDenseResult(row scanner) (RawResult, error) {
 		&detailJSON,
 		&securityFlags,
 		&handshake,
+		&result.Host,
+		&blocked,
+		&result.ProxyEventType,
+		&result.ProxyDeviceID,
+		&windowStart,
+		&windowEnd,
+		&result.Classification,
 	)
 	if err != nil {
 		return result, err
@@ -148,6 +179,18 @@ func scanDenseResult(row scanner) (RawResult, error) {
 	if observed.Valid {
 		value := observed.Time.UTC()
 		result.ObservedAt = &value
+	}
+	if blocked.Valid {
+		value := blocked.Bool
+		result.Blocked = &value
+	}
+	if windowStart.Valid {
+		value := windowStart.Time.UTC()
+		result.WindowStart = &value
+	}
+	if windowEnd.Valid {
+		value := windowEnd.Time.UTC()
+		result.WindowEnd = &value
 	}
 	result.Tags = parseTagsJSON(tagsJSON)
 	result.DetailJSON = normalizeJSONObject(detailJSON)

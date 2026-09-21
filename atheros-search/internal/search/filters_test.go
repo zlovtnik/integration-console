@@ -38,3 +38,19 @@ func TestFilterSourceMACsNormalizesAndDeduplicates(t *testing.T) {
 	})
 	require.Equal(t, []string{"aa:bb", "cc:dd"}, got)
 }
+
+func TestResultMatchesProxyFiltersPreservesExplicitAllowedState(t *testing.T) {
+	allowed := false
+	result := RawResult{
+		Host: "api.example.com", Blocked: &allowed, ProxyEventType: "http_proxied",
+		ProxyDeviceID: "8df7e18f-219e-4c33-9427-11fe3ae63ee8", Classification: "cdn",
+	}
+
+	require.True(t, resultMatchesFilters(result, &searchv1.SearchFilters{
+		Host: "example", Blocked: &allowed, EventTypes: []string{"HTTP_PROXIED"},
+		ProxyDeviceIds:  []string{"8DF7E18F-219E-4C33-9427-11FE3AE63EE8"},
+		Classifications: []string{"CDN"},
+	}))
+	blocked := true
+	require.False(t, resultMatchesFilters(result, &searchv1.SearchFilters{Blocked: &blocked}))
+}

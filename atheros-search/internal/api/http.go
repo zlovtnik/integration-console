@@ -573,6 +573,10 @@ func parseKind(value string) searchv1.SearchKind {
 		return searchv1.SearchKind_SEARCH_KIND_DEVICE
 	case "cross":
 		return searchv1.SearchKind_SEARCH_KIND_CROSS
+	case "proxy_event", "proxy-event":
+		return searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT
+	case "proxy_blocked_host_window", "proxy-window", "blocked_host_window":
+		return searchv1.SearchKind_SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW
 	default:
 		return searchv1.SearchKind_SEARCH_KIND_EVENT
 	}

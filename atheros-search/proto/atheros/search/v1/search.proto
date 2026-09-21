@@ -20,6 +20,8 @@ enum SearchKind {
   SEARCH_KIND_SEQUENCE = 3;
   SEARCH_KIND_DEVICE = 4;
   SEARCH_KIND_CROSS = 5;
+  SEARCH_KIND_PROXY_EVENT = 6;
+  SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW = 7;
 }
 
 enum SearchMode {
@@ -42,6 +44,11 @@ message SearchFilters {
   int32 security_flags_mask = 10;
   repeated string tags = 11;
   repeated string source_macs = 12;
+  string host = 13;
+  optional bool blocked = 14;
+  repeated string event_types = 15;
+  repeated string proxy_device_ids = 16;
+  repeated string classifications = 17;
 }
 
 message SearchRequest {
@@ -84,6 +91,13 @@ message SearchResult {
   double sequence_log_prob = 17;
   repeated string boost_reasons = 18;
   string detail_json = 19;
+  string host = 20;
+  optional bool blocked = 21;
+  string proxy_event_type = 22;
+  string proxy_device_id = 23;
+  google.protobuf.Timestamp window_start = 24;
+  google.protobuf.Timestamp window_end = 25;
+  string classification = 26;
 }
 
 message ExplainRequest {

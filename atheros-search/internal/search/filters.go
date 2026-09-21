@@ -22,6 +22,17 @@ func resultMatchesFilters(result RawResult, filters *searchv1.SearchFilters) boo
 	if sourceMACs := filterSourceMACs(filters); len(sourceMACs) > 0 && !containsFold(sourceMACs, result.SourceMAC) {
 		return false
 	}
+	if host := strings.TrimSpace(filters.Host); host != "" && !strings.Contains(strings.ToLower(result.Host), strings.ToLower(host)) {
+		return false
+	}
+	if filters.Blocked != nil && (result.Blocked == nil || *result.Blocked != *filters.Blocked) {
+		return false
+	}
+	if !matchesFoldList(result.ProxyEventType, filters.EventTypes) ||
+		!matchesFoldList(result.ProxyDeviceID, filters.ProxyDeviceIds) ||
+		!matchesFoldList(result.Classification, filters.Classifications) {
+		return false
+	}
 	if filters.ObservedAfter != nil && (result.ObservedAt == nil || result.ObservedAt.Before(filters.ObservedAfter.AsTime())) {
 		return false
 	}

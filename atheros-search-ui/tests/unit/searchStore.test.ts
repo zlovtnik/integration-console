@@ -67,6 +67,31 @@ describe('search store request construction', () => {
     expect(buildSearchRequest().filters?.source_mac).toBeUndefined();
   });
 
+  it('preserves an explicit allowed proxy filter', () => {
+    setQuery('*');
+    setKind('SEARCH_KIND_PROXY_EVENT');
+    setFilters(
+      reconcile({
+        host: ' api.example ',
+        blocked: false,
+        event_types: ['http_proxied'],
+        proxy_device_ids: ['device-1'],
+        classifications: ['cdn'],
+      }),
+    );
+
+    expect(buildSearchRequest()).toMatchObject({
+      kind: 'SEARCH_KIND_PROXY_EVENT',
+      filters: {
+        host: 'api.example',
+        blocked: false,
+        event_types: ['http_proxied'],
+        proxy_device_ids: ['device-1'],
+        classifications: ['cdn'],
+      },
+    });
+  });
+
   it('resets stale advanced controls for URL-driven searches', () => {
     setQuery('probe');
     setKind('SEARCH_KIND_CROSS');

@@ -55,6 +55,46 @@ export function FilterChips() {
           setFilters('tags', (items) => removeListItem(items, value)),
       }),
     );
+    filters.event_types?.forEach((value) =>
+      next.push({
+        id: `proxy-event-${value}`,
+        label: `event:${value}`,
+        remove: () =>
+          setFilters('event_types', (items) => removeListItem(items, value)),
+      }),
+    );
+    filters.proxy_device_ids?.forEach((value) =>
+      next.push({
+        id: `proxy-device-${value}`,
+        label: `device:${value}`,
+        remove: () =>
+          setFilters('proxy_device_ids', (items) =>
+            removeListItem(items, value),
+          ),
+      }),
+    );
+    filters.classifications?.forEach((value) =>
+      next.push({
+        id: `classification-${value}`,
+        label: `class:${value}`,
+        remove: () =>
+          setFilters('classifications', (items) =>
+            removeListItem(items, value),
+          ),
+      }),
+    );
+    if (filters.host)
+      next.push({
+        id: 'host',
+        label: `host:${filters.host}`,
+        remove: () => setFilters('host', undefined),
+      });
+    if (typeof filters.blocked === 'boolean')
+      next.push({
+        id: 'blocked',
+        label: filters.blocked ? 'blocked' : 'allowed',
+        remove: () => setFilters('blocked', undefined),
+      });
     if (filters.ssid)
       next.push({
         id: 'ssid',

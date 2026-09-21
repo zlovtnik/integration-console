@@ -59,6 +59,9 @@ export function useUrlSync() {
       const tags = asList(params.tag);
       const macs = asList(params.mac);
       const mask = first(params.mask);
+      const eventTypes = asList(params.eventType);
+      const proxyDeviceIds = asList(params.proxyDevice);
+      const classifications = asList(params.classification);
 
       if (locationIds) urlFilters.location_ids = locationIds;
       if (sensorIds) urlFilters.sensor_ids = sensorIds;
@@ -78,6 +81,18 @@ export function useUrlSync() {
       if (observedAfter) urlFilters.observed_after = observedAfter;
       if (observedBefore) urlFilters.observed_before = observedBefore;
       if (tags) urlFilters.tags = tags;
+      if (eventTypes) urlFilters.event_types = eventTypes;
+      if (proxyDeviceIds) urlFilters.proxy_device_ids = proxyDeviceIds;
+      if (classifications) urlFilters.classifications = classifications;
+      if (typeof params.host === 'string' && params.host) {
+        urlFilters.host = params.host;
+      }
+      if (params.blocked !== undefined) {
+        const blocked = first(params.blocked);
+        if (blocked === '1' || blocked === '0') {
+          urlFilters.blocked = blocked === '1';
+        }
+      }
       if (params.threat) urlFilters.threat_only = first(params.threat) === '1';
       if (params.hs) urlFilters.handshake_only = first(params.hs) === '1';
       const parsedMask = mask ? Number(mask) : undefined;
@@ -150,6 +165,22 @@ export function useUrlSync() {
           ? String(nextFilters.security_flags_mask)
           : undefined,
       tag: nextFilters.tags?.length ? nextFilters.tags : undefined,
+      host: nextFilters.host || undefined,
+      blocked:
+        typeof nextFilters.blocked === 'boolean'
+          ? nextFilters.blocked
+            ? '1'
+            : '0'
+          : undefined,
+      eventType: nextFilters.event_types?.length
+        ? nextFilters.event_types
+        : undefined,
+      proxyDevice: nextFilters.proxy_device_ids?.length
+        ? nextFilters.proxy_device_ids
+        : undefined,
+      classification: nextFilters.classifications?.length
+        ? nextFilters.classifications
+        : undefined,
     };
 
     setParams(next, { replace: true });

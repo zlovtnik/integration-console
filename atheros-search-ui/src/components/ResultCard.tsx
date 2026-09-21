@@ -118,6 +118,32 @@ export function ResultCard(props: {
           <dt class="sr-only">Location</dt>
           <dd class="caption">{props.result.location_id}</dd>
         </Show>
+        <Show when={props.result.host}>
+          <dt class="sr-only">Host</dt>
+          <dd class="mono caption">{props.result.host}</dd>
+        </Show>
+        <Show when={props.result.proxy_device_id}>
+          <dt class="sr-only">Proxy device</dt>
+          <dd class="mono caption">{props.result.proxy_device_id}</dd>
+        </Show>
+        <Show when={props.result.proxy_event_type}>
+          <dt class="sr-only">Proxy event type</dt>
+          <dd class="caption">{props.result.proxy_event_type}</dd>
+        </Show>
+        <Show when={typeof props.result.blocked === 'boolean'}>
+          <dt class="sr-only">Blocked state</dt>
+          <dd class="caption">{props.result.blocked ? 'Blocked' : 'Allowed'}</dd>
+        </Show>
+        <Show when={props.result.classification}>
+          <dt class="sr-only">Classification</dt>
+          <dd class="caption">{props.result.classification}</dd>
+        </Show>
+        <Show when={props.result.window_start && props.result.window_end}>
+          <dt class="sr-only">Window</dt>
+          <dd class="caption">
+            {formatDateTime(props.result.window_start!)} – {formatDateTime(props.result.window_end!)}
+          </dd>
+        </Show>
       </dl>
 
       <Show when={(props.result.tags ?? []).length > 0}>

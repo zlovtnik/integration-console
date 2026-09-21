@@ -55,7 +55,7 @@ func sparseKind(ctx context.Context, pool *sql.DB, query, kind string, opts Opti
 	querySQL := `
 SELECT
   d.source_id,
-  CASE d.source_kind WHEN 'event' THEN 'wireless_observations' ELSE 'devices' END,
+	  d.source_table,
   d.source_kind,
   COALESCE(d.source_mac, ''),
   COALESCE(d.location_id, ''),
@@ -69,7 +69,14 @@ SELECT
   COALESCE(d.filters -> 'tags', '[]'::jsonb)::text,
   COALESCE(d.detail_json::text, '{}'),
   COALESCE(d.security_flags, 0),
-  COALESCE(d.handshake_captured, false)
+	  COALESCE(d.handshake_captured, false),
+	  COALESCE(d.host, ''),
+	  d.blocked,
+	  COALESCE(d.proxy_event_type, ''),
+	  COALESCE(CAST(d.proxy_device_id AS TEXT), ''),
+	  d.window_start,
+	  d.window_end,
+	  COALESCE(d.classification, '')
 FROM atheros_search.search_documents d
 WHERE d.search_vector @@ websearch_to_tsquery('simple', $1)
   AND d.source_kind = $2
@@ -85,7 +92,7 @@ func sparseWildcard(ctx context.Context, pool *sql.DB, kind string, opts Options
 	query := `
 SELECT
   d.source_id,
-  CASE d.source_kind WHEN 'event' THEN 'wireless_observations' ELSE 'devices' END,
+	  d.source_table,
   d.source_kind,
   COALESCE(d.source_mac, ''),
   COALESCE(d.location_id, ''),
@@ -99,7 +106,14 @@ SELECT
   COALESCE(d.filters -> 'tags', '[]'::jsonb)::text,
   COALESCE(d.detail_json::text, '{}'),
   COALESCE(d.security_flags, 0),
-  COALESCE(d.handshake_captured, false)
+	  COALESCE(d.handshake_captured, false),
+	  COALESCE(d.host, ''),
+	  d.blocked,
+	  COALESCE(d.proxy_event_type, ''),
+	  COALESCE(CAST(d.proxy_device_id AS TEXT), ''),
+	  d.window_start,
+	  d.window_end,
+	  COALESCE(d.classification, '')
 FROM atheros_search.search_documents d
 WHERE d.source_kind = $1 AND d.status = 'active'
 ORDER BY d.observed_at DESC, d.source_id ASC
@@ -133,7 +147,8 @@ func scanSparseRows(ctx context.Context, pool *sql.DB, query string, opts Option
 
 func scanSparseResult(row scanner) (RawResult, error) {
 	var result RawResult
-	var observed sql.NullTime
+	var observed, windowStart, windowEnd sql.NullTime
+	var blocked sql.NullBool
 	var tagsJSON, detailJSON string
 	var securityFlags int64
 	var handshake bool
@@ -154,6 +169,13 @@ func scanSparseResult(row scanner) (RawResult, error) {
 		&detailJSON,
 		&securityFlags,
 		&handshake,
+		&result.Host,
+		&blocked,
+		&result.ProxyEventType,
+		&result.ProxyDeviceID,
+		&windowStart,
+		&windowEnd,
+		&result.Classification,
 	)
 	if err != nil {
 		return result, err
@@ -161,6 +183,18 @@ func scanSparseResult(row scanner) (RawResult, error) {
 	if observed.Valid {
 		value := observed.Time.UTC()
 		result.ObservedAt = &value
+	}
+	if blocked.Valid {
+		value := blocked.Bool
+		result.Blocked = &value
+	}
+	if windowStart.Valid {
+		value := windowStart.Time.UTC()
+		result.WindowStart = &value
+	}
+	if windowEnd.Valid {
+		value := windowEnd.Time.UTC()
+		result.WindowEnd = &value
 	}
 	result.Tags = parseTagsJSON(tagsJSON)
 	result.DetailJSON = normalizeJSONObject(detailJSON)

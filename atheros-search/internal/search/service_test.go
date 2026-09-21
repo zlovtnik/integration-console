@@ -115,3 +115,33 @@ func TestSuggestSSIDQueryIsPostgreSQLSafe(t *testing.T) {
 	require.Contains(t, suggestSSIDSQL, "LIMIT 50")
 	require.Contains(t, suggestSSIDSQL, "$1")
 }
+
+func TestProxySearchKindsRouteBySourceKind(t *testing.T) {
+	events, err := requestKinds(searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT)
+	require.NoError(t, err)
+	require.Equal(t, []string{"proxy_event"}, events)
+
+	windows, err := requestKinds(searchv1.SearchKind_SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW)
+	require.NoError(t, err)
+	require.Equal(t, []string{"proxy_blocked_host_window"}, windows)
+}
+
+func TestProxyResultMetadataIsReturned(t *testing.T) {
+	blocked := false
+	windowStart := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	windowEnd := windowStart.Add(time.Hour)
+	result := toProtoResult(RawResult{
+		SourceKey: "event-id", SourceTable: "proxy_events", SourceKind: "proxy_event",
+		Host: "api.example", Blocked: &blocked, ProxyEventType: "http_proxied",
+		ProxyDeviceID: "device-id", Classification: "cdn",
+		WindowStart: &windowStart, WindowEnd: &windowEnd,
+	})
+
+	require.Equal(t, "proxy_events", result.SourceTable)
+	require.Equal(t, "api.example", result.Host)
+	require.NotNil(t, result.Blocked)
+	require.False(t, result.GetBlocked())
+	require.Equal(t, "http_proxied", result.ProxyEventType)
+	require.Equal(t, windowStart, result.WindowStart.AsTime())
+	require.Equal(t, windowEnd, result.WindowEnd.AsTime())
+}

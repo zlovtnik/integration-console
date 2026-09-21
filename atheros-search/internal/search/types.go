@@ -25,6 +25,13 @@ type RawResult struct {
 	BoostReasons      []string
 	Tags              []string
 	DetailJSON        string
+	Host              string
+	Blocked           *bool
+	ProxyEventType    string
+	ProxyDeviceID     string
+	WindowStart       *time.Time
+	WindowEnd         *time.Time
+	Classification    string
 	securityFlags     int32
 	handshakeCaptured bool
 }
