@@ -1,13 +1,10 @@
 import { batch, onCleanup } from 'solid-js';
 import { ApiError, api } from '~/api/client';
-import { mockInventoryResponse } from '~/api/inventoryMock';
-import type { InventoryFilters, MergeDecision } from '~/api/types';
+import type { InventoryFilters, InventoryResponse, MergeDecision } from '~/api/types';
 import {
-  captureMergeUndo,
   clearInventory,
   inventoryFilters,
   removeMergeCandidate,
-  restoreMergeUndo,
   setInventoryEdges,
   setInventoryError,
   setInventoryLoading,
@@ -22,9 +19,7 @@ function backendEndpointMissing(error: unknown): boolean {
   );
 }
 
-function applyInventoryResponse(
-  response: ReturnType<typeof mockInventoryResponse>,
-) {
+function applyInventoryResponse(response: InventoryResponse) {
   batch(() => {
     setInventoryNodes(response.nodes);
     setInventoryEdges(response.edges);
@@ -55,12 +50,10 @@ export function useInventory() {
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       if (requestId !== activeRequestId) return;
-
       if (backendEndpointMissing(err)) {
-        applyInventoryResponse(mockInventoryResponse(filters));
+        setInventoryError('Inventory endpoint is unavailable.');
         return;
       }
-
       setInventoryError((err as Error).message || 'Inventory load failed.');
     } finally {
       if (requestId === activeRequestId) {
@@ -71,34 +64,12 @@ export function useInventory() {
   }
 
   async function decideMerge(candidateId: string, decision: MergeDecision) {
-    const undo = decision === 'merge' ? captureMergeUndo(candidateId) : null;
-
     try {
       await api.mergeDecision(candidateId, decision);
       removeMergeCandidate(candidateId);
-    } catch (err) {
-      if (backendEndpointMissing(err)) {
-        removeMergeCandidate(candidateId);
-        return undo?.id ?? null;
-      }
-      if (undo) restoreMergeUndo(undo.id);
-      setInventoryError((err as Error).message || 'Merge decision failed.');
-      return null;
-    }
-
-    return undo?.id ?? null;
-  }
-
-  async function undoMerge(undoId: string) {
-    const undo = restoreMergeUndo(undoId);
-    if (!undo) return false;
-
-    try {
-      await api.mergeDecision(undo.candidateId, 'undo_merge');
       return true;
     } catch (err) {
-      if (backendEndpointMissing(err)) return true;
-      setInventoryError((err as Error).message || 'Undo merge failed.');
+      setInventoryError((err as Error).message || 'Merge decision failed.');
       return false;
     }
   }
@@ -110,5 +81,5 @@ export function useInventory() {
   }
 
   onCleanup(cancel);
-  return { load, cancel, decideMerge, undoMerge };
+  return { load, cancel, decideMerge };
 }

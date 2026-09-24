@@ -33,6 +33,23 @@ const (
 	DecisionAuthorized
 )
 
+type subjectContextKey struct{}
+
+// WithSubject attaches a non-sensitive caller identity (for example a
+// Keycloak subject or preferred username) to the request context.
+func WithSubject(ctx context.Context, subject string) context.Context {
+	return context.WithValue(ctx, subjectContextKey{}, subject)
+}
+
+// SubjectFromContext returns the caller identity recorded by WithSubject.
+func SubjectFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(subjectContextKey{}).(string)
+	return value
+}
+
 type JWTConfig struct {
 	Issuer   string
 	JWKSURI  string
@@ -66,11 +83,13 @@ type jwtHeader struct {
 }
 
 type jwtClaims struct {
-	Issuer         string                    `json:"iss"`
-	Audience       json.RawMessage           `json:"aud"`
-	ExpiresAt      json.Number               `json:"exp"`
-	NotBefore      json.Number               `json:"nbf"`
-	ResourceAccess map[string]resourceAccess `json:"resource_access"`
+	Issuer            string                    `json:"iss"`
+	Audience          json.RawMessage           `json:"aud"`
+	ExpiresAt         json.Number               `json:"exp"`
+	NotBefore         json.Number               `json:"nbf"`
+	Subject           string                    `json:"sub"`
+	PreferredUsername string                    `json:"preferred_username"`
+	ResourceAccess    map[string]resourceAccess `json:"resource_access"`
 }
 
 type resourceAccess struct {
@@ -130,33 +149,40 @@ func (a *TokenAuth) VerifyAuthorization(header string) bool {
 }
 
 func (a *TokenAuth) AuthorizeAuthorization(ctx context.Context, header string, allowedRoles ...string) Decision {
+	decision, _ := a.AuthorizeWithSubject(ctx, header, allowedRoles...)
+	return decision
+}
+
+// AuthorizeWithSubject validates the bearer header and, when JWT auth is
+// enabled, returns a stable non-token identity for audit fields.
+func (a *TokenAuth) AuthorizeWithSubject(ctx context.Context, header string, allowedRoles ...string) (Decision, string) {
 	if !a.Enabled() {
-		return DecisionAuthorized
+		return DecisionAuthorized, ""
 	}
 	token, ok := bearerToken(header)
 	if !ok {
-		return DecisionUnauthorized
+		return DecisionUnauthorized, ""
 	}
 	if len(a.expectedDigest) > 0 {
 		sum := sha256.Sum256([]byte(token))
 		if subtle.ConstantTimeCompare(sum[:], a.expectedDigest) == 1 {
-			return DecisionAuthorized
+			return DecisionAuthorized, "static-token"
 		}
-		return DecisionUnauthorized
+		return DecisionUnauthorized, ""
 	}
-	roles, err := a.jwt.verify(ctx, token)
+	roles, subject, err := a.jwt.verify(ctx, token)
 	if err != nil {
-		return DecisionUnauthorized
+		return DecisionUnauthorized, ""
 	}
 	if len(allowedRoles) == 0 {
-		return DecisionAuthorized
+		return DecisionAuthorized, subject
 	}
 	for _, allowed := range allowedRoles {
 		if _, ok := roles[allowed]; ok {
-			return DecisionAuthorized
+			return DecisionAuthorized, subject
 		}
 	}
-	return DecisionForbidden
+	return DecisionForbidden, ""
 }
 
 func bearerToken(header string) (string, bool) {
@@ -169,66 +195,70 @@ func bearerToken(header string) (string, bool) {
 	return token, token != ""
 }
 
-func (v *jwtVerifier) verify(ctx context.Context, raw string) (map[string]struct{}, error) {
+func (v *jwtVerifier) verify(ctx context.Context, raw string) (map[string]struct{}, string, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
-		return nil, errors.New("JWT must contain three segments")
+		return nil, "", errors.New("JWT must contain three segments")
 	}
 	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, errors.New("invalid JWT header")
+		return nil, "", errors.New("invalid JWT header")
 	}
 	var header jwtHeader
 	if err := json.Unmarshal(headerBytes, &header); err != nil || header.Algorithm != "RS256" || header.KeyID == "" {
-		return nil, errors.New("JWT must use RS256 with a key ID")
+		return nil, "", errors.New("JWT must use RS256 with a key ID")
 	}
 	key, err := v.key(ctx, header.KeyID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, errors.New("invalid JWT signature encoding")
+		return nil, "", errors.New("invalid JWT signature encoding")
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
-		return nil, errors.New("invalid JWT signature")
+		return nil, "", errors.New("invalid JWT signature")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, errors.New("invalid JWT claims")
+		return nil, "", errors.New("invalid JWT claims")
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(payload)))
 	decoder.UseNumber()
 	var claims jwtClaims
 	if err := decoder.Decode(&claims); err != nil {
-		return nil, errors.New("invalid JWT claims")
+		return nil, "", errors.New("invalid JWT claims")
 	}
 	if strings.TrimRight(claims.Issuer, "/") != v.config.Issuer {
-		return nil, errors.New("wrong JWT issuer")
+		return nil, "", errors.New("wrong JWT issuer")
 	}
 	expiry, err := numberTime(claims.ExpiresAt)
 	if err != nil || !v.now().Before(expiry) {
-		return nil, errors.New("expired JWT")
+		return nil, "", errors.New("expired JWT")
 	}
 	if claims.NotBefore != "" {
 		notBefore, err := numberTime(claims.NotBefore)
 		if err != nil || v.now().Before(notBefore) {
-			return nil, errors.New("JWT is not active")
+			return nil, "", errors.New("JWT is not active")
 		}
 	}
 	if !audienceContains(claims.Audience, v.config.Audience) {
-		return nil, errors.New("wrong JWT audience")
+		return nil, "", errors.New("wrong JWT audience")
+	}
+	subject := strings.TrimSpace(claims.PreferredUsername)
+	if subject == "" {
+		subject = strings.TrimSpace(claims.Subject)
 	}
 	clientRoles, ok := claims.ResourceAccess[v.config.ClientID]
 	if !ok {
-		return map[string]struct{}{}, nil
+		return map[string]struct{}{}, subject, nil
 	}
 	roles := make(map[string]struct{}, len(clientRoles.Roles))
 	for _, role := range clientRoles.Roles {
 		roles[role] = struct{}{}
 	}
-	return roles, nil
+	return roles, subject, nil
 }
 
 func numberTime(value json.Number) (time.Time, error) {

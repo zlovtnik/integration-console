@@ -133,7 +133,7 @@ Key routes:
 | `GET` | `/v1/suggest/filters` | Filter suggestions |
 | `POST` | `/v1/graph` | Graph projection query |
 | `POST` | `/v1/inventory` | Inventory query |
-| `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Persist merge workflow decisions |
+| `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Persist a final merge decision (operator/admin) |
 | `GET` | `/v1/etl/health` | ETL summary |
 | `GET` | `/v1/etl/embedding/jobs` | Embedding job state |
 | `GET` | `/v1/etl/workers` | Worker heartbeat state |
@@ -141,13 +141,54 @@ Key routes:
 | `GET` | `/healthz` | Liveness |
 | `GET` | `/readyz` | Postgres/schema/vector/embedding readiness |
 
+### Graph and inventory contracts
+
+`POST /v1/graph` accepts optional filters:
+
+- `location_ids`, `sensor_ids`, `ssid`, `source_mac`, `kinds`
+- `threat_only`, `observed_after`, `observed_before`, `limit`
+
+Node kinds returned to clients are UI-facing (`device`, `ap`, `cluster`,
+`client`, `alert`, `embedding`, `shadow_alert`). Stored projection kinds map
+as follows: `access_point` → `ap`, `identity_cluster` → `cluster`.
+Edge kinds map as follows: `observed_at` → `association`,
+`identity_member` → `cluster_member`. When `source_mac` is set, the service
+loads that anchor device and returns only its neighborhood.
+
+Inventory grouping accepts `registry`, `cmdb`, and `similarity`. Similarity
+grouping may include `min_dedup_confidence`.
+
+### Merge decisions
+
+`POST /v1/inventory/merge-candidates/{candidate_id}/decision` accepts:
+
+```json
+{ "decision": "merge" | "not_match" | "needs_more_data" }
+```
+
+Decisions are final. There is no undo endpoint. The response echoes
+`candidate_id`, `decision`, `accepted`, and records the authenticated
+caller as `decided_by` (Keycloak `preferred_username` when present, else
+`sub`; static-token auth records `static-token`; auth-disabled local mode
+records `auth-disabled`). Candidate status is
+updated to `approved`, `rejected`, or `deferred`.
+
+Error mapping for this route:
+
+| Condition | Status |
+|---|---|
+| Unsupported decision (including `undo_merge`) | `400` |
+| Candidate not found | `404` |
+| Candidate already decided | `409` |
+
 The public protobuf contract is
 [`proto/atheros/search/v1/search.proto`](proto/atheros/search/v1/search.proto).
 HTTP bodies are capped at 1 MiB. Production uses RS256 JWT validation with
 JWKS refresh, exact issuer and audience checks, and Keycloak client roles.
-Viewer, operator and admin can read/search; only operator and admin can submit
-merge decisions. Static token-digest auth remains a mutually exclusive local
-development option. Preserve CORS, deadlines and the NDJSON completion marker.
+Viewer, operator and admin can read/search, query graph, and query
+inventory; only operator and admin can submit merge decisions. Static
+token-digest auth remains a mutually exclusive local development option.
+Preserve CORS, deadlines and the NDJSON completion marker.
 
 ## Observability and privacy
 

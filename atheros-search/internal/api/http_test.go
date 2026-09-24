@@ -26,6 +26,9 @@ func TestHTTPStatusFromError(t *testing.T) {
 		{name: "inventory validation", err: errors.New("unsupported inventory grouping \"topology\""), want: http.StatusBadRequest},
 		{name: "range validation", err: errors.New("observed_after must be before observed_before"), want: http.StatusBadRequest},
 		{name: "search query validation", err: errors.New("search query is required and must contain meaningful terms"), want: http.StatusBadRequest},
+		{name: "merge decision validation", err: errors.New("unsupported merge decision \"undo_merge\""), want: http.StatusBadRequest},
+		{name: "merge candidate missing", err: errors.New("merge candidate not found"), want: http.StatusNotFound},
+		{name: "merge already decided", err: errors.New("merge candidate already decided"), want: http.StatusConflict},
 		{name: "generic required failure", err: errors.New("required background cleanup failed"), want: http.StatusInternalServerError},
 		{name: "fallback", err: errors.New("boom"), want: http.StatusInternalServerError},
 	}

@@ -26,6 +26,15 @@ func TestNormalizeInventoryFiltersRejectsUnsupportedGrouping(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported inventory grouping")
 }
 
+func TestNormalizeInventoryFiltersAcceptsSimilarity(t *testing.T) {
+	minConfidence := 0.9
+	got, err := normalizeInventoryFilters(InventoryFilters{Grouping: InventoryGroupingSimilarity, MinDedupConfidence: &minConfidence})
+	require.NoError(t, err)
+	require.Equal(t, InventoryGroupingSimilarity, got.Grouping)
+	require.NotNil(t, got.MinDedupConfidence)
+	require.InDelta(t, 0.9, *got.MinDedupConfidence, 0.0001)
+}
+
 func TestInventoryDeviceTagsIncludeDerivedOperationalTags(t *testing.T) {
 	device := &inventoryDeviceRow{OwnerID: "Security", LocationID: "Floor-2", Active: true, Registered: true}
 	require.Equal(t, []string{"device", "registered", "active", "owner:security", "location:floor-2"}, inventoryDeviceTags(device))

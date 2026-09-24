@@ -170,9 +170,10 @@ export type MergeDecision = 'merge' | 'not_match' | 'needs_more_data';
 
 export interface MergeDecisionResponse {
   candidate_id: string;
-  decision: MergeDecision | 'undo_merge';
+  decision: MergeDecision;
   accepted: boolean;
-  undo_until?: string;
+  decided_by?: string;
+  decided_at?: string;
 }
 
 export interface GraphNode {

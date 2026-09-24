@@ -18,47 +18,56 @@ const (
 type InventoryGrouping string
 
 const (
-	InventoryGroupingRegistry InventoryGrouping = "registry"
-	InventoryGroupingCMDB     InventoryGrouping = "cmdb"
+	InventoryGroupingRegistry   InventoryGrouping = "registry"
+	InventoryGroupingCMDB       InventoryGrouping = "cmdb"
+	InventoryGroupingSimilarity InventoryGrouping = "similarity"
 )
 
 type InventoryNodeKind string
 
 const (
-	InventoryNodeDevice        InventoryNodeKind = "device"
-	InventoryNodeOwner         InventoryNodeKind = "owner"
-	InventoryNodeLocationAsset InventoryNodeKind = "location_asset"
+	InventoryNodeDevice         InventoryNodeKind = "device"
+	InventoryNodeOwner          InventoryNodeKind = "owner"
+	InventoryNodeLocationAsset  InventoryNodeKind = "location_asset"
+	InventoryNodeCluster        InventoryNodeKind = "cluster"
+	InventoryNodeMergeCandidate InventoryNodeKind = "merge_candidate"
 )
 
 type InventoryEdgeKind string
 
 const (
-	InventoryEdgeOwns      InventoryEdgeKind = "owns"
-	InventoryEdgeLocatedAt InventoryEdgeKind = "located_at"
+	InventoryEdgeOwns           InventoryEdgeKind = "owns"
+	InventoryEdgeLocatedAt      InventoryEdgeKind = "located_at"
+	InventoryEdgeClusterMember  InventoryEdgeKind = "cluster_member"
+	InventoryEdgeMergeCandidate InventoryEdgeKind = "merge_candidate"
+	InventoryEdgeSameDevice     InventoryEdgeKind = "same_device"
 )
 
 type InventoryFilters struct {
-	Grouping    InventoryGrouping `json:"grouping"`
-	LocationIDs []string          `json:"location_ids,omitempty"`
-	OwnerIDs    []string          `json:"owner_ids,omitempty"`
-	ActiveOnly  bool              `json:"active_only,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Limit       int               `json:"limit,omitempty"`
+	Grouping           InventoryGrouping `json:"grouping"`
+	LocationIDs        []string          `json:"location_ids,omitempty"`
+	OwnerIDs           []string          `json:"owner_ids,omitempty"`
+	ActiveOnly         bool              `json:"active_only,omitempty"`
+	MinDedupConfidence *float64          `json:"min_dedup_confidence,omitempty"`
+	Tags               []string          `json:"tags,omitempty"`
+	Limit              int               `json:"limit,omitempty"`
 }
 
 type InventoryNode struct {
-	ID              string            `json:"id"`
-	Kind            InventoryNodeKind `json:"kind"`
-	Label           string            `json:"label"`
-	MAC             string            `json:"mac,omitempty"`
-	KnownMACs       []string          `json:"known_macs,omitempty"`
-	DisplayName     string            `json:"display_name,omitempty"`
-	OwnerID         string            `json:"owner_id,omitempty"`
-	LocationID      string            `json:"location_id,omitempty"`
-	FirstRegistered *time.Time        `json:"first_registered,omitempty"`
-	LastSeen        *time.Time        `json:"last_seen,omitempty"`
-	Active          bool              `json:"active"`
-	Tags            []string          `json:"tags,omitempty"`
+	ID                  string            `json:"id"`
+	Kind                InventoryNodeKind `json:"kind"`
+	Label               string            `json:"label"`
+	MAC                 string            `json:"mac,omitempty"`
+	KnownMACs           []string          `json:"known_macs,omitempty"`
+	DisplayName         string            `json:"display_name,omitempty"`
+	OwnerID             string            `json:"owner_id,omitempty"`
+	LocationID          string            `json:"location_id,omitempty"`
+	FirstRegistered     *time.Time        `json:"first_registered,omitempty"`
+	LastSeen            *time.Time        `json:"last_seen,omitempty"`
+	Active              bool              `json:"active"`
+	SimilarityClusterID string            `json:"similarity_cluster_id,omitempty"`
+	DedupConfidence     *float64          `json:"dedup_confidence,omitempty"`
+	Tags                []string          `json:"tags,omitempty"`
 }
 
 type InventoryEdge struct {
@@ -114,6 +123,11 @@ func (s *Service) Inventory(ctx context.Context, filters InventoryFilters) (*Inv
 	edges := map[string]InventoryEdge{}
 	for _, device := range devices {
 		addInventoryDevice(nodes, edges, device, filters.Grouping)
+	}
+	if filters.Grouping == InventoryGroupingSimilarity {
+		if err := attachSimilarityInventory(ctx, tx, nodes, edges, filters); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -289,7 +303,7 @@ func normalizeInventoryFilters(filters InventoryFilters) (InventoryFilters, erro
 		filters.Grouping = InventoryGroupingRegistry
 	}
 	switch filters.Grouping {
-	case InventoryGroupingRegistry, InventoryGroupingCMDB:
+	case InventoryGroupingRegistry, InventoryGroupingCMDB, InventoryGroupingSimilarity:
 	default:
 		return filters, fmt.Errorf("unsupported inventory grouping %q", filters.Grouping)
 	}
@@ -299,10 +313,124 @@ func normalizeInventoryFilters(filters InventoryFilters) (InventoryFilters, erro
 	if filters.Limit > inventoryMaxLimit {
 		filters.Limit = inventoryMaxLimit
 	}
+	if filters.MinDedupConfidence != nil {
+		value := *filters.MinDedupConfidence
+		if value < 0 {
+			value = 0
+		}
+		if value > 1 {
+			value = 1
+		}
+		filters.MinDedupConfidence = &value
+	}
 	filters.LocationIDs = normalizeGraphList(filters.LocationIDs)
 	filters.OwnerIDs = normalizeGraphList(filters.OwnerIDs)
 	filters.Tags = normalizeLowerList(filters.Tags)
 	return filters, nil
+}
+
+func attachSimilarityInventory(ctx context.Context, tx *sql.Tx, nodes map[string]InventoryNode, edges map[string]InventoryEdge, filters InventoryFilters) error {
+	minConfidence := 0.0
+	if filters.MinDedupConfidence != nil {
+		minConfidence = *filters.MinDedupConfidence
+	}
+	rows, err := tx.QueryContext(ctx, `
+SELECT candidate_id, mac_a, mac_b, confidence, status
+FROM atheros_search.merge_candidates
+WHERE status = 'pending'
+  AND confidence >= $1
+  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+ORDER BY confidence DESC, candidate_id
+LIMIT $2`, minConfidence, filters.Limit)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pendingCandidate struct {
+		id         string
+		macA       string
+		macB       string
+		confidence float64
+	}
+	candidates := make([]pendingCandidate, 0)
+	for rows.Next() {
+		var row pendingCandidate
+		if err := rows.Scan(&row.id, &row.macA, &row.macB, &row.confidence); err != nil {
+			return err
+		}
+		candidates = append(candidates, row)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, candidate := range candidates {
+		deviceAID := "device:" + strings.ToLower(candidate.macA)
+		deviceBID := "device:" + strings.ToLower(candidate.macB)
+		deviceA, hasA := nodes[deviceAID]
+		deviceB, hasB := nodes[deviceBID]
+		if !hasA || !hasB {
+			continue
+		}
+		if !devicePassesSimilarityFilters(deviceA, filters) || !devicePassesSimilarityFilters(deviceB, filters) {
+			continue
+		}
+		confidence := candidate.confidence
+		candidateID := "merge:" + candidate.id
+		clusterID := "cluster:" + candidate.id
+		nodes[candidateID] = InventoryNode{
+			ID:                  candidateID,
+			Kind:                InventoryNodeMergeCandidate,
+			Label:               candidate.macA + " / " + candidate.macB,
+			Active:              true,
+			SimilarityClusterID: candidate.id,
+			DedupConfidence:     &confidence,
+			Tags:                []string{"merge-review"},
+		}
+		nodes[clusterID] = InventoryNode{
+			ID:                  clusterID,
+			Kind:                InventoryNodeCluster,
+			Label:               "Similarity " + candidate.id[:minInt(8, len(candidate.id))],
+			Active:              true,
+			SimilarityClusterID: candidate.id,
+			Tags:                []string{"similarity:pending"},
+		}
+		deviceA.SimilarityClusterID = candidate.id
+		deviceA.DedupConfidence = &confidence
+		nodes[deviceAID] = deviceA
+		deviceB.SimilarityClusterID = candidate.id
+		deviceB.DedupConfidence = &confidence
+		nodes[deviceBID] = deviceB
+
+		edgeA := "merge_candidate:" + candidateID + ":" + deviceAID
+		edges[edgeA] = InventoryEdge{ID: edgeA, Source: candidateID, Target: deviceAID, Kind: InventoryEdgeMergeCandidate, Weight: &confidence}
+		edgeB := "merge_candidate:" + candidateID + ":" + deviceBID
+		edges[edgeB] = InventoryEdge{ID: edgeB, Source: candidateID, Target: deviceBID, Kind: InventoryEdgeMergeCandidate, Weight: &confidence}
+		same := "same_device:" + deviceAID + ":" + deviceBID
+		edges[same] = InventoryEdge{ID: same, Source: deviceAID, Target: deviceBID, Kind: InventoryEdgeSameDevice, Weight: &confidence}
+		clusterEdgeA := "cluster_member:" + clusterID + ":" + deviceAID
+		edges[clusterEdgeA] = InventoryEdge{ID: clusterEdgeA, Source: deviceAID, Target: clusterID, Kind: InventoryEdgeClusterMember, Weight: &confidence}
+		clusterEdgeB := "cluster_member:" + clusterID + ":" + deviceBID
+		edges[clusterEdgeB] = InventoryEdge{ID: clusterEdgeB, Source: deviceBID, Target: clusterID, Kind: InventoryEdgeClusterMember, Weight: &confidence}
+	}
+	return nil
+}
+
+func devicePassesSimilarityFilters(device InventoryNode, filters InventoryFilters) bool {
+	if filters.ActiveOnly && !device.Active {
+		return false
+	}
+	if len(filters.LocationIDs) > 0 && device.LocationID != "" && !containsFold(filters.LocationIDs, device.LocationID) {
+		return false
+	}
+	if len(filters.OwnerIDs) > 0 && device.OwnerID != "" && !containsFold(filters.OwnerIDs, device.OwnerID) {
+		return false
+	}
+	if !inventoryTagsMatch(device.Tags, filters.Tags) {
+		return false
+	}
+	return true
 }
 
 func addInClause(clauses *[]string, args *[]any, column string, values []any) {

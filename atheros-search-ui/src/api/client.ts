@@ -645,7 +645,7 @@ export const api = {
 
   mergeDecision: (
     candidateId: string,
-    decision: MergeDecision | 'undo_merge',
+    decision: MergeDecision,
     signal?: AbortSignal,
   ) =>
     request<MergeDecisionResponse>(

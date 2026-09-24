@@ -40,8 +40,14 @@ func httpStatusFromError(err error) int {
 	if strings.Contains(msg, "request body too large") {
 		return http.StatusRequestEntityTooLarge
 	}
-	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") {
+	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
 		return http.StatusBadRequest
+	}
+	if strings.Contains(msg, "merge candidate not found") {
+		return http.StatusNotFound
+	}
+	if strings.Contains(msg, "merge candidate already decided") {
+		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }
@@ -302,6 +308,88 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Msg("inventory completed")
 		writeJSON(w, http.StatusOK, resp)
 	})
+	registerJSON(mux, "POST", "/v1/graph", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		start := time.Now()
+		reqID := requestID()
+		log := loggerWithTrace(logger.With().Str("endpoint", "/v1/graph").Str("method", "POST").Str("req_id", reqID).Logger(), r.Context())
+		log.Info().Msg("graph request started")
+
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			log.Error().Dur("latency", time.Since(start)).Msg("graph failed: read body")
+			return
+		}
+		var filters search.GraphFilters
+		if len(strings.TrimSpace(string(body))) > 0 {
+			if err := json.Unmarshal(body, &filters); err != nil {
+				log.Error().Err(err).Dur("latency", time.Since(start)).Msg("graph failed: unmarshal filters")
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		log = log.With().
+			Int("location_ids", len(filters.LocationIDs)).
+			Int("sensor_ids", len(filters.SensorIDs)).
+			Bool("has_source_mac", strings.TrimSpace(filters.SourceMAC) != "").
+			Bool("has_ssid", strings.TrimSpace(filters.SSID) != "").
+			Int("kinds", len(filters.Kinds)).
+			Bool("threat_only", filters.ThreatOnly).
+			Int("limit", filters.Limit).
+			Logger()
+
+		resp, err := svc.Graph(r.Context(), filters)
+		if err != nil {
+			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("graph failed")
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		log.Info().
+			Dur("latency", time.Since(start)).
+			Int("nodes", len(resp.Nodes)).
+			Int("edges", len(resp.Edges)).
+			Msg("graph completed")
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSONRoles(mux, "POST", "/v1/inventory/merge-candidates/{candidate_id}/decision", tokenAuth, []string{auth.RoleOperator, auth.RoleAdmin}, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
+		start := time.Now()
+		reqID := requestID()
+		candidateID := params["candidate_id"]
+		log := loggerWithTrace(logger.With().
+			Str("endpoint", "/v1/inventory/merge-candidates/decision").
+			Str("method", "POST").
+			Str("req_id", reqID).
+			Str("candidate_id_hash", shortHash(candidateID)).
+			Logger(), r.Context())
+		log.Info().Msg("merge decision request started")
+
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			log.Error().Dur("latency", time.Since(start)).Msg("merge decision failed: read body")
+			return
+		}
+		var req struct {
+			Decision string `json:"decision"`
+		}
+		if len(strings.TrimSpace(string(body))) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				log.Error().Err(err).Dur("latency", time.Since(start)).Msg("merge decision failed: unmarshal")
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		resp, err := svc.MergeDecision(r.Context(), candidateID, req.Decision, auth.SubjectFromContext(r.Context()))
+		if err != nil {
+			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("merge decision failed")
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		log.Info().
+			Dur("latency", time.Since(start)).
+			Str("decision", string(resp.Decision)).
+			Bool("accepted", resp.Accepted).
+			Msg("merge decision completed")
+		writeJSON(w, http.StatusOK, resp)
+	})
 	mux.HandlePath("GET", "/healthz", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		logger.Debug().Str("endpoint", "/healthz").Msg("healthz check")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -520,12 +608,12 @@ func registerJSON(mux *runtime.ServeMux, method, pattern string, tokenAuth *auth
 
 func registerJSONRoles(mux *runtime.ServeMux, method, pattern string, tokenAuth *auth.TokenAuth, allowedRoles []string, handler func(http.ResponseWriter, *http.Request, map[string]string)) {
 	mux.HandlePath(method, pattern, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
-		decision := tokenAuth.AuthorizeAuthorization(r.Context(), r.Header.Get("Authorization"), allowedRoles...)
+		decision, subject := tokenAuth.AuthorizeWithSubject(r.Context(), r.Header.Get("Authorization"), allowedRoles...)
 		if decision != auth.DecisionAuthorized {
 			writeAuthorizationError(w, decision)
 			return
 		}
-		handler(w, r, params)
+		handler(w, r.WithContext(auth.WithSubject(r.Context(), subject)), params)
 	})
 }
 

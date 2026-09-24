@@ -12,8 +12,7 @@ import type {
  * Contract assumption:
  * The inventory UI is built against POST /v1/inventory and
  * POST /v1/inventory/merge-candidates/:id/decision in atheros-search.
- * useInventory keeps a local fixture fallback for standalone frontend
- * development when that backend is not running.
+ * Merge decisions are final; there is no undo endpoint.
  */
 
 export const INVENTORY_NODE_KINDS: InventoryNodeKind[] = [
@@ -27,15 +26,6 @@ export const INVENTORY_NODE_KINDS: InventoryNodeKind[] = [
 export const INVENTORY_LIMITS = [100, 200, 400, 800] as const;
 
 export type InventoryViewMode = 'graph' | 'dedup_queue';
-
-export interface InventoryMergeUndo {
-  id: string;
-  candidateId: string;
-  label: string;
-  nodes: InventoryNode[];
-  edges: InventoryEdge[];
-  createdAt: string;
-}
 
 function defaultVisibleKinds(): Set<InventoryNodeKind> {
   return new Set(INVENTORY_NODE_KINDS);
@@ -72,9 +62,6 @@ export const [inventoryViewMode, setInventoryViewMode] =
   createSignal<InventoryViewMode>('graph');
 export const [expandedInventoryGroupIds, setExpandedInventoryGroupIds] =
   createSignal<Set<string>>(new Set());
-export const [recentMergeUndos, setRecentMergeUndos] = createSignal<
-  InventoryMergeUndo[]
->([]);
 
 export function toggleInventoryPin(id: string) {
   setPinnedInventoryNodeIds((prev) => {
@@ -127,21 +114,6 @@ export function clearInventory() {
   setSelectedInventoryNodeId(null);
 }
 
-export function captureMergeUndo(candidateId: string): InventoryMergeUndo {
-  const candidate = inventoryNodes().find((node) => node.id === candidateId);
-  const undo: InventoryMergeUndo = {
-    id: `${candidateId}:${Date.now()}`,
-    candidateId,
-    label: candidate?.label ?? candidateId,
-    nodes: inventoryNodes(),
-    edges: inventoryEdges(),
-    createdAt: new Date().toISOString(),
-  };
-
-  setRecentMergeUndos((prev) => [undo, ...prev].slice(0, 5));
-  return undo;
-}
-
 export function removeMergeCandidate(candidateId: string) {
   setInventoryNodes((prev) => prev.filter((node) => node.id !== candidateId));
   setInventoryEdges((prev) =>
@@ -150,14 +122,4 @@ export function removeMergeCandidate(candidateId: string) {
     ),
   );
   setSelectedInventoryNodeId(null);
-}
-
-export function restoreMergeUndo(undoId: string): InventoryMergeUndo | null {
-  const undo = recentMergeUndos().find((item) => item.id === undoId) ?? null;
-  if (!undo) return null;
-
-  setInventoryNodes(undo.nodes);
-  setInventoryEdges(undo.edges);
-  setRecentMergeUndos((prev) => prev.filter((item) => item.id !== undoId));
-  return undo;
 }

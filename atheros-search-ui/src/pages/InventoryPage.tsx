@@ -1,14 +1,4 @@
-import {
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  onMount,
-  Show,
-  startTransition,
-} from 'solid-js';
+import { batch, createEffect, createMemo, on, onCleanup, onMount, Show, startTransition } from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { DedupQueue } from '~/components/inventory/DedupQueue';
 import { InventoryControls } from '~/components/inventory/InventoryControls';
@@ -28,9 +18,7 @@ import {
   inventoryNodes,
   inventoryViewMode,
   pinnedInventoryNodeIds,
-  recentMergeUndos,
   selectedInventoryNodeId,
-  setInventoryViewMode,
   setSelectedInventoryNodeId,
   toggleInventoryGroupExpansion,
   visibleInventoryKinds,
@@ -65,8 +53,7 @@ export default function InventoryPage() {
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
   const { ready } = useInventoryUrlSync();
-  const { load, decideMerge, undoMerge } = useInventory();
-  const [activeUndoId, setActiveUndoId] = createSignal<string | null>(null);
+  const { load, decideMerge } = useInventory();
 
   const graph = useInventoryGraph(
     () => svgRef,
@@ -91,11 +78,6 @@ export default function InventoryPage() {
       inventoryNodes().find((node) => node.id === selectedInventoryNodeId()) ??
       null,
   );
-  const activeUndo = createMemo(() => {
-    const id = activeUndoId();
-    if (!id) return null;
-    return recentMergeUndos().find((undo) => undo.id === id) ?? null;
-  });
   const dataFilterKey = createMemo(() =>
     JSON.stringify({
       owner_ids: inventoryFilters.owner_ids ?? [],
@@ -179,17 +161,7 @@ export default function InventoryPage() {
   }
 
   async function handleDecision(candidateId: string, decision: MergeDecision) {
-    const undoId = await decideMerge(candidateId, decision);
-    if (undoId) setActiveUndoId(undoId);
-  }
-
-  async function handleUndo(undoId: string) {
-    const restored = await undoMerge(undoId);
-    if (restored) {
-      setActiveUndoId(null);
-      setInventoryViewMode('graph');
-      graph.rebuild();
-    }
+    await decideMerge(candidateId, decision);
   }
 
   return (
@@ -198,21 +170,6 @@ export default function InventoryPage() {
         onRefresh={() => void load(snapshotFilters())}
         onResetView={() => graph.resetZoom()}
       />
-
-      <Show when={activeUndo()}>
-        {(undo) => (
-          <div class="inventory-undo-toast" role="status">
-            <span>Merged {undo().label}</span>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onClick={() => void handleUndo(undo().id)}
-            >
-              Undo merge
-            </button>
-          </div>
-        )}
-      </Show>
 
       <Show
         when={inventoryViewMode() === 'dedup_queue'}

@@ -90,24 +90,6 @@
   }
 }
 
-.inventory-undo-toast {
-  position: fixed;
-  right: var(--space-5);
-  bottom: var(--space-5);
-  z-index: calc(var(--z-drawer) + 1);
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  max-width: min(420px, calc(100vw - 32px));
-  padding: var(--space-3);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-focus);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-}
-
 .inventory-tag-list,
 .inventory-mac-list {
   display: flex;
@@ -260,13 +242,5 @@
 
   .inventory-candidate-grid {
     grid-template-columns: 1fr;
-  }
-
-  .inventory-undo-toast {
-    right: var(--space-4);
-    bottom: var(--space-4);
-    left: var(--space-4);
-    max-width: none;
-    justify-content: space-between;
   }
 }

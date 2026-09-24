@@ -66,6 +66,21 @@ func TestJWTAuthValidatesClaimsSignatureAndRoles(t *testing.T) {
 	require.Equal(t, DecisionAuthorized, authenticator.AuthorizeAuthorization(context.Background(), "Bearer "+token, RoleViewer, RoleOperator, RoleAdmin))
 	require.Equal(t, DecisionForbidden, authenticator.AuthorizeAuthorization(context.Background(), "Bearer "+token, RoleOperator, RoleAdmin))
 
+	withSubject := claims(RoleViewer)
+	withSubject["preferred_username"] = "alice"
+	withSubject["sub"] = "subject-1"
+	subjectToken := signedJWT(t, key, keyID, withSubject)
+	decision, subject := authenticator.AuthorizeWithSubject(context.Background(), "Bearer "+subjectToken, RoleViewer, RoleOperator, RoleAdmin)
+	require.Equal(t, DecisionAuthorized, decision)
+	require.Equal(t, "alice", subject)
+
+	subOnly := claims(RoleOperator)
+	subOnly["sub"] = "subject-2"
+	subOnlyToken := signedJWT(t, key, keyID, subOnly)
+	decision, subject = authenticator.AuthorizeWithSubject(context.Background(), "Bearer "+subOnlyToken, RoleOperator, RoleAdmin)
+	require.Equal(t, DecisionAuthorized, decision)
+	require.Equal(t, "subject-2", subject)
+
 	operator := signedJWT(t, key, keyID, claims(RoleOperator))
 	require.Equal(t, DecisionAuthorized, authenticator.AuthorizeAuthorization(context.Background(), "Bearer "+operator, RoleOperator, RoleAdmin))
 	admin := signedJWT(t, key, keyID, claims(RoleAdmin))
