@@ -54,12 +54,18 @@ type EmbeddingCounts struct {
 }
 
 func (c EmbeddingCounts) EmptyKinds() []string {
-	empty := make([]string, 0, 2)
+	empty := make([]string, 0, 4)
 	if c.Event == 0 {
 		empty = append(empty, "event")
 	}
 	if c.Device == 0 {
 		empty = append(empty, "device")
+	}
+	if c.Behaviour == 0 {
+		empty = append(empty, "behaviour")
+	}
+	if c.Sequence == 0 {
+		empty = append(empty, "sequence")
 	}
 	return empty
 }

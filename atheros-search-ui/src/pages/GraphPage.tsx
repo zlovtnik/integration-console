@@ -2,6 +2,7 @@ import {
   batch,
   createEffect,
   createMemo,
+  createSignal,
   on,
   onCleanup,
   onMount,
@@ -13,6 +14,10 @@ import { GraphControls } from '~/components/graph/GraphControls';
 import { GraphLegend } from '~/components/graph/GraphLegend';
 import { GraphNodePanel } from '~/components/graph/GraphNodePanel';
 import { useForceGraph } from '~/hooks/useForceGraph';
+import {
+  buildGraphRenderModel,
+  GRAPH_AGGREGATE_THRESHOLD,
+} from '~/hooks/useGraphAggregate';
 import { useGraph } from '~/hooks/useGraph';
 import { useSuggest } from '~/hooks/useSuggest';
 import {
@@ -34,16 +39,39 @@ export default function GraphPage() {
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
   const { load } = useGraph();
+  const [expandedAPIds, setExpandedAPIds] = createSignal<Set<string>>(
+    new Set(),
+  );
 
   useSuggest();
 
-  const graph = useForceGraph(() => svgRef, graphNodes, graphEdges, {
-    selectedNodeId,
-    pinnedNodeIds,
-    visibleKinds: visibleGraphKinds,
-    onNodeClick: (node) =>
-      setSelectedNodeId((current) => (current === node.id ? null : node.id)),
-  });
+  const renderModel = createMemo(() =>
+    buildGraphRenderModel(
+      graphNodes(),
+      graphEdges(),
+      expandedAPIds(),
+      GRAPH_AGGREGATE_THRESHOLD,
+    ),
+  );
+
+  const graph = useForceGraph(
+    () => svgRef,
+    () => renderModel().nodes,
+    () => renderModel().edges,
+    {
+      selectedNodeId,
+      pinnedNodeIds,
+      visibleKinds: visibleGraphKinds,
+      onNodeClick: (node) => {
+        if (node.id.startsWith('aggregate:')) {
+          const apID = node.id.replace('aggregate:', '');
+          setExpandedAPIds((prev) => new Set([...prev, apID]));
+          return;
+        }
+        setSelectedNodeId((current) => (current === node.id ? null : node.id));
+      },
+    },
+  );
 
   const selected = createMemo(
     () => graphNodes().find((node) => node.id === selectedNodeId()) ?? null,
@@ -55,9 +83,11 @@ export default function GraphPage() {
       source_mac: graphFilters.source_mac ?? '',
       ssid: graphFilters.ssid ?? '',
       kinds: graphFilters.kinds ?? [],
+      edge_kinds: graphFilters.edge_kinds ?? [],
       threat_only: graphFilters.threat_only ?? false,
       observed_after: graphFilters.observed_after ?? '',
       observed_before: graphFilters.observed_before ?? '',
+      hops: graphFilters.hops ?? 1,
       limit: graphFilters.limit ?? 200,
     }),
   );

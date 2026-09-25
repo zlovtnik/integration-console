@@ -93,6 +93,20 @@ function readLiveStreamPreference(): boolean {
   }
 }
 
+function fallbackBannerCopy(reason: string): string {
+  const detail = reason.trim();
+  if (detail.startsWith('no embeddings indexed for requested kind')) {
+    return `This content type is not indexed for semantic search yet - showing keyword matches only. ${detail}`;
+  }
+  if (
+    detail.startsWith('embedding backend unavailable') ||
+    detail.startsWith('embedding backend returned no vectors')
+  ) {
+    return `Embedding backend unavailable - showing keyword results only. ${detail}`;
+  }
+  return `Semantic search unavailable - showing keyword results only. ${detail}`;
+}
+
 export default function SearchPage() {
   const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = createSignal(false);
@@ -397,8 +411,7 @@ export default function SearchPage() {
             }
           >
             <div class="state-banner state-banner--warn" role="status">
-              Embedding backend unavailable - showing keyword results only.{' '}
-              {meta.fallback_reason}
+              {fallbackBannerCopy(meta.fallback_reason ?? '')}
             </div>
           </Show>
 

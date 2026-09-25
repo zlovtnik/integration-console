@@ -271,6 +271,23 @@
   background: var(--color-warn);
 }
 
+.graph-legend-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
+}
+
+.graph-legend-line {
+  width: 18px;
+  height: 2px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+}
+
+.graph-legend-item--edge .graph-legend-line {
+  display: inline-block;
+}
+
 .graph-node-panel {
   position: fixed;
   top: var(--nav-height);

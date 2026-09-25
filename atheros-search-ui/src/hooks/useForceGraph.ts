@@ -1,7 +1,7 @@
 import * as d3 from 'd3';
 import { createEffect, on, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
-import type { GraphEdge, GraphNode, NodeKind } from '~/api/types';
+import type { EdgeKind, GraphEdge, GraphNode, NodeKind } from '~/api/types';
 import {
   createSimNodes,
   finiteCoord,
@@ -154,14 +154,16 @@ export function useForceGraph(
       .attr('stroke-width', 1.5);
 
     node
-      .filter((item) => (item.risk_score ?? 0) > 0.5)
+      .filter((item) => hasSeverityHalo(item))
       .append('circle')
       .attr('class', 'graph-node-halo')
       .attr('r', (item) => nodeRadius(item) + 8)
       .attr('fill', 'none')
-      .attr('stroke', 'var(--color-danger)')
+      .attr('stroke', (item) => severityHaloColor(item))
       .attr('stroke-width', 0.75)
-      .attr('stroke-dasharray', '3 3')
+      .attr('stroke-dasharray', (item) =>
+        (item.risk_score ?? 0) > 0.5 ? '3 3' : 'none',
+      )
       .attr('stroke-opacity', 0.65);
 
     node
@@ -438,7 +440,41 @@ export function nodeKindLabel(kind: NodeKind): string {
   }
 }
 
-function edgeColor(kind: string): string {
+function highSeverity(item: SimNode): boolean {
+  return (
+    item.alert_severity === 'high' || item.alert_severity === 'critical'
+  );
+}
+
+function hasSeverityHalo(item: SimNode): boolean {
+  return (item.risk_score ?? 0) > 0.5 || highSeverity(item);
+}
+
+function severityHaloColor(item: SimNode): string {
+  if ((item.risk_score ?? 0) > 0.5) return 'var(--color-danger)';
+  return 'var(--color-warn)';
+}
+
+export function edgeKindLabel(kind: EdgeKind): string {
+  switch (kind) {
+    case 'association':
+      return 'Device-AP association';
+    case 'cluster_member':
+      return 'Identity cluster member';
+    case 'rf_proximity':
+      return 'RF proximity';
+    case 'same_channel':
+      return 'Same channel';
+    case 'vendor_link':
+      return 'Shared vendor OUI';
+    case 'alert_ref':
+      return 'Alert reference';
+    default:
+      return kind.replaceAll('_', ' ');
+  }
+}
+
+export function edgeColor(kind: string): string {
   switch (kind) {
     case 'association':
       return 'var(--color-accent)';
@@ -454,6 +490,10 @@ function edgeColor(kind: string): string {
       return 'var(--color-info)';
     case 'roaming':
       return 'var(--color-border-focus)';
+    case 'same_channel':
+      return 'var(--color-info)';
+    case 'vendor_link':
+      return 'var(--score-sparse)';
     default:
       return 'var(--color-border)';
   }

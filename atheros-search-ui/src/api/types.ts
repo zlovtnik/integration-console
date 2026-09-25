@@ -228,6 +228,7 @@ export interface GraphEdge {
   target: string;
   kind: EdgeKind;
   weight?: number;
+  weight_basis?: string;
   label?: string;
 }
 
@@ -256,9 +257,11 @@ export interface GraphFilters {
   source_mac?: string;
   ssid?: string;
   kinds?: NodeKind[];
+  edge_kinds?: EdgeKind[];
   threat_only?: boolean;
   observed_after?: Rfc3339Timestamp;
   observed_before?: Rfc3339Timestamp;
+  hops?: number;
   limit?: number;
 }
 

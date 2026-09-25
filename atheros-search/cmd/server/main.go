@@ -143,7 +143,7 @@ func main() {
 	}
 
 	svc := search.NewService(pool.DB, embedder, cfg, m, logger)
-	readiness := &health.Readiness{DB: pool, Embedder: embedder, SchemaReadyRequired: cfg.SchemaReadyRequired}
+	readiness := &health.Readiness{DB: pool, Embedder: embedder, Metrics: m, SchemaReadyRequired: cfg.SchemaReadyRequired}
 
 	metricsServer, err := metrics.StartServer(ctx, cfg.MetricsPort)
 	if err != nil {

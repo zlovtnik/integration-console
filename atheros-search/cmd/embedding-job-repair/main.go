@@ -129,6 +129,89 @@ ORDER BY status
 	}
 	logger.Info().Int64("heartbeat_rows", workerCount).Msg("Worker heartbeats")
 
+	return showKindCoverage(ctx, db, logger)
+}
+
+func showKindCoverage(ctx context.Context, db *sql.DB, logger zerolog.Logger) error {
+	type kindRow struct {
+		Kind   string
+		Status string
+		Count  int64
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT embedding_kind, status, COUNT(*) AS count
+FROM embedding_jobs
+GROUP BY embedding_kind, status
+ORDER BY embedding_kind, status
+`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	logger.Info().Msg("=== Embedding Jobs by Kind and Status ===")
+	for rows.Next() {
+		var r kindRow
+		if err := rows.Scan(&r.Kind, &r.Status, &r.Count); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Str("status", r.Status).Int64("count", r.Count).Msg("")
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	type vectorRow struct {
+		Kind  string
+		Total int64
+	}
+	vectorRows, err := db.QueryContext(ctx, `
+SELECT embedding_kind, COUNT(*) AS total
+FROM atheros_search.embeddings
+GROUP BY embedding_kind
+ORDER BY embedding_kind
+`)
+	if err != nil {
+		return err
+	}
+	defer vectorRows.Close()
+
+	logger.Info().Msg("=== Embedded Vectors by Kind ===")
+	for vectorRows.Next() {
+		var r vectorRow
+		if err := vectorRows.Scan(&r.Kind, &r.Total); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Int64("vectors", r.Total).Msg("")
+	}
+
+	type pendingRow struct {
+		Kind    string
+		Pending int64
+		Sources int64
+	}
+	pendingRows, err := db.QueryContext(ctx, `
+SELECT embedding_kind,
+       COUNT(*) FILTER (WHERE job.status IN ('pending', 'leased')) AS pending_jobs,
+       COUNT(*) AS total_jobs
+FROM embedding_jobs job
+GROUP BY embedding_kind
+ORDER BY embedding_kind
+`)
+	if err != nil {
+		return err
+	}
+	defer pendingRows.Close()
+
+	logger.Info().Msg("=== Per-Kind Backlog ===")
+	for pendingRows.Next() {
+		var r pendingRow
+		if err := pendingRows.Scan(&r.Kind, &r.Pending, &r.Sources); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Int64("pending_or_leased", r.Pending).Int64("total_jobs", r.Sources).Msg("")
+	}
+
 	return nil
 }
 

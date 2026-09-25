@@ -19,6 +19,9 @@ type Metrics struct {
 	ResultsReturned    *prometheus.CounterVec
 	EmbeddingCacheHits prometheus.Counter
 	EmbeddingCacheMiss prometheus.Counter
+	SearchFallbacks    *prometheus.CounterVec
+	GraphEdgeDensity   *prometheus.GaugeVec
+	VectorCoverage     *prometheus.GaugeVec
 }
 
 func New() *Metrics {
@@ -48,6 +51,18 @@ func NewForRegisterer(registerer prometheus.Registerer) *Metrics {
 			Name: "athsearch_embedding_cache_misses_total",
 			Help: "Query embedding cache misses.",
 		}),
+		SearchFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "athsearch_search_fallbacks_total",
+			Help: "Searches that degraded to keyword-only ranking, by kind and reason.",
+		}, []string{"kind", "reason"}),
+		GraphEdgeDensity: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "athsearch_graph_edge_density",
+			Help: "Edges per graph node by node kind, sampled from graph responses.",
+		}, []string{"node_kind"}),
+		VectorCoverage: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "athsearch_search_vector_coverage",
+			Help: "Embedded vectors per embedding kind; zero indicates a kind with no semantic coverage.",
+		}, []string{"embedding_kind"}),
 	}
 	registerer.MustRegister(
 		m.SearchRequests,
@@ -55,6 +70,9 @@ func NewForRegisterer(registerer prometheus.Registerer) *Metrics {
 		m.ResultsReturned,
 		m.EmbeddingCacheHits,
 		m.EmbeddingCacheMiss,
+		m.SearchFallbacks,
+		m.GraphEdgeDensity,
+		m.VectorCoverage,
 	)
 	initializeStableLabelSets(m)
 	return m
@@ -73,6 +91,29 @@ func initializeStableLabelSets(m *Metrics) {
 			}
 		}
 	}
+	for _, kind := range []string{"event", "device", "behaviour", "sequence"} {
+		m.VectorCoverage.WithLabelValues(kind).Set(0)
+	}
+	for _, kind := range []string{"device", "cluster", "ap", "client", "shadow_alert", "alert"} {
+		m.GraphEdgeDensity.WithLabelValues(kind).Set(0)
+	}
+}
+
+// ObserveSearchFallback records a search that degraded to keyword-only ranking.
+// reason is a short stable token such as "backend_unavailable",
+// "backend_no_vectors", or "no_kind_coverage".
+func (m *Metrics) ObserveSearchFallback(kind, reason string) {
+	m.SearchFallbacks.WithLabelValues(kind, reason).Inc()
+}
+
+// ObserveGraphEdgeDensity records edges-per-node observed in a graph response.
+func (m *Metrics) ObserveGraphEdgeDensity(nodeKind string, density float64) {
+	m.GraphEdgeDensity.WithLabelValues(nodeKind).Set(density)
+}
+
+// ObserveVectorCoverage records the number of embedded vectors per kind.
+func (m *Metrics) ObserveVectorCoverage(embeddingKind string, vectors float64) {
+	m.VectorCoverage.WithLabelValues(embeddingKind).Set(vectors)
 }
 
 func (m *Metrics) ObserveSearch(kind, mode, status string, started time.Time, results int) {

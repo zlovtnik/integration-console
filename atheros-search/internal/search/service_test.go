@@ -2,11 +2,13 @@ package search
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
@@ -81,6 +83,82 @@ func TestSearchFallsBackToSparseForEmptyEmbeddingResult(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_SPARSE, response.ModeUsed)
 	require.Equal(t, "embedding backend returned no vectors", response.FallbackReason)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+type staticEmbedder struct{}
+
+func (staticEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32, error) {
+	vector := make([]float32, embeddingDimensions)
+	return [][]float32{vector}, nil
+}
+func (staticEmbedder) Health(context.Context) error { return nil }
+
+func TestSearchReportsMissingKindCoverageWhenDenseIsEmpty(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+
+	denseRows := sqlmock.NewRows([]string{
+		"source_id", "source_kind", "source_key", "title", "snippet", "source_table",
+		"location_id", "sensor_id", "source_mac", "observed_at", "document_text",
+		"similarity", "rank",
+	})
+	mock.ExpectQuery("FROM atheros_search.embeddings").WillReturnRows(denseRows)
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM atheros_search.embeddings").
+		WithArgs("device").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("FROM atheros_search.search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"source_id"}))
+	mock.ExpectQuery("INSERT INTO atheros_search.search_queries").
+		WillReturnRows(sqlmock.NewRows([]string{"query_id"}).AddRow(1))
+
+	svc := &Service{
+		Pool:     database,
+		Embedder: staticEmbedder{},
+		Config:   config.Config{SearchTimeout: time.Second},
+		Logger:   zerolog.New(io.Discard),
+	}
+	response, err := svc.Search(context.Background(), &searchv1.SearchRequest{
+		Query: "lab laptop", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE, Mode: searchv1.SearchMode_SEARCH_MODE_HYBRID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_SPARSE, response.ModeUsed)
+	require.Contains(t, response.FallbackReason, `no embeddings indexed for requested kind(s) "device"`)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSearchKeepsHybridWhenKindHasCoverage(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+
+	denseRows := sqlmock.NewRows([]string{
+		"source_id", "source_kind", "source_key", "title", "snippet", "source_table",
+		"location_id", "sensor_id", "source_mac", "observed_at", "document_text",
+		"similarity", "rank",
+	})
+	mock.ExpectQuery("FROM atheros_search.embeddings").WillReturnRows(denseRows)
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM atheros_search.embeddings").
+		WithArgs("device").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(42))
+	mock.ExpectQuery("FROM atheros_search.search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"source_id"}))
+	mock.ExpectQuery("INSERT INTO atheros_search.search_queries").
+		WillReturnRows(sqlmock.NewRows([]string{"query_id"}).AddRow(1))
+
+	svc := &Service{
+		Pool:     database,
+		Embedder: staticEmbedder{},
+		Config:   config.Config{SearchTimeout: time.Second},
+		Logger:   zerolog.New(io.Discard),
+	}
+	response, err := svc.Search(context.Background(), &searchv1.SearchRequest{
+		Query: "lab laptop", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE, Mode: searchv1.SearchMode_SEARCH_MODE_HYBRID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_HYBRID, response.ModeUsed)
+	require.Empty(t, response.FallbackReason)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

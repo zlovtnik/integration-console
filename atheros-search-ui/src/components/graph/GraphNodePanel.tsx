@@ -1,7 +1,7 @@
 import { A } from '@solidjs/router';
 import { createMemo, For, Show } from 'solid-js';
 import { Pin, PinOff, X } from 'lucide-solid';
-import type { GraphNode } from '~/api/types';
+import type { GraphEdge, GraphNode } from '~/api/types';
 import {
   graphEdges,
   graphFilters,
@@ -9,8 +9,45 @@ import {
   pinnedNodeIds,
   togglePin,
 } from '~/stores/graphStore';
-import { nodeKindLabel } from '~/hooks/useForceGraph';
+import { nodeKindLabel, edgeKindLabel } from '~/hooks/useForceGraph';
 import { DetailRow } from './graphPanelUtils';
+
+function weightBasisLabel(basis: string | undefined): string | undefined {
+  switch (basis) {
+    case 'frame_count':
+      return 'frames observed';
+    case 'cluster_confidence':
+      return 'cluster confidence';
+    case 'vendor_match':
+      return 'shared vendor OUIs';
+    case 'time_overlap_windows':
+      return 'shared access points';
+    case 'probe_overlap':
+      return 'probed SSIDs in common';
+    case 'channel_overlap':
+      return 'channels in common';
+    case 'unspecified':
+    case undefined:
+    case '':
+      return undefined;
+    default:
+      return basis.replaceAll('_', ' ');
+  }
+}
+
+function edgeDetail(
+  edge: GraphEdge,
+  other: GraphNode | undefined,
+): string | undefined {
+  const parts: string[] = [];
+  if (edge.weight !== undefined && edge.weight > 0) {
+    parts.push(String(Math.round(edge.weight * 100) / 100));
+  }
+  const basis = weightBasisLabel(edge.weight_basis);
+  if (basis) parts.push(basis);
+  else if (edge.label) parts.push(edge.label);
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
 
 function compact(values: (string | undefined)[]): string[] {
   return Array.from(
@@ -134,6 +171,23 @@ export function GraphNodePanel(props: {
       )
       .map((edge) => nodesById().get(edge.source))
       .filter((node): node is GraphNode => Boolean(node)),
+  );
+
+  const relatedLinks = createMemo(() =>
+    graphEdges()
+      .filter(
+        (edge) =>
+          edge.source === props.node.id || edge.target === props.node.id,
+      )
+      .map((edge) => {
+        const otherID =
+          edge.source === props.node.id ? edge.target : edge.source;
+        const other = nodesById().get(otherID);
+        return { edge, other };
+      })
+      .filter((item): item is { edge: GraphEdge; other: GraphNode } =>
+        Boolean(item.other),
+      ),
   );
 
   const pinned = () => pinnedNodeIds().has(props.node.id);
@@ -303,6 +357,32 @@ export function GraphNodePanel(props: {
             </A>
           </Show>
         </div>
+      </section>
+
+      <section class="graph-panel-section">
+        <h3>Related links</h3>
+        <Show
+          when={relatedLinks().length > 0}
+          fallback={<p class="graph-panel-empty">No linked nodes.</p>}
+        >
+          <ul class="graph-node-mini-list">
+            <For each={relatedLinks()}>
+              {(item) => (
+                <li>
+                  <span>{item.other.label}</span>
+                  <span>
+                    {edgeKindLabel(item.edge.kind)}
+                    <Show when={edgeDetail(item.edge, item.other)}>
+                      {(detail) => (
+                        <small class="graph-edge-detail">{detail()}</small>
+                      )}
+                    </Show>
+                  </span>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
       </section>
     </aside>
   );

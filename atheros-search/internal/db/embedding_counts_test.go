@@ -21,6 +21,11 @@ func TestCountEmbeddingsReturnsCountsByKind(t *testing.T) {
 	counts, err := (&Pool{DB: sqlDB}).CountEmbeddings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, EmbeddingCounts{Event: 4, Device: 0, Behaviour: 0, Sequence: 0}, counts)
-	require.Equal(t, []string{"device"}, counts.EmptyKinds())
+	require.Equal(t, []string{"device", "behaviour", "sequence"}, counts.EmptyKinds())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestEmptyKindsReturnsAllEmptyKinds(t *testing.T) {
+	require.Equal(t, []string{}, EmbeddingCounts{Event: 1, Device: 1, Behaviour: 1, Sequence: 1}.EmptyKinds())
+	require.Equal(t, []string{"event", "device", "behaviour", "sequence"}, EmbeddingCounts{}.EmptyKinds())
 }

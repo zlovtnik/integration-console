@@ -12,6 +12,7 @@ import (
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
 )
 
 type Database interface {
@@ -23,6 +24,7 @@ type Database interface {
 type Readiness struct {
 	DB                  Database
 	Embedder            embed.Client
+	Metrics             *metrics.Metrics
 	SchemaReadyRequired bool
 	countsMu            sync.Mutex
 	counts              db.EmbeddingCounts
@@ -50,6 +52,12 @@ func (r *Readiness) Check(ctx context.Context) error {
 	counts, refreshed, err := r.embeddingCounts(checkCtx)
 	if err != nil {
 		return fmt.Errorf("count embeddings: %w", err)
+	}
+	if r.Metrics != nil {
+		r.Metrics.ObserveVectorCoverage("event", float64(counts.Event))
+		r.Metrics.ObserveVectorCoverage("device", float64(counts.Device))
+		r.Metrics.ObserveVectorCoverage("behaviour", float64(counts.Behaviour))
+		r.Metrics.ObserveVectorCoverage("sequence", float64(counts.Sequence))
 	}
 	if emptyKinds := counts.EmptyKinds(); refreshed && len(emptyKinds) > 0 {
 		log.Warn().

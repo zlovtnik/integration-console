@@ -1,18 +1,26 @@
-import { For } from 'solid-js';
-import { LocateFixed, RefreshCw } from 'lucide-solid';
+import { For, createSignal } from 'solid-js';
+import { LocateFixed, RefreshCw, Star, Trash2 } from 'lucide-solid';
 import {
+  GRAPH_EDGE_KINDS,
   GRAPH_LIMITS,
   GRAPH_NODE_KINDS,
+  applyGraphSavedView,
+  deleteGraphSavedView,
   graphFilters,
   graphLoading,
   graphMeta,
+  loadGraphSavedViews,
+  saveCurrentGraphView,
+  setGraphEdgeKindVisibility,
   setGraphFilters,
   setGraphKindVisibility,
+  visibleGraphEdgeKinds,
   visibleGraphKinds,
+  type GraphSavedView,
 } from '~/stores/graphStore';
 import { suggestions } from '~/stores/suggestStore';
-import { nodeKindLabel } from '~/hooks/useForceGraph';
-import type { NodeKind } from '~/api/types';
+import { edgeKindLabel, nodeKindLabel } from '~/hooks/useForceGraph';
+import type { EdgeKind, NodeKind } from '~/api/types';
 import {
   localInputToRfc3339,
   rfc3339ToLocalInput,
@@ -41,6 +49,11 @@ export function GraphControls(props: {
   onRefresh: () => void;
   onResetView: () => void;
 }) {
+  const [savedViews, setSavedViews] = createSignal<GraphSavedView[]>(
+    loadGraphSavedViews(),
+  );
+  const [viewName, setViewName] = createSignal('');
+
   function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
     props.onRefresh();
@@ -48,6 +61,26 @@ export function GraphControls(props: {
 
   function handleKind(kind: NodeKind, checked: boolean) {
     setGraphKindVisibility(kind, checked);
+  }
+
+  function handleEdgeKind(kind: EdgeKind, checked: boolean) {
+    setGraphEdgeKindVisibility(kind, checked);
+  }
+
+  function handleSaveView(event: SubmitEvent) {
+    event.preventDefault();
+    if (!viewName().trim()) return;
+    setSavedViews(saveCurrentGraphView(viewName()));
+    setViewName('');
+  }
+
+  function handleApplyView(view: GraphSavedView) {
+    applyGraphSavedView(view);
+    props.onRefresh();
+  }
+
+  function handleDeleteView(view: GraphSavedView) {
+    setSavedViews(deleteGraphSavedView(view.name));
   }
 
   return (
@@ -168,7 +201,87 @@ export function GraphControls(props: {
         </For>
       </fieldset>
 
+      <fieldset class="graph-kind-filter">
+        <legend>Edge types</legend>
+        <For each={GRAPH_EDGE_KINDS}>
+          {(kind) => (
+            <label class="graph-kind-check">
+              <input
+                type="checkbox"
+                checked={visibleGraphEdgeKinds().has(kind)}
+                onChange={(event) =>
+                  handleEdgeKind(kind, event.currentTarget.checked)
+                }
+              />
+              <span>{edgeKindLabel(kind)}</span>
+            </label>
+          )}
+        </For>
+      </fieldset>
+
+      <fieldset class="graph-kind-filter graph-saved-views">
+        <legend>Saved views</legend>
+        <For
+          each={savedViews()}
+          fallback={<p class="graph-panel-empty">No saved views yet.</p>}
+        >
+          {(view) => (
+            <span class="graph-saved-view">
+              <button
+                type="button"
+                class="btn btn-secondary btn-saved-view"
+                onClick={() => handleApplyView(view)}
+              >
+                <Star size={14} aria-hidden="true" />
+                <span>{view.name}</span>
+              </button>
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label={`Delete saved view ${view.name}`}
+                onClick={() => handleDeleteView(view)}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
+            </span>
+          )}
+        </For>
+        <label class="field graph-field graph-field--save-view">
+          <span>View name</span>
+          <input
+            value={viewName()}
+            placeholder="lab 24h threats"
+            onInput={(event) => setViewName(event.currentTarget.value)}
+          />
+        </label>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          disabled={!viewName().trim()}
+          onClick={(event) => handleSaveView(event as unknown as SubmitEvent)}
+        >
+          Save current filters
+        </button>
+      </fieldset>
+
       <div class="graph-actions">
+        <label class="field graph-field graph-field--hops">
+          <span>Hops {graphFilters.hops === 2 ? '2' : '1'}</span>
+          <input
+            type="range"
+            min="1"
+            max="2"
+            step="1"
+            value={graphFilters.hops === 2 ? '2' : '1'}
+            onInput={(event) =>
+              setGraphFilters(
+                'hops',
+                Number(event.currentTarget.value) === 2 ? 2 : undefined,
+              )
+            }
+          />
+        </label>
+
         <label class="switch-inline">
           <input
             type="checkbox"

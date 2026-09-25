@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 const (
 	graphDefaultLimit = 200
 	graphMaxLimit     = 1000
+	graphMaxHops      = 2
 )
 
 type GraphFilters struct {
@@ -20,9 +22,11 @@ type GraphFilters struct {
 	SourceMAC      string     `json:"source_mac,omitempty"`
 	SSID           string     `json:"ssid,omitempty"`
 	Kinds          []string   `json:"kinds,omitempty"`
+	EdgeKinds      []string   `json:"edge_kinds,omitempty"`
 	ThreatOnly     bool       `json:"threat_only,omitempty"`
 	ObservedAfter  *time.Time `json:"observed_after,omitempty"`
 	ObservedBefore *time.Time `json:"observed_before,omitempty"`
+	Hops           int        `json:"hops,omitempty"`
 	Limit          int        `json:"limit,omitempty"`
 }
 
@@ -53,12 +57,13 @@ type GraphNode struct {
 }
 
 type GraphEdge struct {
-	ID     string   `json:"id"`
-	Source string   `json:"source"`
-	Target string   `json:"target"`
-	Kind   string   `json:"kind"`
-	Weight *float64 `json:"weight,omitempty"`
-	Label  string   `json:"label,omitempty"`
+	ID          string   `json:"id"`
+	Source      string   `json:"source"`
+	Target      string   `json:"target"`
+	Kind        string   `json:"kind"`
+	Weight      *float64 `json:"weight,omitempty"`
+	WeightBasis string   `json:"weight_basis,omitempty"`
+	Label       string   `json:"label,omitempty"`
 }
 
 type GraphResponse struct {
@@ -102,7 +107,7 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (*GraphRespon
 	}
 
 	if filters.SourceMAC != "" {
-		nodes, edges = focusGraphAroundMAC(nodes, edges, filters.SourceMAC)
+		nodes, edges = focusGraphAroundMAC(nodes, edges, filters.SourceMAC, filters.Hops)
 	}
 
 	sortedNodes := sortGraphNodes(nodes)
@@ -122,6 +127,29 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (*GraphRespon
 			}
 		}
 		sortedEdges = filtered
+	}
+
+	nodeKind := make(map[string]string, len(sortedNodes))
+	nodeCountByKind := make(map[string]int, len(sortedNodes))
+	for _, node := range sortedNodes {
+		nodeKind[node.ID] = node.Kind
+		nodeCountByKind[node.Kind]++
+	}
+	degreeByKind := make(map[string]int, len(nodeCountByKind))
+	for _, edge := range sortedEdges {
+		if kind, ok := nodeKind[edge.Source]; ok {
+			degreeByKind[kind]++
+		}
+		if kind, ok := nodeKind[edge.Target]; ok {
+			degreeByKind[kind]++
+		}
+	}
+	if s.Metrics != nil {
+		for kind, degree := range degreeByKind {
+			if count := nodeCountByKind[kind]; count > 0 {
+				s.Metrics.ObserveGraphEdgeDensity(kind, float64(degree)/float64(count))
+			}
+		}
 	}
 
 	return &GraphResponse{
@@ -162,6 +190,27 @@ func normalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
 		mappedKinds = append(mappedKinds, mapped)
 	}
 	filters.Kinds = mappedKinds
+	mappedEdgeKinds := make([]string, 0, len(filters.EdgeKinds))
+	seenEdgeKinds := map[string]struct{}{}
+	for _, kind := range filters.EdgeKinds {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		mapped := mapGraphEdgeKind(kind)
+		if _, ok := seenEdgeKinds[mapped]; ok {
+			continue
+		}
+		seenEdgeKinds[mapped] = struct{}{}
+		mappedEdgeKinds = append(mappedEdgeKinds, mapped)
+	}
+	filters.EdgeKinds = mappedEdgeKinds
+	if filters.Hops < 1 {
+		filters.Hops = 1
+	}
+	if filters.Hops > graphMaxHops {
+		filters.Hops = graphMaxHops
+	}
 	return filters, nil
 }
 
@@ -186,6 +235,17 @@ func mapGraphEdgeKind(kind string) string {
 		return "association"
 	case "identity_member":
 		return "cluster_member"
+	default:
+		return kind
+	}
+}
+
+func graphEdgeKindToDB(kind string) string {
+	switch kind {
+	case "association":
+		return "observed_at"
+	case "cluster_member":
+		return "identity_member"
 	default:
 		return kind
 	}
@@ -356,6 +416,7 @@ type graphEdgeRow struct {
 	TargetID   string
 	EdgeKind   string
 	Weight     float64
+	WeightBasis sql.NullString
 	Label      sql.NullString
 	ObservedAt sql.NullTime
 }
@@ -369,13 +430,29 @@ func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, node
 		nodeIDs = append(nodeIDs, node.ID)
 	}
 	args := append([]any(nil), nodeIDs...)
+	clauses := []string{
+		"source_node_id IN (" + pgPlaceholders(1, len(nodeIDs)) + ")",
+		"target_node_id IN (" + pgPlaceholders(1, len(nodeIDs)) + ")",
+	}
+	if len(filters.EdgeKinds) > 0 {
+		mapped := make([]any, 0, len(filters.EdgeKinds))
+		for _, kind := range filters.EdgeKinds {
+			mapped = append(mapped, graphEdgeKindToDB(kind))
+		}
+		start := len(args) + 1
+		placeholders := pgPlaceholders(start, len(mapped))
+		clauses = append(clauses, fmt.Sprintf("edge_kind IN (%s)", placeholders))
+		args = append(args, mapped...)
+	}
 	args = append(args, filters.Limit)
-	placeholders := pgPlaceholders(1, len(nodeIDs))
+	where := "(" + strings.Join(clauses[:2], " OR ") + ")"
+	if len(clauses) > 2 {
+		where += " AND " + strings.Join(clauses[2:], " AND ")
+	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT edge_id, source_node_id, target_node_id, edge_kind, weight, label, observed_at
+SELECT edge_id, source_node_id, target_node_id, edge_kind, weight, weight_basis, label, observed_at
 FROM atheros_search.graph_edges
-WHERE source_node_id IN (`+placeholders+`)
-   OR target_node_id IN (`+placeholders+`)
+WHERE `+where+`
 ORDER BY observed_at DESC NULLS LAST, edge_id
 LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
@@ -386,15 +463,16 @@ LIMIT $`+fmt.Sprint(len(args)), args...)
 	edges := make([]GraphEdge, 0, len(nodes))
 	for rows.Next() {
 		var row graphEdgeRow
-		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.Label, &row.ObservedAt); err != nil {
+		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt); err != nil {
 			return nil, err
 		}
 		edge := GraphEdge{
-			ID:     row.EdgeID,
-			Source: row.SourceID,
-			Target: row.TargetID,
-			Kind:   mapGraphEdgeKind(row.EdgeKind),
-			Weight: &row.Weight,
+			ID:          row.EdgeID,
+			Source:      row.SourceID,
+			Target:      row.TargetID,
+			Kind:        mapGraphEdgeKind(row.EdgeKind),
+			Weight:      &row.Weight,
+			WeightBasis: row.WeightBasis.String,
 		}
 		if row.Label.Valid {
 			edge.Label = row.Label.String
@@ -421,7 +499,7 @@ func anchorGraphFilters(filters GraphFilters) GraphFilters {
 	return anchor
 }
 
-func focusGraphAroundMAC(nodes []GraphNode, edges []GraphEdge, mac string) ([]GraphNode, []GraphEdge) {
+func focusGraphAroundMAC(nodes []GraphNode, edges []GraphEdge, mac string, hops int) ([]GraphNode, []GraphEdge) {
 	deviceID := "device:" + strings.ToLower(mac)
 	found := false
 	for _, node := range nodes {
@@ -436,13 +514,29 @@ func focusGraphAroundMAC(nodes []GraphNode, edges []GraphEdge, mac string) ([]Gr
 	}
 
 	related := map[string]struct{}{deviceID: {}}
-	for _, edge := range edges {
-		if edge.Source == deviceID {
-			related[edge.Target] = struct{}{}
+	frontier := []string{deviceID}
+	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
+		frontierSet := make(map[string]struct{}, len(frontier))
+		for _, id := range frontier {
+			frontierSet[id] = struct{}{}
 		}
-		if edge.Target == deviceID {
-			related[edge.Source] = struct{}{}
+		next := make([]string, 0)
+		for _, edge := range edges {
+			var neighbor string
+			if _, ok := frontierSet[edge.Source]; ok {
+				neighbor = edge.Target
+			} else if _, ok := frontierSet[edge.Target]; ok {
+				neighbor = edge.Source
+			} else {
+				continue
+			}
+			if _, ok := related[neighbor]; ok {
+				continue
+			}
+			related[neighbor] = struct{}{}
+			next = append(next, neighbor)
 		}
+		frontier = next
 	}
 	filteredNodes := make([]GraphNode, 0, len(related))
 	for _, node := range nodes {
@@ -463,20 +557,12 @@ func focusGraphAroundMAC(nodes []GraphNode, edges []GraphEdge, mac string) ([]Gr
 
 func sortGraphNodes(nodes []GraphNode) []GraphNode {
 	sorted := append([]GraphNode(nil), nodes...)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j].ID < sorted[j-1].ID; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	return sorted
 }
 
 func sortGraphEdges(edges []GraphEdge) []GraphEdge {
 	sorted := append([]GraphEdge(nil), edges...)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j].ID < sorted[j-1].ID; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	return sorted
 }

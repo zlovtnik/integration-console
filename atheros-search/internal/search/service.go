@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -96,6 +97,7 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 			}
 			modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
 			fallbackReason = err.Error()
+			s.observeFallback(metricsKind, "backend_unavailable")
 		} else {
 			qvec = vectors[0]
 			denseResults, err = Dense(searchCtx, s.Pool, qvec, s.Config.EmbeddingModel, opts)
@@ -106,6 +108,14 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 				modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
 				fallbackReason = err.Error()
 				qvec = nil
+				s.observeFallback(metricsKind, "dense_query_failed")
+			} else if mode == searchv1.SearchMode_SEARCH_MODE_HYBRID && len(denseResults) == 0 {
+				if reason, ok := s.noEmbeddingCoverageReason(searchCtx, kinds); ok {
+					modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
+					fallbackReason = reason
+					qvec = nil
+					s.observeFallback(metricsKind, "no_kind_coverage")
+				}
 			}
 		}
 	}
@@ -224,6 +234,41 @@ func (s *Service) SuggestFilters(ctx context.Context, req *searchv1.SuggestFilte
 		s.suggMu.Unlock()
 	}
 	return resp, nil
+}
+
+func (s *Service) observeFallback(kind, reason string) {
+	if s.Metrics == nil {
+		return
+	}
+	s.Metrics.ObserveSearchFallback(kind, reason)
+}
+
+// noEmbeddingCoverageReason reports whether every requested kind has zero
+// embeddings indexed. When true the dense leg of a hybrid search degenerates
+// to keyword-only and callers deserve an explicit reason instead of silence.
+func (s *Service) noEmbeddingCoverageReason(ctx context.Context, kinds []string) (string, bool) {
+	if len(kinds) == 0 {
+		return "", false
+	}
+	for _, kind := range kinds {
+		embeddingKind := embeddingKindForSourceKind(kind)
+		if _, supported := supportedSearchKinds[kind]; !supported {
+			continue
+		}
+		var count int64
+		err := s.Pool.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM atheros_search.embeddings WHERE embedding_kind = $1
+`, embeddingKind).Scan(&count)
+		if err != nil {
+			s.Logger.Warn().Err(err).Str("embedding_kind", embeddingKind).Msg("embedding coverage check failed")
+			return "", false
+		}
+		if count > 0 {
+			return "", false
+		}
+	}
+	kindList := strings.Join(kinds, ", ")
+	return fmt.Sprintf("no embeddings indexed for requested kind(s) %q yet", kindList), true
 }
 
 func requestKinds(kind searchv1.SearchKind) ([]string, error) {
