@@ -19,6 +19,10 @@ function backendEndpointMissing(error: unknown): boolean {
   );
 }
 
+export function stripMergeNodePrefix(nodeId: string): string {
+  return nodeId.startsWith('merge:') ? nodeId.slice('merge:'.length) : nodeId;
+}
+
 function applyInventoryResponse(response: InventoryResponse) {
   batch(() => {
     setInventoryNodes(response.nodes);
@@ -65,7 +69,7 @@ export function useInventory() {
 
   async function decideMerge(candidateId: string, decision: MergeDecision) {
     try {
-      await api.mergeDecision(candidateId, decision);
+      await api.mergeDecision(stripMergeNodePrefix(candidateId), decision);
       removeMergeCandidate(candidateId);
       return true;
     } catch (err) {

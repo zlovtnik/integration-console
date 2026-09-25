@@ -51,6 +51,16 @@ function hasEventScope(node: GraphNode): boolean {
   return eventSourceMacs(node).length > 0 || eventSSIDs(node).length === 1;
 }
 
+function alertEvidenceString(node: GraphNode, key: string): string | undefined {
+  const value = node.alert_evidence?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function alertEvidenceNumber(node: GraphNode, key: string): number | undefined {
+  const value = node.alert_evidence?.[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
 function explainHref(node: GraphNode): string | null {
   if (!node.explain_source_key) return null;
   const params = new URLSearchParams({
@@ -221,6 +231,9 @@ export function GraphNodePanel(props: {
               label="Connected clients"
               value={connectedClients().length}
             />
+            <DetailRow label="Risk score" value={props.node.risk_score} />
+            <DetailRow label="Alert" value={props.node.alert_type} />
+            <DetailRow label="Severity" value={props.node.alert_severity} />
           </dl>
         </section>
         <NodeLinkList title="Clients" nodes={connectedClients()} />
@@ -243,10 +256,18 @@ export function GraphNodePanel(props: {
         <section class="graph-panel-section">
           <h3>Shadow alert</h3>
           <dl class="graph-detail-list">
-            <DetailRow label="Reason" value={props.node.reason} />
+            <DetailRow
+              label="Reason"
+              value={
+                alertEvidenceString(props.node, 'reason') ?? props.node.reason
+              }
+            />
             <DetailRow
               label="Occurrences"
-              value={props.node.occurrence_count}
+              value={
+                alertEvidenceNumber(props.node, 'occurrence_count') ??
+                props.node.occurrence_count
+              }
             />
             <DetailRow label="Signal" value={props.node.signal_dbm} />
             <DetailRow label="Resolved" value={props.node.resolved_at} date />

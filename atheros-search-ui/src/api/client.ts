@@ -388,6 +388,30 @@ export function normalizeSearchResponse(
   };
 }
 
+type RawExplainResponse = Record<string, unknown>;
+
+export function normalizeExplainResponse(raw: RawExplainResponse): ExplainResponse {
+  const normalized: ExplainResponse = {
+    source_key: firstString(raw.source_key, raw.sourceKey),
+    dense_score: firstNumber(raw.dense_score, raw.denseScore),
+    sparse_score: firstNumber(raw.sparse_score, raw.sparseScore),
+    fused_score: firstNumber(raw.fused_score, raw.fusedScore),
+    threat_boost: firstNumber(raw.threat_boost, raw.threatBoost),
+    boost_reasons: stringArray(raw.boost_reasons ?? raw.boostReasons),
+    sequence_log_prob: firstNumber(
+      raw.sequence_log_prob,
+      raw.sequenceLogProb,
+    ),
+  };
+  const sequenceTokens = stringArray(
+    raw.sequence_tokens ?? raw.sequenceTokens ?? [],
+  );
+  if (sequenceTokens.length > 0) normalized.sequence_tokens = sequenceTokens;
+  const detail = detailJson(raw.detail_json, raw.detailJson);
+  if (detail) normalized.detail_json = detail;
+  return normalized;
+}
+
 const INVENTORY_NODE_KINDS: InventoryNodeKind[] = [
   'device',
   'owner',
@@ -606,17 +630,19 @@ export const api = {
       ),
     ),
 
-  explain: (
+  explain: async (
     sourceKey: string,
     query: string,
     kind: string,
     signal?: AbortSignal,
   ) => {
     const encodedKey = encodeURIComponent(sourceKey);
-    return request<ExplainResponse>(
-      buildUrl(`/v1/explain/${encodedKey}`, { query, kind }),
-      {},
-      signal,
+    return normalizeExplainResponse(
+      await request<RawExplainResponse>(
+        buildUrl(`/v1/explain/${encodedKey}`, { query, kind }),
+        {},
+        signal,
+      ),
     );
   },
 

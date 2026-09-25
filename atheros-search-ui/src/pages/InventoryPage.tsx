@@ -28,7 +28,10 @@ import '~/styles/inventory.css';
 
 function snapshotFilters(): InventoryFilters {
   const filters: InventoryFilters = {
-    grouping: inventoryFilters.grouping,
+    grouping:
+      inventoryViewMode() === 'dedup_queue'
+        ? 'similarity'
+        : inventoryFilters.grouping,
   };
   if (inventoryFilters.owner_ids) {
     filters.owner_ids = [...inventoryFilters.owner_ids];
@@ -80,6 +83,8 @@ export default function InventoryPage() {
   );
   const dataFilterKey = createMemo(() =>
     JSON.stringify({
+      grouping: inventoryFilters.grouping,
+      view_mode: inventoryViewMode(),
       owner_ids: inventoryFilters.owner_ids ?? [],
       location_ids: inventoryFilters.location_ids ?? [],
       active_only: inventoryFilters.active_only ?? false,

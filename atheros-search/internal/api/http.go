@@ -655,17 +655,17 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func parseKind(value string) searchv1.SearchKind {
 	switch strings.ToLower(value) {
-	case "behaviour", "behavior", "behaviour_window":
+	case "behaviour", "behavior", "behaviour_window", "search_kind_behaviour":
 		return searchv1.SearchKind_SEARCH_KIND_BEHAVIOUR
-	case "sequence", "frame_sequence":
+	case "sequence", "frame_sequence", "search_kind_sequence":
 		return searchv1.SearchKind_SEARCH_KIND_SEQUENCE
-	case "device":
+	case "device", "search_kind_device":
 		return searchv1.SearchKind_SEARCH_KIND_DEVICE
-	case "cross":
+	case "cross", "search_kind_cross":
 		return searchv1.SearchKind_SEARCH_KIND_CROSS
-	case "proxy_event", "proxy-event":
+	case "proxy_event", "proxy-event", "search_kind_proxy_event":
 		return searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT
-	case "proxy_blocked_host_window", "proxy-window", "blocked_host_window":
+	case "proxy_blocked_host_window", "proxy-window", "blocked_host_window", "search_kind_proxy_blocked_host_window":
 		return searchv1.SearchKind_SEARCH_KIND_PROXY_BLOCKED_HOST_WINDOW
 	default:
 		return searchv1.SearchKind_SEARCH_KIND_EVENT

@@ -196,6 +196,8 @@ export interface GraphNode {
   tags?: string[];
   cluster_size?: number;
   alert_type?: string;
+  alert_severity?: string;
+  alert_evidence?: Record<string, unknown>;
   reason?: string;
   occurrence_count?: number;
   probe_count?: number;

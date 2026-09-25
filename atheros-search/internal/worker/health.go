@@ -150,8 +150,6 @@ FROM atheros_search.embedding_jobs
 	}
 	if health.EmbeddingFailed > 0 {
 		health.EmbeddingDependency = "blocked"
-	} else if health.EmbeddingPending > 0 && len(health.Workers) == 0 {
-		health.EmbeddingDependency = "waiting_for_worker"
 	} else if health.EmbeddingPending == 0 && health.EmbeddingCompleted == 0 {
 		health.EmbeddingDependency = "waiting_for_source"
 	} else {

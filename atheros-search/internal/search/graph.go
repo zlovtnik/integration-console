@@ -27,21 +27,29 @@ type GraphFilters struct {
 }
 
 type GraphNode struct {
-	ID          string     `json:"id"`
-	Kind        string     `json:"kind"`
-	Label       string     `json:"label"`
-	MAC         string     `json:"mac,omitempty"`
-	DisplayName string     `json:"display_name,omitempty"`
-	SSID        string     `json:"ssid,omitempty"`
-	BSSID       string     `json:"bssid,omitempty"`
-	LocationID  string     `json:"location_id,omitempty"`
-	SensorID    string     `json:"sensor_id,omitempty"`
-	ClusterSize *int       `json:"cluster_size,omitempty"`
-	Threat      bool       `json:"threat,omitempty"`
-	ObservedAt  *time.Time `json:"created_at,omitempty"`
-	FirstSeen   *time.Time `json:"first_seen,omitempty"`
-	LastSeen    *time.Time `json:"last_seen,omitempty"`
-	Tags        []string   `json:"tags,omitempty"`
+	ID               string     `json:"id"`
+	Kind             string     `json:"kind"`
+	Label            string     `json:"label"`
+	MAC              string     `json:"mac,omitempty"`
+	DisplayName      string     `json:"display_name,omitempty"`
+	Username         string     `json:"username,omitempty"`
+	Hostname         string     `json:"hostname,omitempty"`
+	OSHint           string     `json:"os_hint,omitempty"`
+	SSID             string     `json:"ssid,omitempty"`
+	BSSID            string     `json:"bssid,omitempty"`
+	LocationID       string     `json:"location_id,omitempty"`
+	SensorID         string     `json:"sensor_id,omitempty"`
+	ClusterSize      *int       `json:"cluster_size,omitempty"`
+	RiskScore        *float64   `json:"risk_score,omitempty"`
+	AlertType        string     `json:"alert_type,omitempty"`
+	AlertSeverity    string     `json:"alert_severity,omitempty"`
+	Threat           bool       `json:"threat,omitempty"`
+	ExplainSourceKey string     `json:"explain_source_key,omitempty"`
+	ExplainKind      string     `json:"explain_kind,omitempty"`
+	ObservedAt       *time.Time `json:"created_at,omitempty"`
+	FirstSeen        *time.Time `json:"first_seen,omitempty"`
+	LastSeen         *time.Time `json:"last_seen,omitempty"`
+	Tags             []string   `json:"tags,omitempty"`
 }
 
 type GraphEdge struct {
@@ -307,6 +315,30 @@ func graphNodeFromRow(row graphNodeRow) GraphNode {
 		if size, ok := payload["cluster_size"].(float64); ok {
 			clusterSize := int(size)
 			node.ClusterSize = &clusterSize
+		}
+		if username, ok := payload["username"].(string); ok && username != "" {
+			node.Username = username
+		}
+		if hostname, ok := payload["hostname"].(string); ok && hostname != "" {
+			node.Hostname = hostname
+		}
+		if osHint, ok := payload["os_hint"].(string); ok && osHint != "" {
+			node.OSHint = osHint
+		}
+		if risk, ok := payload["risk_score"].(float64); ok && risk > 0 {
+			node.RiskScore = &risk
+		}
+		if alertType, ok := payload["alert_type"].(string); ok && alertType != "" {
+			node.AlertType = alertType
+		}
+		if alertSeverity, ok := payload["alert_severity"].(string); ok && alertSeverity != "" {
+			node.AlertSeverity = alertSeverity
+		}
+		if explainKey, ok := payload["explain_source_key"].(string); ok && explainKey != "" {
+			node.ExplainSourceKey = explainKey
+		}
+		if explainKind, ok := payload["explain_kind"].(string); ok && explainKind != "" {
+			node.ExplainKind = explainKind
 		}
 	}
 	if node.DisplayName == "" && node.Kind == "device" {
