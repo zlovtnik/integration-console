@@ -64,8 +64,9 @@ describe('buildGraphRenderModel', () => {
     expect(model.nodes).toHaveLength(2);
     expect(model.edges).toHaveLength(1);
     const edge = model.edges[0];
-    expect(edge.kind).toBe('association');
-    expect(edge.source.startsWith('aggregate:')).toBe(true);
+    expect(edge).toBeDefined();
+    expect(edge?.kind).toBe('association');
+    expect(edge?.source?.startsWith('aggregate:')).toBe(true);
   });
 
   it('expands a bundled group when its access point is expanded', () => {
