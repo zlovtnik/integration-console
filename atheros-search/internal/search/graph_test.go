@@ -1,11 +1,44 @@
 package search
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGraphLoadsEdgesForProjectedNodes(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+
+	now := time.Now()
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM atheros_search.graph_nodes").WithArgs(200).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"node_id", "node_kind", "label", "node_payload", "location_id", "sensor_id",
+			"normalized_mac", "normalized_ssid", "is_threat", "observed_at",
+		}).AddRow("device:aa:bb:cc:dd:ee:ff", "device", "device", "{}", nil, nil,
+			"aa:bb:cc:dd:ee:ff", nil, false, now).
+			AddRow("ap:11:22:33:44:55:66", "access_point", "ap", "{}", nil, nil,
+				"11:22:33:44:55:66", nil, false, now))
+	mock.ExpectQuery(`(?s)WHERE source_node_id IN \(\$1,\$2\).*OR target_node_id IN \(\$1,\$2\).*LIMIT \$3`).
+		WithArgs("device:aa:bb:cc:dd:ee:ff", "ap:11:22:33:44:55:66", 200).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "label", "observed_at",
+		}).AddRow("observed:1", "device:aa:bb:cc:dd:ee:ff", "ap:11:22:33:44:55:66",
+			"observed_at", 1.0, "wireless observation", now))
+	mock.ExpectCommit()
+
+	graph, err := (&Service{Pool: database}).Graph(context.Background(), GraphFilters{})
+	require.NoError(t, err)
+	require.Equal(t, 2, graph.NodeCount)
+	require.Equal(t, 1, graph.EdgeCount)
+	require.Equal(t, "association", graph.Edges[0].Kind)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestNormalizeGraphFiltersDefaultsAndMapsKinds(t *testing.T) {
 	got, err := normalizeGraphFilters(GraphFilters{

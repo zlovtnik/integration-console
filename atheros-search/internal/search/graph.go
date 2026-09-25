@@ -338,11 +338,12 @@ func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, node
 	}
 	args := append([]any(nil), nodeIDs...)
 	args = append(args, filters.Limit)
+	placeholders := pgPlaceholders(1, len(nodeIDs))
 	rows, err := tx.QueryContext(ctx, `
 SELECT edge_id, source_node_id, target_node_id, edge_kind, weight, label, observed_at
 FROM atheros_search.graph_edges
-WHERE source_node_id IN (`+pgPlaceholders(1, len(nodeIDs))+`)
-   OR target_node_id IN (`+pgPlaceholders(len(nodeIDs)+1, len(nodeIDs))+`)
+WHERE source_node_id IN (`+placeholders+`)
+   OR target_node_id IN (`+placeholders+`)
 ORDER BY observed_at DESC NULLS LAST, edge_id
 LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
