@@ -60,6 +60,10 @@ describe('api client authentication', () => {
     );
 
     await expect(api.healthz()).resolves.toEqual({ status: 'ok' });
+    expect(fetch).toHaveBeenCalledWith(
+      '/api-healthz',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
     expect(getAccessToken).not.toHaveBeenCalled();
   });
 });
