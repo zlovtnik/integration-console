@@ -1,10 +1,37 @@
 package search
 
 import (
+	"context"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSimilarityInventoryIncludesPendingMergeCandidate(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM atheros_search.merge_candidates").WithArgs(0.0, 400).
+		WillReturnRows(sqlmock.NewRows([]string{"candidate_id", "mac_a", "mac_b", "confidence"}).
+			AddRow("candidate-1", "aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02", 0.95))
+	mock.ExpectRollback()
+	tx, err := database.Begin()
+	require.NoError(t, err)
+	nodes := map[string]InventoryNode{
+		"device:aa:bb:cc:dd:ee:01": {ID: "device:aa:bb:cc:dd:ee:01", Kind: InventoryNodeDevice},
+		"device:aa:bb:cc:dd:ee:02": {ID: "device:aa:bb:cc:dd:ee:02", Kind: InventoryNodeDevice},
+	}
+	edges := map[string]InventoryEdge{}
+	err = attachSimilarityInventory(context.Background(), tx, nodes, edges, InventoryFilters{Limit: 400})
+	require.NoError(t, err)
+	require.Contains(t, nodes, "merge:candidate-1")
+	require.Contains(t, nodes, "cluster:candidate-1")
+	require.Len(t, edges, 5)
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestNormalizeInventoryFiltersDefaultsAndClamps(t *testing.T) {
 	got, err := normalizeInventoryFilters(InventoryFilters{

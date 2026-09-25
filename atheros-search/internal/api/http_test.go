@@ -8,8 +8,26 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPublicV1HealthzRoute(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := StartHTTP(ctx, 0, []string{"https://search.rclabs.uk"}, nil, nil, nil, nil, false, zerolog.Nop())
+	require.NoError(t, err)
+	defer server.Close()
+
+	request := httptest.NewRequest(http.MethodGet, "https://gateway.rclabs.uk/v1/healthz", nil)
+	request.Header.Set("Origin", "https://search.rclabs.uk")
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"status":"ok"}`, response.Body.String())
+	require.Equal(t, "https://search.rclabs.uk", response.Header().Get("Access-Control-Allow-Origin"))
+}
 
 func TestHTTPStatusFromError(t *testing.T) {
 	t.Parallel()

@@ -390,10 +390,12 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Msg("merge decision completed")
 		writeJSON(w, http.StatusOK, resp)
 	})
-	mux.HandlePath("GET", "/healthz", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	healthz := func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		logger.Debug().Str("endpoint", "/healthz").Msg("healthz check")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	}
+	mux.HandlePath("GET", "/healthz", healthz)
+	mux.HandlePath("GET", "/v1/healthz", healthz)
 	mux.HandlePath("GET", "/readyz", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		logger.Debug().Str("endpoint", "/readyz").Msg("readyz check")
 		if err := readiness.Check(r.Context()); err != nil {

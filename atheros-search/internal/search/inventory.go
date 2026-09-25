@@ -335,7 +335,7 @@ func attachSimilarityInventory(ctx context.Context, tx *sql.Tx, nodes map[string
 		minConfidence = *filters.MinDedupConfidence
 	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT candidate_id, mac_a, mac_b, confidence, status
+SELECT candidate_id, mac_a, mac_b, confidence
 FROM atheros_search.merge_candidates
 WHERE status = 'pending'
   AND confidence >= $1

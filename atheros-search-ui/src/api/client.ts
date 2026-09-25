@@ -562,7 +562,6 @@ async function request<T>(
   init: RequestInit = {},
   signal?: AbortSignal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  base = env.apiBase,
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (
@@ -583,9 +582,9 @@ async function request<T>(
 
   let response: Response;
   try {
-    response = path.startsWith('/v1/')
-      ? await authenticatedFetch(`${base}${path}`, requestInit)
-      : await fetch(`${base}${path}`, requestInit);
+    response = path.startsWith('/v1/') && path !== '/v1/healthz'
+      ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit)
+      : await fetch(`${env.apiBase}${path}`, requestInit);
   } finally {
     timeout.cleanup();
   }
@@ -656,5 +655,5 @@ export const api = {
     ),
 
   healthz: (signal?: AbortSignal) =>
-    request<{ status: string }>('/api-healthz', {}, signal, 3_000, ''),
+    request<{ status: string }>('/v1/healthz', {}, signal, 3_000),
 };
