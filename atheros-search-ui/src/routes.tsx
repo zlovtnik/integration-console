@@ -7,6 +7,10 @@ export const routes: RouteDefinition[] = [
     component: lazy(() => import('~/pages/SearchPage')),
   },
   {
+    path: '/callback',
+    component: lazy(() => import('~/pages/CallbackPage')),
+  },
+  {
     path: '/explain/:sourceKey',
     component: lazy(() => import('~/pages/ExplainPage')),
   },

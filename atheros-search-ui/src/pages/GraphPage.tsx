@@ -88,7 +88,8 @@ export default function GraphPage() {
       observed_after: graphFilters.observed_after ?? '',
       observed_before: graphFilters.observed_before ?? '',
       hops: graphFilters.hops ?? 1,
-      limit: graphFilters.limit ?? 200,
+      scope: graphFilters.scope ?? '',
+      limit: graphFilters.limit ?? 0,
     }),
   );
 

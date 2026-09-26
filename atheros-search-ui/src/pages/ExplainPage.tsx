@@ -70,6 +70,18 @@ export default function ExplainPage() {
     return (explain.error as Error).message || 'Could not load explanation.';
   };
 
+  const recordMissing = () => {
+    const details = explain();
+    if (!details) return false;
+    return details.found === false;
+  };
+
+  const scoresAvailable = () => {
+    const details = explain();
+    if (!details) return true;
+    return details.scores_available !== false;
+  };
+
   createEffect(
     on(sourceKey, (key) => {
       document.title = key
@@ -106,18 +118,55 @@ export default function ExplainPage() {
             </div>
           }
         >
-          <Show when={explain()}>
+          <Show
+            when={explain()}
+            fallback={
+              <div class="state-banner" role="status">
+                No explanation is available for this record.
+              </div>
+            }
+          >
             {(details) => (
               <div class="explain-grid">
-                <section
-                  aria-labelledby="score-breakdown-title"
-                  class="explain-section"
+                <Show
+                  when={recordMissing()}
+                  fallback={
+                    <section
+                      aria-labelledby="score-breakdown-title"
+                      class="explain-section"
+                    >
+                      <h2 id="score-breakdown-title" class="heading-1">
+                        Score breakdown
+                      </h2>
+                      <Show
+                        when={scoresAvailable()}
+                        fallback={
+                          <p class="caption" role="status">
+                            Ranking scores are unavailable for this record.
+                            Open an explanation from a search result or graph
+                            node to compare it against a query.
+                          </p>
+                        }
+                      >
+                        <ScoreChart explain={details()} />
+                      </Show>
+                    </section>
+                  }
                 >
-                  <h2 id="score-breakdown-title" class="heading-1">
-                    Score breakdown
-                  </h2>
-                  <ScoreChart explain={details()} />
-                </section>
+                  <section
+                    aria-labelledby="missing-record-title"
+                    class="explain-section"
+                  >
+                    <h2 id="missing-record-title" class="heading-1">
+                      Record not found
+                    </h2>
+                    <p class="caption" role="status">
+                      No record with this source key exists in the current
+                      data set. It may have been removed or the link may be
+                      outdated.
+                    </p>
+                  </section>
+                </Show>
 
                 <section aria-labelledby="boost-title" class="explain-section">
                   <h2 id="boost-title" class="heading-1">

@@ -121,7 +121,7 @@ FROM (
   SELECT
     embedding_row.document_id,
     embedding_row.embedding_model,
-    embedding_row.embedding <=> $1::public.vector AS cosine_distance
+    embedding_row.embedding OPERATOR(public.<=>) $1::public.vector AS cosine_distance
   FROM atheros_search.embeddings embedding_row
   JOIN atheros_search.search_documents candidate
     ON candidate.document_id = embedding_row.document_id
@@ -129,7 +129,7 @@ FROM (
    AND candidate.status = 'active'
   WHERE embedding_row.embedding_model = $3
     AND embedding_row.embedding_kind = $4
-  ORDER BY embedding_row.embedding <=> $1::public.vector ASC
+  ORDER BY embedding_row.embedding OPERATOR(public.<=>) $1::public.vector ASC
   LIMIT $2
 ) nearest
 JOIN atheros_search.search_documents d ON d.document_id = nearest.document_id

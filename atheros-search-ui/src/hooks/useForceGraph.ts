@@ -243,14 +243,16 @@ export function useForceGraph(
 
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
-      .style('display', (item) =>
-        visibleKinds.has(item.kind) ? null : 'none',
-      );
+      .style('display', (item) => (kindIsVisible(item.kind) ? null : 'none'));
+
+    function kindIsVisible(kind: NodeKind): boolean {
+      return kind === 'aggregate_group' || visibleKinds.has(kind);
+    }
 
     function edgeIsVisible(edge: SimEdge): boolean {
       return (
-        visibleKinds.has(endpointKind(edge.source)) &&
-        visibleKinds.has(endpointKind(edge.target))
+        kindIsVisible(endpointKind(edge.source)) &&
+        kindIsVisible(endpointKind(edge.target))
       );
     }
 
@@ -368,6 +370,7 @@ function nodeLaneX(node: GraphNode, width: number): number {
     shadow_alert: 0.88,
     alert: 0.88,
     embedding: 0.5,
+    aggregate_group: 0.62,
   };
   return width * (lanes[node.kind] ?? 0.5);
 }
@@ -382,6 +385,9 @@ function nodeLaneY(node: GraphNode, index: number, height: number): number {
 export function nodeRadius(node: GraphNode): number {
   if (node.kind === 'cluster') {
     return 10 + Math.min((node.cluster_size ?? 1) * 1.5, 12);
+  }
+  if (node.kind === 'aggregate_group') {
+    return 11 + Math.min((node.occurrence_count ?? 1) * 0.4, 10);
   }
   if (node.kind === 'ap') return 10;
   if (node.kind === 'shadow_alert' || node.kind === 'alert') return 8;
@@ -403,6 +409,8 @@ function nodeShapePath(node: GraphNode): string {
       return polygonPath(r * 1.1, 8);
     case 'alert':
       return polygonPath(r * 1.15, 3, Math.PI / 2);
+    case 'aggregate_group':
+      return polygonPath(r, 5);
     default:
       return circlePath(r);
   }
@@ -424,6 +432,8 @@ export function nodeColor(node: Pick<GraphNode, 'kind'>): string {
       return 'var(--color-warn)';
     case 'embedding':
       return 'var(--score-dense)';
+    case 'aggregate_group':
+      return 'var(--color-text-tertiary)';
     default:
       return 'var(--color-text-tertiary)';
   }
@@ -435,6 +445,8 @@ export function nodeKindLabel(kind: NodeKind): string {
       return 'Shadow alert';
     case 'ap':
       return 'Access point';
+    case 'aggregate_group':
+      return 'Visual group';
     default:
       return kind.replaceAll('_', ' ');
   }

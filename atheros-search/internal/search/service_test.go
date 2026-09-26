@@ -223,3 +223,33 @@ func TestProxyResultMetadataIsReturned(t *testing.T) {
 	require.Equal(t, windowStart, result.WindowStart.AsTime())
 	require.Equal(t, windowEnd, result.WindowEnd.AsTime())
 }
+
+func TestExplainDetailsDistinguishesMissingFromUnrankedRecord(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	svc := &Service{Pool: database}
+
+	mock.ExpectQuery("SELECT source_kind").
+		WithArgs("present-key", "device").
+		WillReturnRows(sqlmock.NewRows([]string{"source_kind"}).AddRow("device"))
+	present, err := svc.ExplainDetails(context.Background(), &searchv1.ExplainRequest{
+		SourceKey: "present-key", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE,
+	})
+	require.NoError(t, err)
+	require.True(t, present.Found)
+	require.False(t, present.ScoresAvailable)
+	require.Equal(t, "device", present.SourceKind)
+
+	mock.ExpectQuery("SELECT source_kind").
+		WithArgs("missing-key", "device").
+		WillReturnRows(sqlmock.NewRows([]string{"source_kind"}))
+	missing, err := svc.ExplainDetails(context.Background(), &searchv1.ExplainRequest{
+		SourceKey: "missing-key", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE,
+	})
+	require.NoError(t, err)
+	require.False(t, missing.Found)
+	require.False(t, missing.ScoresAvailable)
+	require.Empty(t, missing.SourceKind)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

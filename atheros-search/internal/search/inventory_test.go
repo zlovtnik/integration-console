@@ -2,7 +2,9 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -33,6 +35,45 @@ func TestSimilarityInventoryIncludesPendingMergeCandidate(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestInventoryAllScopeReturnsBoundedDevicePage(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	now := time.Now()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM atheros_search.devices d`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM atheros_search.devices WHERE registered`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(`(?s)FROM atheros_search.devices d.*ORDER BY d.mac.*LIMIT \$1`).
+		WithArgs(3).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"mac", "display_name", "owner_id", "location_id", "first_registered", "last_seen",
+			"active", "registered", "tags", "known_macs",
+		}).AddRow("00:00:00:00:00:01", "one", "", "", now, now, true, true, "[]", "[]").
+			AddRow("00:00:00:00:00:02", "two", "", "", now, now, true, true, "[]", "[]").
+			AddRow("00:00:00:00:00:03", "three", "", "", now, now, false, false, "[]", "[]"))
+	mock.ExpectCommit()
+
+	page, err := (&Service{Pool: database}).Inventory(context.Background(), InventoryFilters{Scope: "all", PageSize: 2})
+	require.NoError(t, err)
+	require.Len(t, page.Nodes, 2)
+	require.NotEmpty(t, page.NextPageCursor)
+	require.Equal(t, 3, *page.TotalNodeCount)
+	require.Equal(t, 0, *page.TotalEdgeCount)
+	require.Equal(t, 3, *page.TotalDeviceCount)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestLegacyInventoryResponseOmitsPaginationFields(t *testing.T) {
+	encoded, err := json.Marshal(InventoryResponse{})
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "next_page_cursor")
+	require.NotContains(t, string(encoded), "total_node_count")
+	require.NotContains(t, string(encoded), "total_edge_count")
+	require.NotContains(t, string(encoded), "total_device_count")
+}
+
 func TestNormalizeInventoryFiltersDefaultsAndClamps(t *testing.T) {
 	got, err := normalizeInventoryFilters(InventoryFilters{
 		Grouping:    InventoryGroupingCMDB,
@@ -60,6 +101,15 @@ func TestNormalizeInventoryFiltersAcceptsSimilarity(t *testing.T) {
 	require.Equal(t, InventoryGroupingSimilarity, got.Grouping)
 	require.NotNil(t, got.MinDedupConfidence)
 	require.InDelta(t, 0.9, *got.MinDedupConfidence, 0.0001)
+}
+
+func TestNormalizeInventoryFiltersEnablesBoundedAllScope(t *testing.T) {
+	got, err := normalizeInventoryFilters(InventoryFilters{Scope: "all", PageSize: maxPageSize + 1})
+	require.NoError(t, err)
+	require.Equal(t, maxPageSize, got.PageSize)
+
+	_, err = normalizeInventoryFilters(InventoryFilters{PageCursor: "opaque"})
+	require.ErrorContains(t, err, "page_cursor requires scope all")
 }
 
 func TestInventoryDeviceTagsIncludeDerivedOperationalTags(t *testing.T) {

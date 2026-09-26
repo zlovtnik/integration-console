@@ -96,6 +96,10 @@ type RawInventoryResponse = Omit<
   nodeCount?: unknown;
   edgeCount?: unknown;
   totalRegisteredCount?: unknown;
+  totalDeviceCount?: unknown;
+  totalNodeCount?: unknown;
+  totalEdgeCount?: unknown;
+  nextPageCursor?: unknown;
   nodes?: unknown;
   edges?: unknown;
 };
@@ -409,6 +413,19 @@ export function normalizeExplainResponse(raw: RawExplainResponse): ExplainRespon
   if (sequenceTokens.length > 0) normalized.sequence_tokens = sequenceTokens;
   const detail = detailJson(raw.detail_json, raw.detailJson);
   if (detail) normalized.detail_json = detail;
+  const found = optionalBoolean(raw.found);
+  if (found !== undefined) normalized.found = found;
+  const scoresAvailable = optionalBoolean(
+    raw.scores_available,
+    raw.scoresAvailable,
+  );
+  if (scoresAvailable !== undefined) {
+    normalized.scores_available = scoresAvailable;
+  } else {
+    normalized.scores_available = found === undefined || found;
+  }
+  const sourceKind = firstString(raw.source_kind, raw.sourceKind);
+  if (sourceKind) normalized.source_kind = sourceKind;
   return normalized;
 }
 
@@ -489,7 +506,7 @@ export function normalizeInventoryResponse(
     normalizeInventoryEdge(edge as RawInventoryEdge),
   );
 
-  return {
+  const response: InventoryResponse = {
     nodes: normalizedNodes,
     edges: normalizedEdges,
     generated_at: firstString(raw.generated_at, raw.generatedAt),
@@ -509,6 +526,29 @@ export function normalizeInventoryResponse(
       normalizedNodes.filter((node) => node.kind === 'device').length,
     ),
   };
+  const nextPageCursor = firstString(
+    raw.next_page_cursor,
+    raw.nextPageCursor,
+  );
+  if (nextPageCursor) response.next_page_cursor = nextPageCursor;
+  const totalNodeCount = optionalNumber(
+    raw.total_node_count,
+    raw.totalNodeCount,
+  );
+  if (totalNodeCount !== undefined) response.total_node_count = totalNodeCount;
+  const totalEdgeCount = optionalNumber(
+    raw.total_edge_count,
+    raw.totalEdgeCount,
+  );
+  if (totalEdgeCount !== undefined) response.total_edge_count = totalEdgeCount;
+  const totalDeviceCount = optionalNumber(
+    raw.total_device_count,
+    raw.totalDeviceCount,
+  );
+  if (totalDeviceCount !== undefined) {
+    response.total_device_count = totalDeviceCount;
+  }
+  return response;
 }
 
 function abortSignalWithTimeout(
@@ -660,6 +700,22 @@ export const api = {
       signal,
     ),
 
+  graphPage: (
+    filters: GraphFilters,
+    pageCursor: string | undefined,
+    signal?: AbortSignal,
+  ) => {
+    const body: GraphFilters = { ...filters };
+    delete body.limit;
+    delete body.page_cursor;
+    if (pageCursor) body.page_cursor = pageCursor;
+    return request<GraphResponse>(
+      '/v1/graph',
+      { method: 'POST', body: JSON.stringify(prepareGraphFilters(body)) },
+      signal,
+    );
+  },
+
   inventory: async (filters: InventoryFilters, signal?: AbortSignal) =>
     normalizeInventoryResponse(
       await request<RawInventoryResponse>(
@@ -668,6 +724,24 @@ export const api = {
         signal,
       ),
     ),
+
+  inventoryPage: async (
+    filters: InventoryFilters,
+    pageCursor: string | undefined,
+    signal?: AbortSignal,
+  ) => {
+    const body: InventoryFilters = { ...filters };
+    delete body.limit;
+    delete body.page_cursor;
+    if (pageCursor) body.page_cursor = pageCursor;
+    return normalizeInventoryResponse(
+      await request<RawInventoryResponse>(
+        '/v1/inventory',
+        { method: 'POST', body: JSON.stringify(body) },
+        signal,
+      ),
+    );
+  },
 
   mergeDecision: (
     candidateId: string,

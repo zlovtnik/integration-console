@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,6 +29,9 @@ type GraphFilters struct {
 	ObservedBefore *time.Time `json:"observed_before,omitempty"`
 	Hops           int        `json:"hops,omitempty"`
 	Limit          int        `json:"limit,omitempty"`
+	Scope          string     `json:"scope,omitempty"`
+	PageCursor     string     `json:"page_cursor,omitempty"`
+	PageSize       int        `json:"page_size,omitempty"`
 }
 
 type GraphNode struct {
@@ -67,11 +71,14 @@ type GraphEdge struct {
 }
 
 type GraphResponse struct {
-	Nodes       []GraphNode `json:"nodes"`
-	Edges       []GraphEdge `json:"edges"`
-	GeneratedAt time.Time   `json:"generated_at"`
-	NodeCount   int         `json:"node_count"`
-	EdgeCount   int         `json:"edge_count"`
+	Nodes          []GraphNode `json:"nodes"`
+	Edges          []GraphEdge `json:"edges"`
+	GeneratedAt    time.Time   `json:"generated_at"`
+	NodeCount      int         `json:"node_count"`
+	EdgeCount      int         `json:"edge_count"`
+	NextPageCursor string      `json:"next_page_cursor,omitempty"`
+	TotalNodeCount *int        `json:"total_node_count,omitempty"`
+	TotalEdgeCount *int        `json:"total_edge_count,omitempty"`
 }
 
 // Graph queries projected identity-graph rows for the Integration Console.
@@ -79,6 +86,9 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (*GraphRespon
 	filters, err := normalizeGraphFilters(filters)
 	if err != nil {
 		return nil, err
+	}
+	if filters.Scope == "all" {
+		return s.graphPage(ctx, filters)
 	}
 
 	tx, err := s.Pool.BeginTx(ctx, nil)
@@ -162,6 +172,16 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (*GraphRespon
 }
 
 func normalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
+	filters.Scope = strings.TrimSpace(filters.Scope)
+	if filters.Scope != "" && filters.Scope != "all" {
+		return filters, fmt.Errorf("unsupported scope %q", filters.Scope)
+	}
+	if filters.Scope == "" && filters.PageCursor != "" {
+		return filters, errors.New("page_cursor requires scope all")
+	}
+	if filters.Scope == "all" {
+		filters.PageSize = normalizePageSize(filters.PageSize)
+	}
 	if filters.Limit <= 0 {
 		filters.Limit = graphDefaultLimit
 	}
@@ -212,6 +232,312 @@ func normalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
 		filters.Hops = graphMaxHops
 	}
 	return filters, nil
+}
+
+func (s *Service) graphPage(ctx context.Context, filters GraphFilters) (*GraphResponse, error) {
+	fingerprintFilters := filters
+	fingerprintFilters.PageCursor = ""
+	fingerprintFilters.PageSize = 0
+	fingerprintFilters.Limit = 0
+	fingerprint, err := pageFingerprint(fingerprintFilters)
+	if err != nil {
+		return nil, err
+	}
+	cursor, err := decodePageCursor(filters.PageCursor, "graph", fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.Pool.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	nodeWhere, nodeArgs := graphNodePageWhere(filters, "n")
+	focusIDs, err := graphFocusNodeIDs(ctx, tx, filters)
+	if err != nil {
+		return nil, err
+	}
+	if len(focusIDs) > 0 {
+		nodeWhere += " AND n.node_id IN (" + pgPlaceholders(len(nodeArgs)+1, len(focusIDs)) + ")"
+		nodeArgs = append(nodeArgs, focusIDs...)
+	}
+	var totalNodes int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM atheros_search.graph_nodes n WHERE `+nodeWhere, nodeArgs...).Scan(&totalNodes); err != nil {
+		return nil, err
+	}
+	totalEdges, err := countGraphPageEdges(ctx, tx, nodeWhere, nodeArgs, filters)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := []GraphNode{}
+	nodesMore := false
+	if !cursor.NodesDone {
+		pageWhere := nodeWhere
+		pageArgs := append([]any(nil), nodeArgs...)
+		if cursor.NodeAfter != "" {
+			pageWhere += fmt.Sprintf(" AND n.node_id > $%d", len(pageArgs)+1)
+			pageArgs = append(pageArgs, cursor.NodeAfter)
+		}
+		pageArgs = append(pageArgs, filters.PageSize+1)
+		rows, queryErr := tx.QueryContext(ctx, `
+SELECT n.node_id, n.node_kind, n.label, COALESCE(n.node_payload::text, '{}'),
+       n.location_id, n.sensor_id, n.normalized_mac, n.normalized_ssid,
+       n.is_threat, n.observed_at
+FROM atheros_search.graph_nodes n
+WHERE `+pageWhere+`
+ORDER BY n.node_id
+LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		for rows.Next() {
+			var row graphNodeRow
+			if err := rows.Scan(&row.NodeID, &row.NodeKind, &row.Label, &row.NodePayload, &row.LocationID, &row.SensorID, &row.NormalizedMAC, &row.NormalizedSSID, &row.IsThreat, &row.ObservedAt); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			nodes = append(nodes, graphNodeFromRow(row))
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if len(nodes) > filters.PageSize {
+			nodesMore = true
+			nodes = nodes[:filters.PageSize]
+		}
+	}
+
+	edges, edgesMore, err := fetchGraphEdgePage(ctx, tx, nodeWhere, nodeArgs, filters, cursor.EdgeAfter, cursor.EdgesDone)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	next := ""
+	if nodesMore || edgesMore {
+		cursor.NodesDone = !nodesMore
+		cursor.EdgesDone = !edgesMore
+		if len(nodes) > 0 {
+			cursor.NodeAfter = nodes[len(nodes)-1].ID
+		}
+		if len(edges) > 0 {
+			cursor.EdgeAfter = edges[len(edges)-1].ID
+		}
+		next, err = encodePageCursor(cursor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &GraphResponse{
+		Nodes: nodes, Edges: edges, GeneratedAt: time.Now().UTC(),
+		NodeCount: len(nodes), EdgeCount: len(edges), NextPageCursor: next,
+		TotalNodeCount: &totalNodes, TotalEdgeCount: &totalEdges,
+	}, nil
+}
+
+func graphNodePageWhere(filters GraphFilters, alias string) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	addInClause(&clauses, &args, alias+".location_id", stringsToAny(filters.LocationIDs))
+	addInClause(&clauses, &args, alias+".sensor_id", stringsToAny(filters.SensorIDs))
+	if filters.ThreatOnly {
+		clauses = append(clauses, alias+".is_threat")
+	}
+	if filters.SSID != "" {
+		clauses = append(clauses, fmt.Sprintf("%s.normalized_ssid = $%d", alias, len(args)+1))
+		args = append(args, filters.SSID)
+	}
+	if filters.ObservedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("%s.observed_at >= $%d", alias, len(args)+1))
+		args = append(args, *filters.ObservedAfter)
+	}
+	if filters.ObservedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("%s.observed_at < $%d", alias, len(args)+1))
+		args = append(args, *filters.ObservedBefore)
+	}
+	if len(filters.Kinds) > 0 {
+		mapped := make([]any, 0, len(filters.Kinds))
+		for _, kind := range filters.Kinds {
+			mapped = append(mapped, graphNodeKindToDB(kind))
+		}
+		addInClause(&clauses, &args, alias+".node_kind", mapped)
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+// graphFocusNodeIDs resolves the source MAC neighborhood within the filtered
+// graph so paginated scope:"all" requests keep the legacy focus contract.
+// It returns no IDs when the anchor node is absent from the filtered graph.
+func graphFocusNodeIDs(ctx context.Context, tx *sql.Tx, filters GraphFilters) ([]any, error) {
+	if filters.SourceMAC == "" {
+		return nil, nil
+	}
+	nodeWhere, nodeArgs := graphNodePageWhere(filters, "n")
+	mac := strings.ToLower(filters.SourceMAC)
+	anchorArgs := append(append([]any(nil), nodeArgs...), "device:"+mac, mac)
+	anchorPlaceholder := len(nodeArgs) + 1
+	var anchor string
+	err := tx.QueryRowContext(ctx, `
+SELECT n.node_id
+FROM atheros_search.graph_nodes n
+WHERE (`+nodeWhere+`)
+  AND (n.node_id = $`+fmt.Sprint(anchorPlaceholder)+`
+       OR lower(COALESCE(n.normalized_mac, '')) = $`+fmt.Sprint(anchorPlaceholder+1)+`)
+LIMIT 1`, anchorArgs...).Scan(&anchor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	visited := []string{anchor}
+	frontier := []string{anchor}
+	for hop := 0; hop < filters.Hops && len(frontier) > 0; hop++ {
+		neighbors, err := graphNeighborIDs(ctx, tx, filters, frontier, visited)
+		if err != nil {
+			return nil, err
+		}
+		if len(neighbors) == 0 {
+			break
+		}
+		visited = append(visited, neighbors...)
+		frontier = neighbors
+	}
+	ids := make([]any, 0, len(visited))
+	for _, id := range visited {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func graphNeighborIDs(ctx context.Context, tx *sql.Tx, filters GraphFilters, frontier, visited []string) ([]string, error) {
+	nodeWhere, nodeArgs := graphNodePageWhere(filters, "n")
+	frontierStart := len(nodeArgs) + 1
+	frontierPlaceholders := pgPlaceholders(frontierStart, len(frontier))
+	edgeClause := ""
+	var edgeArgs []any
+	if len(filters.EdgeKinds) > 0 {
+		mapped := make([]any, 0, len(filters.EdgeKinds))
+		for _, kind := range filters.EdgeKinds {
+			mapped = append(mapped, graphEdgeKindToDB(kind))
+		}
+		edgeClause = fmt.Sprintf(" AND e.edge_kind IN (%s)", pgPlaceholders(frontierStart+len(frontier), len(mapped)))
+		edgeArgs = mapped
+	}
+	visitedStart := frontierStart + len(frontier) + len(edgeArgs)
+	args := append([]any(nil), nodeArgs...)
+	args = append(args, stringsToAny(frontier)...)
+	args = append(args, edgeArgs...)
+	args = append(args, stringsToAny(visited)...)
+	rows, err := tx.QueryContext(ctx, `
+WITH filtered_nodes AS (
+  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+)
+SELECT DISTINCT step.neighbor
+FROM (
+  SELECT CASE
+           WHEN e.source_node_id IN (`+frontierPlaceholders+`) THEN e.target_node_id
+           ELSE e.source_node_id
+         END AS neighbor
+  FROM atheros_search.graph_edges e
+  JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
+  JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
+  WHERE (e.source_node_id IN (`+frontierPlaceholders+`)
+         OR e.target_node_id IN (`+frontierPlaceholders+`))`+edgeClause+`
+) step
+WHERE step.neighbor NOT IN (`+pgPlaceholders(visitedStart, len(visited))+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	neighbors := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		neighbors = append(neighbors, id)
+	}
+	return neighbors, rows.Err()
+}
+
+func graphEdgePageQueryParts(nodeWhere string, nodeArgs []any, filters GraphFilters) (string, []any, string) {
+	args := append([]any(nil), nodeArgs...)
+	edgeClauses := []string{"1 = 1"}
+	if len(filters.EdgeKinds) > 0 {
+		mapped := make([]any, 0, len(filters.EdgeKinds))
+		for _, kind := range filters.EdgeKinds {
+			mapped = append(mapped, graphEdgeKindToDB(kind))
+		}
+		addInClause(&edgeClauses, &args, "e.edge_kind", mapped)
+	}
+	return nodeWhere, args, strings.Join(edgeClauses, " AND ")
+}
+
+func countGraphPageEdges(ctx context.Context, tx *sql.Tx, nodeWhere string, nodeArgs []any, filters GraphFilters) (int, error) {
+	_, args, edgeWhere := graphEdgePageQueryParts(nodeWhere, nodeArgs, filters)
+	var count int
+	err := tx.QueryRowContext(ctx, `
+WITH filtered_nodes AS (
+  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+)
+SELECT COUNT(*)
+FROM atheros_search.graph_edges e
+JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
+JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
+WHERE `+edgeWhere, args...).Scan(&count)
+	return count, err
+}
+
+func fetchGraphEdgePage(ctx context.Context, tx *sql.Tx, nodeWhere string, nodeArgs []any, filters GraphFilters, after string, done bool) ([]GraphEdge, bool, error) {
+	if done {
+		return []GraphEdge{}, false, nil
+	}
+	_, args, edgeWhere := graphEdgePageQueryParts(nodeWhere, nodeArgs, filters)
+	if after != "" {
+		edgeWhere += fmt.Sprintf(" AND e.edge_id > $%d", len(args)+1)
+		args = append(args, after)
+	}
+	args = append(args, filters.PageSize+1)
+	rows, err := tx.QueryContext(ctx, `
+WITH filtered_nodes AS (
+  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+)
+SELECT e.edge_id, e.source_node_id, e.target_node_id, e.edge_kind, e.weight, e.weight_basis, e.label, e.observed_at
+FROM atheros_search.graph_edges e
+JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
+JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
+WHERE `+edgeWhere+`
+ORDER BY e.edge_id
+LIMIT $`+fmt.Sprint(len(args)), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	edges := make([]GraphEdge, 0, filters.PageSize+1)
+	for rows.Next() {
+		var row graphEdgeRow
+		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt); err != nil {
+			return nil, false, err
+		}
+		edges = append(edges, GraphEdge{ID: row.EdgeID, Source: row.SourceID, Target: row.TargetID, Kind: mapGraphEdgeKind(row.EdgeKind), Weight: &row.Weight, WeightBasis: row.WeightBasis.String, Label: row.Label.String})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(edges) > filters.PageSize
+	if more {
+		edges = edges[:filters.PageSize]
+	}
+	return edges, more, nil
 }
 
 func mapGraphNodeKind(kind string) string {
@@ -411,14 +737,14 @@ func graphNodeFromRow(row graphNodeRow) GraphNode {
 }
 
 type graphEdgeRow struct {
-	EdgeID     string
-	SourceID   string
-	TargetID   string
-	EdgeKind   string
-	Weight     float64
+	EdgeID      string
+	SourceID    string
+	TargetID    string
+	EdgeKind    string
+	Weight      float64
 	WeightBasis sql.NullString
-	Label      sql.NullString
-	ObservedAt sql.NullTime
+	Label       sql.NullString
+	ObservedAt  sql.NullTime
 }
 
 func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, nodes []GraphNode) ([]GraphEdge, error) {

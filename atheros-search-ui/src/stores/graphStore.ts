@@ -32,6 +32,11 @@ export const GRAPH_EDGE_KINDS: EdgeKind[] = [
 
 export const GRAPH_LIMITS = [50, 100, 200, 500] as const;
 
+/** Sentinel scope covering the complete filtered inventory. */
+export const GRAPH_SCOPE_ALL = 'all' as const;
+
+export type GraphLimit = (typeof GRAPH_LIMITS)[number] | typeof GRAPH_SCOPE_ALL;
+
 function defaultVisibleKinds(): Set<NodeKind> {
   return new Set(GRAPH_NODE_KINDS);
 }
@@ -57,8 +62,14 @@ export const [graphMeta, setGraphMeta] = createStore<Partial<GraphResponse>>(
 );
 export const [graphLoading, setGraphLoading] = createSignal(false);
 export const [graphError, setGraphError] = createSignal<string | null>(null);
+/** Loading progress for scope "all" (loaded vs total device coverage). */
+export const [graphCoverage, setGraphCoverage] = createSignal<{
+  loadedNodes: number;
+  totalNodes: number;
+  complete: boolean;
+} | null>(null);
 export const [graphFilters, setGraphFilters] = createStore<GraphFilters>({
-  limit: 200,
+  scope: GRAPH_SCOPE_ALL,
 });
 export const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(
   null,
@@ -110,7 +121,7 @@ export function setGraphEdgeKindVisibility(
 }
 
 export function resetGraphFilters() {
-  setGraphFilters(reconcile({ limit: 200 }));
+  setGraphFilters(reconcile({ scope: GRAPH_SCOPE_ALL }));
   setVisibleGraphKinds(defaultVisibleKinds());
   setVisibleGraphEdgeKinds(defaultVisibleEdgeKinds());
 }
@@ -210,9 +221,11 @@ export function deleteGraphSavedView(name: string): GraphSavedView[] {
 }
 
 export function applyGraphSavedView(view: GraphSavedView) {
-  setGraphFilters(
-    reconcile({ limit: 200, ...view.filters } as GraphFilters),
-  );
+  const filters: GraphFilters = { ...view.filters };
+  if (!filters.limit && !filters.scope) {
+    filters.scope = GRAPH_SCOPE_ALL;
+  }
+  setGraphFilters(reconcile(filters));
   setVisibleGraphKinds(
     view.visible_kinds.length > 0
       ? new Set(view.visible_kinds)
@@ -231,4 +244,5 @@ export function clearGraph() {
   setGraphMeta(reconcile({}));
   setGraphError(null);
   setSelectedNodeId(null);
+  setGraphCoverage(null);
 }

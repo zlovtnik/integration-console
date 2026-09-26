@@ -84,9 +84,10 @@ export function buildGraphRenderModel(
     const summaryId = `aggregate:${apID}`;
     const summary: GraphNode = {
       id: summaryId,
-      kind: 'cluster',
+      kind: 'aggregate_group',
       label: `devices near ${apID.replace('ap:', '')} (${group.members.length})`,
       bssid: apID.replace('ap:', ''),
+      occurrence_count: group.members.length,
       tags: ['aggregate'],
     };
     renderedNodes.push(summary);

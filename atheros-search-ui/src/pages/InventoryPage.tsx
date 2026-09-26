@@ -33,6 +33,9 @@ function snapshotFilters(): InventoryFilters {
         ? 'similarity'
         : inventoryFilters.grouping,
   };
+  if (inventoryFilters.scope !== undefined) {
+    filters.scope = inventoryFilters.scope;
+  }
   if (inventoryFilters.owner_ids) {
     filters.owner_ids = [...inventoryFilters.owner_ids];
   }
@@ -56,7 +59,7 @@ export default function InventoryPage() {
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
   const { ready } = useInventoryUrlSync();
-  const { load, decideMerge } = useInventory();
+  const { load, decideMerge, loadDedupQueue, cancelDedupQueue } = useInventory();
 
   const graph = useInventoryGraph(
     () => svgRef,
@@ -90,7 +93,8 @@ export default function InventoryPage() {
       active_only: inventoryFilters.active_only ?? false,
       min_dedup_confidence: inventoryFilters.min_dedup_confidence ?? 0,
       tags: inventoryFilters.tags ?? [],
-      limit: inventoryFilters.limit ?? 400,
+      scope: inventoryFilters.scope ?? '',
+      limit: inventoryFilters.limit ?? 0,
     }),
   );
 
@@ -120,7 +124,10 @@ export default function InventoryPage() {
 
   createEffect(
     on(ready, (isReady) => {
-      if (isReady) void load(snapshotFilters());
+      if (isReady) {
+        void load(snapshotFilters());
+        if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
+      }
     }),
   );
 
@@ -132,6 +139,7 @@ export default function InventoryPage() {
         window.clearTimeout(filterReloadTimer);
         filterReloadTimer = window.setTimeout(() => {
           void load(snapshotFilters());
+          if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
         }, 250);
       },
       { defer: true },
@@ -151,7 +159,10 @@ export default function InventoryPage() {
     ),
   );
 
-  onCleanup(() => window.clearTimeout(filterReloadTimer));
+  onCleanup(() => {
+    window.clearTimeout(filterReloadTimer);
+    cancelDedupQueue();
+  });
 
   function queueGraphRebuild() {
     if (rebuildQueued) return;

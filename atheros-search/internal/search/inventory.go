@@ -51,6 +51,9 @@ type InventoryFilters struct {
 	MinDedupConfidence *float64          `json:"min_dedup_confidence,omitempty"`
 	Tags               []string          `json:"tags,omitempty"`
 	Limit              int               `json:"limit,omitempty"`
+	Scope              string            `json:"scope,omitempty"`
+	PageCursor         string            `json:"page_cursor,omitempty"`
+	PageSize           int               `json:"page_size,omitempty"`
 }
 
 type InventoryNode struct {
@@ -85,6 +88,10 @@ type InventoryResponse struct {
 	NodeCount            int             `json:"node_count"`
 	EdgeCount            int             `json:"edge_count"`
 	TotalRegisteredCount int             `json:"total_registered_count"`
+	NextPageCursor       string          `json:"next_page_cursor,omitempty"`
+	TotalNodeCount       *int            `json:"total_node_count,omitempty"`
+	TotalEdgeCount       *int            `json:"total_edge_count,omitempty"`
+	TotalDeviceCount     *int            `json:"total_device_count,omitempty"`
 }
 
 type inventoryDeviceRow struct {
@@ -104,6 +111,9 @@ func (s *Service) Inventory(ctx context.Context, filters InventoryFilters) (*Inv
 	filters, err := normalizeInventoryFilters(filters)
 	if err != nil {
 		return nil, err
+	}
+	if filters.Scope == "all" {
+		return s.inventoryPage(ctx, filters)
 	}
 	tx, err := s.Pool.BeginTx(ctx, nil)
 	if err != nil {
@@ -299,6 +309,16 @@ func inventoryTagsMatch(actual, required []string) bool {
 }
 
 func normalizeInventoryFilters(filters InventoryFilters) (InventoryFilters, error) {
+	filters.Scope = strings.TrimSpace(filters.Scope)
+	if filters.Scope != "" && filters.Scope != "all" {
+		return filters, fmt.Errorf("unsupported scope %q", filters.Scope)
+	}
+	if filters.Scope == "" && filters.PageCursor != "" {
+		return filters, fmt.Errorf("page_cursor requires scope all")
+	}
+	if filters.Scope == "all" {
+		filters.PageSize = normalizePageSize(filters.PageSize)
+	}
 	if filters.Grouping == "" {
 		filters.Grouping = InventoryGroupingRegistry
 	}
@@ -327,6 +347,278 @@ func normalizeInventoryFilters(filters InventoryFilters) (InventoryFilters, erro
 	filters.OwnerIDs = normalizeGraphList(filters.OwnerIDs)
 	filters.Tags = normalizeLowerList(filters.Tags)
 	return filters, nil
+}
+
+func (s *Service) inventoryPage(ctx context.Context, filters InventoryFilters) (*InventoryResponse, error) {
+	fingerprintFilters := filters
+	fingerprintFilters.PageCursor = ""
+	fingerprintFilters.PageSize = 0
+	fingerprintFilters.Limit = 0
+	fingerprint, err := pageFingerprint(fingerprintFilters)
+	if err != nil {
+		return nil, err
+	}
+	cursor, err := decodePageCursor(filters.PageCursor, "inventory", fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.Pool.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	where, args := inventoryPageWhere(filters, "d")
+	var totalDevices, totalRegistered int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM atheros_search.devices d WHERE `+where, args...).Scan(&totalDevices); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM atheros_search.devices WHERE registered").Scan(&totalRegistered); err != nil {
+		return nil, err
+	}
+	totalNodes, totalEdges, err := inventoryPageTotals(ctx, tx, filters, where, args, totalDevices)
+	if err != nil {
+		return nil, err
+	}
+
+	pageWhere := where
+	pageArgs := append([]any(nil), args...)
+	if cursor.DeviceAfter != "" {
+		pageWhere += fmt.Sprintf(" AND d.mac > $%d", len(pageArgs)+1)
+		pageArgs = append(pageArgs, cursor.DeviceAfter)
+	}
+	pageArgs = append(pageArgs, filters.PageSize+1)
+	rows, err := tx.QueryContext(ctx, `
+SELECT d.mac, COALESCE(d.display_name, ''), COALESCE(d.owner_id, ''), COALESCE(d.location_id, ''),
+       d.first_registered, d.last_seen, d.active, d.registered,
+       COALESCE(d.tags::text, '[]'), COALESCE(d.known_macs::text, '[]')
+FROM atheros_search.devices d
+WHERE `+pageWhere+`
+ORDER BY d.mac
+LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)
+	if err != nil {
+		return nil, err
+	}
+	devices := make([]inventoryDeviceRow, 0, filters.PageSize+1)
+	for rows.Next() {
+		var row inventoryDeviceRow
+		var first, last sql.NullTime
+		var tagsJSON, knownMACsJSON string
+		if err := rows.Scan(&row.MAC, &row.DisplayName, &row.OwnerID, &row.LocationID, &first, &last, &row.Active, &row.Registered, &tagsJSON, &knownMACsJSON); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		row.FirstRegistered = nullTimePtr(first)
+		row.LastSeen = nullTimePtr(last)
+		row.Tags = parseTagsJSON(tagsJSON)
+		_ = json.Unmarshal([]byte(knownMACsJSON), &row.KnownMACs)
+		row.Tags = inventoryDeviceTags(&row)
+		devices = append(devices, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	more := len(devices) > filters.PageSize
+	if more {
+		devices = devices[:filters.PageSize]
+	}
+
+	nodeMap := map[string]InventoryNode{}
+	edgeMap := map[string]InventoryEdge{}
+	for _, device := range devices {
+		addInventoryDevice(nodeMap, edgeMap, device, filters.Grouping)
+	}
+	if filters.Grouping == InventoryGroupingSimilarity {
+		if err := attachSimilarityInventoryPage(ctx, tx, nodeMap, edgeMap, filters, devices); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	nodes := make([]InventoryNode, 0, len(nodeMap))
+	for _, node := range nodeMap {
+		nodes = append(nodes, node)
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	edges := make([]InventoryEdge, 0, len(edgeMap))
+	for _, edge := range edgeMap {
+		edges = append(edges, edge)
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
+
+	next := ""
+	if more {
+		cursor.DeviceAfter = devices[len(devices)-1].MAC
+		next, err = encodePageCursor(cursor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &InventoryResponse{
+		Nodes: nodes, Edges: edges, GeneratedAt: time.Now().UTC(), NodeCount: len(nodes), EdgeCount: len(edges),
+		TotalRegisteredCount: totalRegistered, NextPageCursor: next,
+		TotalNodeCount: &totalNodes, TotalEdgeCount: &totalEdges, TotalDeviceCount: &totalDevices,
+	}, nil
+}
+
+func inventoryPageWhere(filters InventoryFilters, alias string) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	addInClause(&clauses, &args, alias+".location_id", stringsToAny(filters.LocationIDs))
+	addInClause(&clauses, &args, alias+".owner_id", stringsToAny(filters.OwnerIDs))
+	if filters.ActiveOnly {
+		clauses = append(clauses, alias+".active")
+	}
+	for _, tag := range filters.Tags {
+		switch {
+		case tag == "device":
+		case tag == "registered":
+			clauses = append(clauses, alias+".registered")
+		case tag == "active":
+			clauses = append(clauses, alias+".active")
+		case strings.HasPrefix(tag, "owner:"):
+			clauses = append(clauses, fmt.Sprintf("lower(COALESCE(%s.owner_id, '')) = $%d", alias, len(args)+1))
+			args = append(args, strings.TrimPrefix(tag, "owner:"))
+		case strings.HasPrefix(tag, "location:"):
+			clauses = append(clauses, fmt.Sprintf("lower(COALESCE(%s.location_id, '')) = $%d", alias, len(args)+1))
+			args = append(args, strings.TrimPrefix(tag, "location:"))
+		default:
+			clauses = append(clauses, fmt.Sprintf("EXISTS (SELECT 1 FROM jsonb_array_elements_text(%s.tags) AS stored_tag(value) WHERE lower(stored_tag.value) = $%d)", alias, len(args)+1))
+			args = append(args, tag)
+		}
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func inventoryPageTotals(ctx context.Context, tx *sql.Tx, filters InventoryFilters, where string, args []any, totalDevices int) (int, int, error) {
+	switch filters.Grouping {
+	case InventoryGroupingRegistry:
+		return totalDevices, 0, nil
+	case InventoryGroupingCMDB:
+		var owners, locations, ownerEdges, locationEdges int
+		err := tx.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT NULLIF(d.owner_id, '')), COUNT(DISTINCT NULLIF(d.location_id, '')),
+       COUNT(*) FILTER (WHERE COALESCE(d.owner_id, '') <> ''),
+       COUNT(*) FILTER (WHERE COALESCE(d.location_id, '') <> '')
+FROM atheros_search.devices d WHERE `+where, args...).Scan(&owners, &locations, &ownerEdges, &locationEdges)
+		return totalDevices + owners + locations, ownerEdges + locationEdges, err
+	case InventoryGroupingSimilarity:
+		whereB := strings.ReplaceAll(where, "d.", "db.")
+		whereA := strings.ReplaceAll(where, "d.", "da.")
+		var candidates int
+		err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM atheros_search.merge_candidates mc
+JOIN atheros_search.devices da ON da.mac = mc.mac_a
+JOIN atheros_search.devices db ON db.mac = mc.mac_b
+WHERE mc.status = 'pending' AND (mc.expires_at IS NULL OR mc.expires_at > CURRENT_TIMESTAMP)
+  AND mc.confidence >= $`+fmt.Sprint(len(args)+1)+`
+  AND (`+whereA+`) AND (`+whereB+`)`, append(args, minimumInventoryConfidence(filters))...).Scan(&candidates)
+		return totalDevices + candidates*2, candidates * 5, err
+	default:
+		return totalDevices, 0, nil
+	}
+}
+
+func minimumInventoryConfidence(filters InventoryFilters) float64 {
+	if filters.MinDedupConfidence == nil {
+		return 0
+	}
+	return *filters.MinDedupConfidence
+}
+
+func attachSimilarityInventoryPage(ctx context.Context, tx *sql.Tx, nodes map[string]InventoryNode, edges map[string]InventoryEdge, filters InventoryFilters, devices []inventoryDeviceRow) error {
+	if len(devices) == 0 {
+		return nil
+	}
+	where, args := inventoryPageWhere(filters, "da")
+	whereB := strings.ReplaceAll(where, "da.", "db.")
+	macs := make([]any, 0, len(devices))
+	for _, device := range devices {
+		macs = append(macs, device.MAC)
+	}
+	confidencePlaceholder := len(args) + 1
+	args = append(args, minimumInventoryConfidence(filters))
+	anchorPlaceholders := pgPlaceholders(len(args)+1, len(macs))
+	args = append(args, macs...)
+	rows, err := tx.QueryContext(ctx, `
+SELECT mc.candidate_id, mc.mac_a, mc.mac_b, mc.confidence,
+       other.mac, COALESCE(other.display_name, ''), COALESCE(other.owner_id, ''), COALESCE(other.location_id, ''),
+       other.first_registered, other.last_seen, other.active, other.registered,
+       COALESCE(other.tags::text, '[]'), COALESCE(other.known_macs::text, '[]')
+FROM atheros_search.merge_candidates mc
+JOIN atheros_search.devices da ON da.mac = mc.mac_a
+JOIN atheros_search.devices db ON db.mac = mc.mac_b
+JOIN atheros_search.devices other ON other.mac = GREATEST(mc.mac_a, mc.mac_b)
+WHERE mc.status = 'pending'
+  AND mc.confidence >= $`+fmt.Sprint(confidencePlaceholder)+`
+  AND (mc.expires_at IS NULL OR mc.expires_at > CURRENT_TIMESTAMP)
+  AND (`+where+`) AND (`+whereB+`)
+  AND LEAST(mc.mac_a, mc.mac_b) IN (`+anchorPlaceholders+`)
+ORDER BY LEAST(mc.mac_a, mc.mac_b), mc.candidate_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var candidate pendingInventoryCandidate
+		var other inventoryDeviceRow
+		var first, last sql.NullTime
+		var tagsJSON, knownMACsJSON string
+		if err := rows.Scan(
+			&candidate.id, &candidate.macA, &candidate.macB, &candidate.confidence,
+			&other.MAC, &other.DisplayName, &other.OwnerID, &other.LocationID,
+			&first, &last, &other.Active, &other.Registered, &tagsJSON, &knownMACsJSON,
+		); err != nil {
+			return err
+		}
+		other.FirstRegistered = nullTimePtr(first)
+		other.LastSeen = nullTimePtr(last)
+		other.Tags = parseTagsJSON(tagsJSON)
+		_ = json.Unmarshal([]byte(knownMACsJSON), &other.KnownMACs)
+		other.Tags = inventoryDeviceTags(&other)
+		addInventoryDevice(nodes, edges, other, InventoryGroupingSimilarity)
+		addSimilarityCandidate(nodes, edges, candidate)
+	}
+	return rows.Err()
+}
+
+type pendingInventoryCandidate struct {
+	id         string
+	macA       string
+	macB       string
+	confidence float64
+}
+
+func addSimilarityCandidate(nodes map[string]InventoryNode, edges map[string]InventoryEdge, candidate pendingInventoryCandidate) {
+	deviceAID := "device:" + strings.ToLower(candidate.macA)
+	deviceBID := "device:" + strings.ToLower(candidate.macB)
+	deviceA, hasA := nodes[deviceAID]
+	deviceB, hasB := nodes[deviceBID]
+	if !hasA || !hasB {
+		return
+	}
+	confidence := candidate.confidence
+	candidateID := "merge:" + candidate.id
+	clusterID := "cluster:" + candidate.id
+	nodes[candidateID] = InventoryNode{ID: candidateID, Kind: InventoryNodeMergeCandidate, Label: candidate.macA + " / " + candidate.macB, Active: true, SimilarityClusterID: candidate.id, DedupConfidence: &confidence, Tags: []string{"merge-review"}}
+	nodes[clusterID] = InventoryNode{ID: clusterID, Kind: InventoryNodeCluster, Label: "Similarity " + candidate.id[:minInt(8, len(candidate.id))], Active: true, SimilarityClusterID: candidate.id, Tags: []string{"similarity:pending"}}
+	deviceA.SimilarityClusterID = candidate.id
+	deviceA.DedupConfidence = &confidence
+	nodes[deviceAID] = deviceA
+	deviceB.SimilarityClusterID = candidate.id
+	deviceB.DedupConfidence = &confidence
+	nodes[deviceBID] = deviceB
+	edges["merge_candidate:"+candidateID+":"+deviceAID] = InventoryEdge{ID: "merge_candidate:" + candidateID + ":" + deviceAID, Source: candidateID, Target: deviceAID, Kind: InventoryEdgeMergeCandidate, Weight: &confidence}
+	edges["merge_candidate:"+candidateID+":"+deviceBID] = InventoryEdge{ID: "merge_candidate:" + candidateID + ":" + deviceBID, Source: candidateID, Target: deviceBID, Kind: InventoryEdgeMergeCandidate, Weight: &confidence}
+	edges["same_device:"+deviceAID+":"+deviceBID] = InventoryEdge{ID: "same_device:" + deviceAID + ":" + deviceBID, Source: deviceAID, Target: deviceBID, Kind: InventoryEdgeSameDevice, Weight: &confidence}
+	edges["cluster_member:"+clusterID+":"+deviceAID] = InventoryEdge{ID: "cluster_member:" + clusterID + ":" + deviceAID, Source: deviceAID, Target: clusterID, Kind: InventoryEdgeClusterMember, Weight: &confidence}
+	edges["cluster_member:"+clusterID+":"+deviceBID] = InventoryEdge{ID: "cluster_member:" + clusterID + ":" + deviceBID, Source: deviceBID, Target: clusterID, Kind: InventoryEdgeClusterMember, Weight: &confidence}
 }
 
 func attachSimilarityInventory(ctx context.Context, tx *sql.Tx, nodes map[string]InventoryNode, edges map[string]InventoryEdge, filters InventoryFilters) error {

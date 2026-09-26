@@ -8,8 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search"
 )
 
 func TestPublicV1HealthzRoute(t *testing.T) {
@@ -42,6 +45,7 @@ func TestHTTPStatusFromError(t *testing.T) {
 		{name: "canceled", err: context.Canceled, want: http.StatusGatewayTimeout},
 		{name: "too large", err: errors.New("request body too large"), want: http.StatusRequestEntityTooLarge},
 		{name: "inventory validation", err: errors.New("unsupported inventory grouping \"topology\""), want: http.StatusBadRequest},
+		{name: "cursor validation", err: errors.New("invalid page_cursor"), want: http.StatusBadRequest},
 		{name: "range validation", err: errors.New("observed_after must be before observed_before"), want: http.StatusBadRequest},
 		{name: "search query validation", err: errors.New("search query is required and must contain meaningful terms"), want: http.StatusBadRequest},
 		{name: "merge decision validation", err: errors.New("unsupported merge decision \"undo_merge\""), want: http.StatusBadRequest},
@@ -75,4 +79,31 @@ func TestWriteErrorRedactsServerFailures(t *testing.T) {
 	var clientBody map[string]string
 	require.NoError(t, json.Unmarshal(clientFailure.Body.Bytes(), &clientBody))
 	require.Equal(t, "source_key is required", clientBody["error"])
+}
+
+func TestExplainHTTPReturnsDirectRecordAvailability(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	mock.ExpectQuery("SELECT source_kind").
+		WithArgs("device-key", "device").
+		WillReturnRows(sqlmock.NewRows([]string{"source_kind"}).AddRow("device"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := StartHTTP(ctx, 0, nil, &search.Service{Pool: database}, nil, nil, nil, false, zerolog.Nop())
+	require.NoError(t, err)
+	defer server.Close()
+
+	request := httptest.NewRequest(http.MethodGet, "https://gateway.rclabs.uk/v1/explain/device-key?kind=device", nil)
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{
+		"sourceKey":"device-key",
+		"found":true,
+		"scores_available":false,
+		"source_kind":"device"
+	}`, response.Body.String())
+	require.NoError(t, mock.ExpectationsWereMet())
 }

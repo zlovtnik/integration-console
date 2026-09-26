@@ -276,16 +276,18 @@ export function useInventoryGraph(
     if (!el || !visible) return;
     const visibleKinds = visible;
 
+    function kindIsVisible(kind: InventoryNodeKind): boolean {
+      return kind === 'aggregate_group' || visibleKinds.has(kind);
+    }
+
     d3.select(el)
       .selectAll<SVGGElement, InventorySimNode>('.inventory-node')
-      .style('display', (item) =>
-        visibleKinds.has(item.kind) ? null : 'none',
-      );
+      .style('display', (item) => (kindIsVisible(item.kind) ? null : 'none'));
 
     function edgeIsVisible(edge: InventorySimEdge): boolean {
       return (
-        visibleKinds.has(endpointKind(edge.source)) &&
-        visibleKinds.has(endpointKind(edge.target))
+        kindIsVisible(endpointKind(edge.source)) &&
+        kindIsVisible(endpointKind(edge.target))
       );
     }
 
@@ -429,7 +431,7 @@ export function buildInventoryRenderModel(
     const summaryId = `aggregate:${groupId}`;
     const summary: InventoryRenderNode = {
       id: summaryId,
-      kind: 'cluster',
+      kind: 'aggregate_group',
       label: `${inventoryGroupLabel(groupId, grouping, sourceById)} (${members.length})`,
       active: members.some((member) => member.active),
       aggregate_group_id: groupId,
@@ -460,9 +462,10 @@ export function buildInventoryRenderModel(
 }
 
 function inventoryGroupId(
-  node: InventoryNode,
+  node: InventoryRenderNode,
   grouping: InventoryGrouping,
 ): string {
+  if (node.aggregate_group_id) return node.aggregate_group_id;
   if (grouping === 'similarity') {
     if (node.kind === 'cluster') {
       return `similarity:${node.similarity_cluster_id || node.id.replace('cluster:', '')}`;
@@ -576,6 +579,8 @@ function inventoryNodeShapePath(node: InventoryRenderNode): string {
       return `M${-r},${-r}L${r},${-r}L${r},${r}L${-r},${r}Z`;
     case 'cluster':
       return polygonPath(r, 6);
+    case 'aggregate_group':
+      return polygonPath(r, 5);
     case 'merge_candidate':
       return polygonPath(r * 1.15, 3, Math.PI / 2);
     default:
@@ -595,6 +600,8 @@ export function inventoryNodeColor(
       return 'var(--color-ok)';
     case 'cluster':
       return 'var(--score-dense)';
+    case 'aggregate_group':
+      return 'var(--color-text-tertiary)';
     case 'merge_candidate':
       return 'var(--color-warn)';
     default:
@@ -608,6 +615,8 @@ export function inventoryNodeKindLabel(kind: InventoryNodeKind): string {
       return 'Location';
     case 'merge_candidate':
       return 'Merge candidate';
+    case 'aggregate_group':
+      return 'Visual group';
     default:
       return kind.replaceAll('_', ' ');
   }

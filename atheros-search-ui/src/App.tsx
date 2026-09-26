@@ -4,6 +4,7 @@ import { AppShell } from '~/components/AppShell';
 import { AuthGate } from '~/components/AuthGate';
 
 const SearchPage = lazy(() => import('~/pages/SearchPage'));
+const CallbackPage = lazy(() => import('~/pages/CallbackPage'));
 const ExplainPage = lazy(() => import('~/pages/ExplainPage'));
 const GraphPage = lazy(() => import('~/pages/GraphPage'));
 const InventoryPage = lazy(() => import('~/pages/InventoryPage'));
@@ -20,7 +21,7 @@ export default function App() {
     <Router>
       <Route component={AuthenticatedAppShell}>
         <Route path="/" component={SearchPage} />
-        <Route path="/callback" component={SearchPage} />
+        <Route path="/callback" component={CallbackPage} />
         <Route path="/graph" component={GraphPage} />
         <Route path="/inventory" component={InventoryPage} />
         <Route path="/explain/:sourceKey" component={ExplainPage} />

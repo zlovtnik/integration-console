@@ -15,7 +15,9 @@ func TestDenseKindQueryScopesSharedEmbeddingsBySourceKind(t *testing.T) {
 	require.Greater(t, innerStart, -1)
 	require.Greater(t, innerEnd, innerStart)
 	inner := query[innerStart:innerEnd]
-	require.Contains(t, inner, "ORDER BY embedding_row.embedding <=> $1::public.vector ASC")
+	require.Contains(t, query, "embedding_row.embedding OPERATOR(public.<=>) $1::public.vector AS cosine_distance")
+	require.Contains(t, inner, "ORDER BY embedding_row.embedding OPERATOR(public.<=>) $1::public.vector ASC")
+	require.NotContains(t, inner, "embedding_row.embedding <=>")
 	require.Contains(t, inner, "LIMIT $2")
 	require.Contains(t, inner, "embedding_model = $3")
 	require.Contains(t, inner, "embedding_kind = $4")

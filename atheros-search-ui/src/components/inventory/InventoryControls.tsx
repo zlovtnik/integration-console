@@ -2,6 +2,8 @@ import { For } from 'solid-js';
 import { LocateFixed, RefreshCw, RotateCcw } from 'lucide-solid';
 import {
   INVENTORY_LIMITS,
+  INVENTORY_SCOPE_ALL,
+  inventoryCoverage,
   inventoryFilters,
   inventoryLoading,
   inventoryMeta,
@@ -51,6 +53,19 @@ function limitIndex(): number {
     (inventoryFilters.limit ?? 400) as (typeof INVENTORY_LIMITS)[number],
   );
   return index >= 0 ? index : 2;
+}
+
+function coverageLabel(): string {
+  const coverage = inventoryCoverage();
+  if (!coverage) return '';
+  const total = coverage.totalDevices;
+  if (coverage.complete && total > 0) {
+    return `All ${total} devices`;
+  }
+  if (total > 0) {
+    return `${coverage.loadedNodes} / ${total} loaded`;
+  }
+  return `${coverage.loadedNodes} loaded`;
 }
 
 function confidencePercent(): string {
@@ -192,19 +207,34 @@ export function InventoryControls(props: {
         </label>
 
         <label class="field graph-limit-field">
-          <span>Limit {inventoryFilters.limit ?? 400}</span>
+          <span>
+            {inventoryFilters.scope === INVENTORY_SCOPE_ALL
+              ? 'Devices All'
+              : `Limit ${inventoryFilters.limit ?? 400}`}
+          </span>
           <input
             type="range"
             min="0"
-            max={String(INVENTORY_LIMITS.length - 1)}
+            max={String(INVENTORY_LIMITS.length)}
             step="1"
-            value={limitIndex()}
-            onInput={(event) =>
-              setInventoryFilters(
-                'limit',
-                INVENTORY_LIMITS[Number(event.currentTarget.value)] ?? 400,
-              )
+            value={
+              inventoryFilters.scope === INVENTORY_SCOPE_ALL
+                ? String(INVENTORY_LIMITS.length)
+                : limitIndex()
             }
+            onInput={(event) => {
+              const index = Number(event.currentTarget.value);
+              if (index >= INVENTORY_LIMITS.length) {
+                setInventoryFilters('limit', undefined);
+                setInventoryFilters('scope', INVENTORY_SCOPE_ALL);
+              } else {
+                setInventoryFilters('scope', undefined);
+                setInventoryFilters(
+                  'limit',
+                  INVENTORY_LIMITS[index] ?? 400,
+                );
+              }
+            }}
           />
         </label>
 
@@ -212,6 +242,7 @@ export function InventoryControls(props: {
           <strong>{inventoryMeta.node_count ?? 0}</strong> nodes
           <strong>{inventoryMeta.edge_count ?? 0}</strong> edges
           <strong>{inventoryMeta.total_registered_count ?? 0}</strong> devices
+          {coverageLabel() ? <span>{coverageLabel()}</span> : null}
         </span>
 
         <button

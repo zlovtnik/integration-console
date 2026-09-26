@@ -4,8 +4,10 @@ import {
   GRAPH_EDGE_KINDS,
   GRAPH_LIMITS,
   GRAPH_NODE_KINDS,
+  GRAPH_SCOPE_ALL,
   applyGraphSavedView,
   deleteGraphSavedView,
+  graphCoverage,
   graphFilters,
   graphLoading,
   graphMeta,
@@ -43,6 +45,18 @@ function limitIndex(): number {
     (graphFilters.limit ?? 200) as (typeof GRAPH_LIMITS)[number],
   );
   return index >= 0 ? index : 2;
+}
+
+function coverageLabel(): string {
+  const coverage = graphCoverage();
+  if (!coverage) return '';
+  if (coverage.complete && coverage.totalNodes > 0) {
+    return `All ${coverage.totalNodes} loaded`;
+  }
+  if (coverage.totalNodes > 0) {
+    return `${coverage.loadedNodes} / ${coverage.totalNodes} loaded`;
+  }
+  return `${coverage.loadedNodes} loaded`;
 }
 
 export function GraphControls(props: {
@@ -294,25 +308,41 @@ export function GraphControls(props: {
         </label>
 
         <label class="field graph-limit-field">
-          <span>Limit {graphFilters.limit ?? 200}</span>
+          <span>
+            {graphFilters.scope === GRAPH_SCOPE_ALL
+              ? 'Devices All'
+              : `Limit ${graphFilters.limit ?? 200}`}
+          </span>
           <input
             type="range"
             min="0"
-            max={String(GRAPH_LIMITS.length - 1)}
+            max={String(GRAPH_LIMITS.length)}
             step="1"
-            value={limitIndex()}
-            onInput={(event) =>
-              setGraphFilters(
-                'limit',
-                GRAPH_LIMITS[Number(event.currentTarget.value)] ?? 200,
-              )
+            value={
+              graphFilters.scope === GRAPH_SCOPE_ALL
+                ? String(GRAPH_LIMITS.length)
+                : limitIndex()
             }
+            onInput={(event) => {
+              const index = Number(event.currentTarget.value);
+              if (index >= GRAPH_LIMITS.length) {
+                setGraphFilters('limit', undefined);
+                setGraphFilters('scope', GRAPH_SCOPE_ALL);
+              } else {
+                setGraphFilters('scope', undefined);
+                setGraphFilters(
+                  'limit',
+                  GRAPH_LIMITS[index] ?? 200,
+                );
+              }
+            }}
           />
         </label>
 
         <span class="graph-stat" aria-live="polite">
           <strong>{graphMeta.node_count ?? 0}</strong> nodes
           <strong>{graphMeta.edge_count ?? 0}</strong> edges
+          {coverageLabel() ? <span>{coverageLabel()}</span> : null}
         </span>
 
         <button

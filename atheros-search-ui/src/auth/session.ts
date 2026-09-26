@@ -1,6 +1,7 @@
 import Keycloak from 'keycloak-js';
 import { createSignal } from 'solid-js';
 import { env } from '~/env';
+import { consumeReturnPath, saveReturnPath } from '~/auth/returnPath';
 
 export type AuthStatus = 'checking' | 'authenticated' | 'anonymous' | 'error';
 
@@ -30,6 +31,10 @@ export function callbackUri(): string {
   return `${window.location.origin}/callback`;
 }
 
+export function currentReturnPath(): string {
+  return window.location.pathname + window.location.search;
+}
+
 export function initAuth(): Promise<boolean> {
   if (!keycloak) return Promise.resolve(true);
   if (initPromise) return initPromise;
@@ -51,9 +56,6 @@ export function initAuth(): Promise<boolean> {
     })
     .then((authenticated) => {
       setAuthStatus(authenticated ? 'authenticated' : 'anonymous');
-      if (authenticated && window.location.pathname === '/callback') {
-        window.history.replaceState(null, '', '/');
-      }
       return authenticated;
     })
     .catch((error: unknown) => {
@@ -84,6 +86,8 @@ export async function getAccessToken(forceRefresh = false): Promise<string> {
 export async function login(): Promise<void> {
   if (!keycloak) return;
   await initAuth();
+  if (keycloak.authenticated) return;
+  saveReturnPath(window.location.pathname, window.location.search);
   await keycloak.login({ redirectUri: callbackUri() });
 }
 
@@ -91,3 +95,5 @@ export async function logout(): Promise<void> {
   if (!keycloak) return;
   await keycloak.logout({ redirectUri: window.location.origin });
 }
+
+export { consumeReturnPath };

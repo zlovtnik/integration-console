@@ -3,6 +3,7 @@ import { batch, createEffect, createSignal, onMount } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import type { InventoryFilters } from '~/api/types';
 import {
+  INVENTORY_SCOPE_ALL,
   inventoryFilters,
   inventoryViewMode,
   setInventoryFilters,
@@ -41,15 +42,22 @@ export function useInventoryUrlSync() {
     batch(() => {
       const parsedLimit = Number(first(params.limit));
       const parsedMin = Number(first(params.min));
+      // A bookmarked numeric limit is preserved exactly; otherwise the
+      // default scope covers every device in the filtered inventory.
+      const hasNumericLimit =
+        Number.isFinite(parsedLimit) && parsedLimit > 0 && first(params.limit) !== undefined;
       const nextFilters: InventoryFilters = {
         grouping: grouping(first(params.grouping)),
-        limit:
-          Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 400,
         min_dedup_confidence:
           Number.isFinite(parsedMin) && parsedMin >= 0
             ? parsedMin
             : DEFAULT_MIN_DEDUP_CONFIDENCE,
       };
+      if (hasNumericLimit) {
+        nextFilters.limit = parsedLimit;
+      } else {
+        nextFilters.scope = INVENTORY_SCOPE_ALL;
+      }
       const locationIds = asList(params.loc);
       const ownerIds = asList(params.owner);
       const tags = asList(params.tag);
@@ -85,10 +93,9 @@ export function useInventoryUrlSync() {
           ? String(inventoryFilters.min_dedup_confidence)
           : undefined,
       tag: inventoryFilters.tags?.length ? inventoryFilters.tags : undefined,
-      limit:
-        (inventoryFilters.limit ?? 400) !== 400
-          ? String(inventoryFilters.limit)
-          : undefined,
+      limit: inventoryFilters.limit !== undefined
+        ? String(inventoryFilters.limit)
+        : undefined,
       view:
         inventoryViewMode() === 'dedup_queue' ? inventoryViewMode() : undefined,
     };

@@ -1,11 +1,15 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
-import { Check, Clock3, Split } from 'lucide-solid';
+import { AlertTriangle, Check, Clock3, Split } from 'lucide-solid';
 import type { InventoryNode, MergeDecision } from '~/api/types';
 import { ScoreBar } from '~/components/ScoreBar';
 import {
-  inventoryEdges,
+  inventoryDedupCandidates,
+  inventoryDedupDevices,
+  inventoryDedupEdges,
+  inventoryDedupError,
+  inventoryDedupLoading,
+  inventoryDedupMeta,
   inventoryFilters,
-  inventoryNodes,
 } from '~/stores/inventoryStore';
 
 interface QueueItem {
@@ -26,7 +30,7 @@ function candidateDevices(
   candidate: InventoryNode,
   nodes: Map<string, InventoryNode>,
 ) {
-  return inventoryEdges()
+  return inventoryDedupEdges()
     .filter(
       (edge) =>
         edge.kind === 'merge_candidate' &&
@@ -39,7 +43,10 @@ function candidateDevices(
 }
 
 function deviceLabels(devices: InventoryNode[]): string {
-  return devices.map((device) => device.label).join(' / ');
+  if (devices.length > 0) return devices.map((device) => device.label).join(' / ');
+  return inventoryDedupLoading()
+    ? 'Loading identities...'
+    : 'Unresolved identities';
 }
 
 export function DedupQueue(props: {
@@ -53,13 +60,11 @@ export function DedupQueue(props: {
     new Set(),
   );
   const queueItems = createMemo<QueueItem[]>(() => {
-    const nodes = new Map(inventoryNodes().map((node) => [node.id, node]));
+    const nodes = new Map(inventoryDedupDevices().map((node) => [node.id, node]));
     const minConfidence = inventoryFilters.min_dedup_confidence ?? 0;
-    return inventoryNodes()
+    return inventoryDedupCandidates()
       .filter(
-        (node) =>
-          node.kind === 'merge_candidate' &&
-          (node.dedup_confidence ?? 0) >= minConfidence,
+        (node) => (node.dedup_confidence ?? 0) >= minConfidence,
       )
       .map((candidate) => ({
         candidate,
@@ -98,17 +103,37 @@ export function DedupQueue(props: {
         <h2 id="dedup-queue-title" class="heading-2">
           Dedup queue
         </h2>
-        <span class="graph-stat">
+        <span class="graph-stat" aria-live="polite">
           <strong>{queueItems().length}</strong> candidates
+          <Show when={inventoryDedupLoading()}>
+            <span role="status">Loading candidates...</span>
+          </Show>
+          <Show when={!inventoryDedupLoading() && !inventoryDedupMeta.complete}>
+            <span role="status">
+              {inventoryDedupMeta.total_candidates} loaded so far
+            </span>
+          </Show>
         </span>
       </div>
+
+      <Show when={inventoryDedupError()}>
+        <div class="inventory-error" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{inventoryDedupError()}</span>
+        </div>
+      </Show>
 
       <Show
         when={queueItems().length > 0}
         fallback={
-          <div class="inventory-empty" role="status">
-            No merge candidates match the current confidence threshold.
-          </div>
+          <Show
+            when={!inventoryDedupLoading() && !inventoryDedupError()}
+            fallback={<div aria-hidden="true" />}
+          >
+            <div class="inventory-empty" role="status">
+              No merge candidates match the current confidence threshold.
+            </div>
+          </Show>
         }
       >
         <div

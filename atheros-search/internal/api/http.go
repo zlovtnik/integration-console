@@ -40,7 +40,7 @@ func httpStatusFromError(err error) int {
 	if strings.Contains(msg, "request body too large") {
 		return http.StatusRequestEntityTooLarge
 	}
-	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
+	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
 		return http.StatusBadRequest
 	}
 	if strings.Contains(msg, "merge candidate not found") {
@@ -225,7 +225,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Query:     query,
 			Kind:      kind,
 		}
-		resp, err := svc.Explain(r.Context(), req)
+		resp, err := svc.ExplainDetails(r.Context(), req)
 		if err != nil {
 			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("explain failed")
 			writeError(w, httpStatusFromError(err), err.Error())
@@ -235,8 +235,10 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Dur("latency", time.Since(start)).
 			Float64("fused_score", float64(resp.FusedScore)).
 			Int("boost_reasons", len(resp.BoostReasons)).
+			Bool("found", resp.Found).
+			Bool("scores_available", resp.ScoresAvailable).
 			Msg("explain completed")
-		writeProtoJSON(w, http.StatusOK, resp, log)
+		writeJSON(w, http.StatusOK, resp)
 	})
 	registerJSON(mux, "GET", "/v1/suggest/filters", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()

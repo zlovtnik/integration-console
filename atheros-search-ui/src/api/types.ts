@@ -101,6 +101,15 @@ export interface ExplainResponse {
   sequence_log_prob: number;
   sequence_tokens?: string[];
   detail_json?: string;
+  /**
+   * False when the record exists but ranking scores are unavailable for it
+   * (for example a direct link outside a ranked search). Scores are then
+   * not displayed as zeros.
+   */
+  scores_available?: boolean;
+  /** False only when the record itself is absent. */
+  found?: boolean;
+  source_kind?: string;
 }
 
 export interface SuggestFiltersResponse {
@@ -115,7 +124,9 @@ export type InventoryNodeKind =
   | 'owner'
   | 'location_asset'
   | 'cluster'
-  | 'merge_candidate';
+  | 'merge_candidate'
+  /** Purely visual aggregation group; never an identity cluster. */
+  | 'aggregate_group';
 
 export interface InventoryNode {
   id: string;
@@ -155,6 +166,10 @@ export interface InventoryFilters {
   min_dedup_confidence?: number;
   tags?: string[];
   limit?: number;
+  /** Opt-in complete pagination; see GraphFilters.scope. */
+  scope?: 'all';
+  page_cursor?: string;
+  page_size?: number;
 }
 
 export interface InventoryResponse {
@@ -164,6 +179,11 @@ export interface InventoryResponse {
   node_count: number;
   edge_count: number;
   total_registered_count: number;
+  next_page_cursor?: string | null;
+  total_node_count?: number;
+  total_edge_count?: number;
+  /** Total devices matching the filters, including pages not loaded yet. */
+  total_device_count?: number;
 }
 
 export type MergeDecision = 'merge' | 'not_match' | 'needs_more_data';
@@ -220,7 +240,9 @@ export type NodeKind =
   | 'client'
   | 'shadow_alert'
   | 'alert'
-  | 'embedding';
+  | 'embedding'
+  /** Purely visual aggregation group (e.g. devices near one AP); never an identity cluster. */
+  | 'aggregate_group';
 
 export interface GraphEdge {
   id: string;
@@ -249,6 +271,14 @@ export interface GraphResponse {
   generated_at: string;
   node_count: number;
   edge_count: number;
+  /**
+   * Present only for scope: "all" requests. Opaque cursor for the next
+   * page; null/absent when this is the final page.
+   */
+  next_page_cursor?: string | null;
+  /** Present only for scope: "all" requests. */
+  total_node_count?: number;
+  total_edge_count?: number;
 }
 
 export interface GraphFilters {
@@ -263,6 +293,14 @@ export interface GraphFilters {
   observed_before?: Rfc3339Timestamp;
   hops?: number;
   limit?: number;
+  /**
+   * Opt-in complete pagination. When "all", the response is one bounded
+   * page of the complete result plus a continuation cursor and total
+   * counts; the client keeps requesting pages until the cursor is null.
+   */
+  scope?: 'all';
+  page_cursor?: string;
+  page_size?: number;
 }
 
 export function isSearchKind(value: unknown): value is SearchKind {

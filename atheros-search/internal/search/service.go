@@ -183,8 +183,69 @@ func (s *Service) SearchStream(req *searchv1.SearchRequest, stream searchv1.Sear
 }
 
 func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*searchv1.ExplainResponse, error) {
+	details, err := s.ExplainDetails(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &searchv1.ExplainResponse{
+		SourceKey:       details.SourceKey,
+		DenseScore:      details.DenseScore,
+		SparseScore:     details.SparseScore,
+		FusedScore:      details.FusedScore,
+		ThreatBoost:     details.ThreatBoost,
+		BoostReasons:    details.BoostReasons,
+		SequenceLogProb: details.SequenceLogProb,
+	}, nil
+}
+
+type ExplainDetails struct {
+	SourceKey       string   `json:"sourceKey"`
+	DenseScore      float32  `json:"denseScore,omitempty"`
+	SparseScore     float32  `json:"sparseScore,omitempty"`
+	FusedScore      float32  `json:"fusedScore,omitempty"`
+	ThreatBoost     float32  `json:"threatBoost,omitempty"`
+	BoostReasons    []string `json:"boostReasons,omitempty"`
+	SequenceLogProb float64  `json:"sequenceLogProb,omitempty"`
+	Found           bool     `json:"found"`
+	ScoresAvailable bool     `json:"scores_available"`
+	SourceKind      string   `json:"source_kind,omitempty"`
+}
+
+func (s *Service) ExplainDetails(ctx context.Context, req *searchv1.ExplainRequest) (*ExplainDetails, error) {
 	if req == nil || req.SourceKey == "" {
 		return nil, errors.New("source_key is required")
+	}
+	kinds, err := requestKinds(req.Kind)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := pgPlaceholders(2, len(kinds))
+	args := make([]any, 0, len(kinds)+1)
+	args = append(args, req.SourceKey)
+	for _, kind := range kinds {
+		args = append(args, kind)
+	}
+	var sourceKind string
+	err = s.Pool.QueryRowContext(ctx, `
+SELECT source_kind
+FROM atheros_search.search_documents
+WHERE source_id = $1 AND source_kind IN (`+placeholders+`) AND status = 'active'
+ORDER BY source_kind
+LIMIT 1`, args...).Scan(&sourceKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &ExplainDetails{SourceKey: req.SourceKey, BoostReasons: []string{}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	details := &ExplainDetails{
+		SourceKey:    req.SourceKey,
+		SourceKind:   sourceKind,
+		Found:        true,
+		BoostReasons: []string{},
+	}
+	if !hasMeaningfulSearchTerms(req.Query) {
+		return details, nil
 	}
 	searchReq := &searchv1.SearchRequest{
 		Query: req.Query,
@@ -198,7 +259,7 @@ func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*s
 	}
 	for _, result := range resp.Results {
 		if result.SourceKey == req.SourceKey {
-			return &searchv1.ExplainResponse{
+			return &ExplainDetails{
 				SourceKey:       result.SourceKey,
 				DenseScore:      result.CosineSimilarity,
 				SparseScore:     result.KeywordRank,
@@ -206,10 +267,13 @@ func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*s
 				ThreatBoost:     result.ThreatBoost,
 				BoostReasons:    result.BoostReasons,
 				SequenceLogProb: result.SequenceLogProb,
+				Found:           true,
+				ScoresAvailable: true,
+				SourceKind:      result.SourceKind,
 			}, nil
 		}
 	}
-	return &searchv1.ExplainResponse{SourceKey: req.SourceKey}, nil
+	return details, nil
 }
 
 func (s *Service) SuggestFilters(ctx context.Context, req *searchv1.SuggestFiltersRequest) (*searchv1.SuggestFiltersResponse, error) {
