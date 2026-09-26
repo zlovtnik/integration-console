@@ -13,7 +13,7 @@ import {
   useForceLayout,
   type SimNodeDatum,
 } from './useForceLayout';
-import { circlePath, polygonPath } from '~/utils/graphShapes';
+import { useGraphPresentation } from './graphPresentation';
 
 const DEFAULT_AGGREGATE_THRESHOLD = 400;
 
@@ -36,6 +36,7 @@ export interface InventorySimEdge extends d3.SimulationLinkDatum<InventorySimNod
 
 export interface InventoryGraphOptions {
   selectedNodeId?: Accessor<string | null>;
+  onClearSelection?: () => void;
   pinnedNodeIds?: Accessor<Set<string>>;
   visibleKinds?: Accessor<Set<InventoryNodeKind>>;
   grouping?: Accessor<InventoryGrouping>;
@@ -60,10 +61,15 @@ export function useInventoryGraph(
   const layout = useForceLayout<InventoryRenderNode, InventorySimEdge>(svgRef, {
     pinnedNodeIds: options.pinnedNodeIds,
   });
+  const presentation = useGraphPresentation<InventorySimNode>(
+    svgRef,
+    () => options.selectedNodeId?.() ?? null,
+    () => options.onClearSelection?.(),
+  );
   let visibilityEffectReady = false;
-  let renderedEdges: InventoryEdge[] = [];
 
   function build() {
+    presentation.reset();
     const model = buildInventoryRenderModel(
       nodes(),
       edges(),
@@ -74,7 +80,7 @@ export function useInventoryGraph(
     const prepared = layout.prepare(model.nodes);
     if (!prepared) return;
     const { svg, container, width, height, simNodes, nodeById } = prepared;
-    renderedEdges = model.edges.filter(
+    const renderedEdges = model.edges.filter(
       (edge) => nodeById.has(edge.source) && nodeById.has(edge.target),
     );
     const simEdges = renderedEdges.map((edge): InventorySimEdge => {
@@ -88,7 +94,7 @@ export function useInventoryGraph(
       return next;
     });
 
-    const defs = svg.append('defs');
+    const defs = presentation.prepare(svg);
     [
       'owns',
       'located_at',
@@ -98,7 +104,7 @@ export function useInventoryGraph(
     ].forEach((kind) => {
       defs
         .append('marker')
-        .attr('id', `inventory-arrow-${kind}`)
+        .attr('id', `${presentation.prefix}-arrow-${kind}`)
         .attr('viewBox', '0 -4 8 8')
         .attr('refX', 22)
         .attr('refY', 0)
@@ -121,7 +127,11 @@ export function useInventoryGraph(
       .attr('stroke', (edge) => inventoryEdgeColor(edge.kind))
       .attr('stroke-width', (edge) => Math.max(0.7, (edge.weight ?? 1) * 1.1))
       .attr('stroke-opacity', 0.45)
-      .attr('marker-end', (edge) => `url(#inventory-arrow-${edge.kind})`);
+      .style('--edge-opacity', '0.45')
+      .attr(
+        'marker-end',
+        (edge) => `url(#${presentation.prefix}-arrow-${edge.kind})`,
+      );
 
     link.append('title').text((edge) => edge.kind.replaceAll('_', ' '));
 
@@ -166,47 +176,15 @@ export function useInventoryGraph(
 
     node.call(layout.createDragBehavior());
 
-    node
-      .append('circle')
-      .attr('class', 'graph-node-ring inventory-node-ring')
-      .attr('r', (item) => inventoryNodeRadius(item) + 4)
-      .attr('fill', 'none')
-      .attr('stroke', (item) => inventoryNodeColor(item))
-      .attr('stroke-width', 0.5)
-      .attr('stroke-opacity', 0.25);
-
-    node
-      .append('path')
-      .attr('class', 'graph-node-body inventory-node-body')
-      .attr('d', inventoryNodeShapePath)
-      .attr('fill', (item) => `${inventoryNodeColor(item)}28`)
-      .attr('stroke', (item) => inventoryNodeColor(item))
-      .attr('stroke-width', 1.5);
-
-    node
-      .filter((item) => item.kind === 'merge_candidate')
-      .append('circle')
-      .attr('class', 'inventory-merge-halo')
-      .attr('r', (item) => inventoryNodeRadius(item) + 9)
-      .attr('fill', 'none')
-      .attr('stroke', 'var(--color-warn)')
-      .attr('stroke-width', 1)
-      .attr('stroke-dasharray', '4 3')
-      .attr('stroke-opacity', 0.8);
-
-    node
-      .append('text')
-      .attr('x', (item) => inventoryNodeRadius(item) + 5)
-      .attr('y', 0)
-      .attr('dominant-baseline', 'middle')
-      .attr('font-family', 'var(--font-mono)')
-      .attr('font-size', 9)
-      .attr('fill', 'var(--color-text-secondary)')
-      .attr('paint-order', 'stroke')
-      .attr('stroke', 'var(--color-bg)')
-      .attr('stroke-width', 3)
-      .attr('stroke-linejoin', 'round')
-      .text((item) => truncate(item.label, 24));
+    presentation.decorate(node, {
+      radius: inventoryNodeRadius,
+      color: inventoryNodeColor,
+      count: (item) => item.member_count,
+      alwaysLabel: (item) =>
+        ['owner', 'location_asset', 'cluster', 'aggregate_group'].includes(
+          item.kind,
+        ),
+    });
 
     let fitOnSimulationEnd = true;
     const simulation = d3
@@ -295,52 +273,19 @@ export function useInventoryGraph(
       .selectAll<SVGLineElement, InventorySimEdge>('.inventory-link')
       .style('display', (edge) => (edgeIsVisible(edge) ? null : 'none'))
       .attr('marker-end', (edge) =>
-        edgeIsVisible(edge) ? `url(#inventory-arrow-${edge.kind})` : null,
+        edgeIsVisible(edge)
+          ? `url(#${presentation.prefix}-arrow-${edge.kind})`
+          : null,
       );
 
+    presentation.paint();
     if (restartSimulation) layout.restart();
   }
 
   function applySelection(selected = options.selectedNodeId?.() ?? null) {
-    const el = svgRef();
-    if (!el) return;
-    const related = new Set<string>();
-    if (selected) {
-      related.add(selected);
-      for (const edge of renderedEdges) {
-        if (edge.source === selected) related.add(edge.target);
-        if (edge.target === selected) related.add(edge.source);
-      }
-    }
-
-    d3.select(el)
-      .selectAll<SVGGElement, InventorySimNode>('.inventory-node')
-      .classed('selected', (item) => item.id === selected)
-      .classed(
-        'related',
-        (item) =>
-          selected !== null && item.id !== selected && related.has(item.id),
-      )
-      .classed('dimmed', (item) => selected !== null && !related.has(item.id));
-
-    d3.select(el)
-      .selectAll<SVGLineElement, InventorySimEdge>('.inventory-link')
-      .classed('selected', (edge) => {
-        if (!selected) return false;
-        return (
-          endpointId(edge.source) === selected ||
-          endpointId(edge.target) === selected
-        );
-      })
-      .classed('dimmed', (edge) => {
-        if (!selected) return false;
-        return (
-          endpointId(edge.source) !== selected &&
-          endpointId(edge.target) !== selected
-        );
-      });
-
-    if (selected) queueMicrotask(() => layout.fitToGraph(related, 80));
+    const related = presentation.paint();
+    if (selected && related.size)
+      queueMicrotask(() => layout.fitToGraph(related, 80));
   }
 
   function applyPinned(
@@ -370,10 +315,6 @@ export function useInventoryGraph(
       return layout.nodeById().get(value)?.kind ?? 'device';
     }
     return value.kind;
-  }
-
-  function endpointId(value: string | InventorySimNode): string {
-    return typeof value === 'string' ? value : value.id;
   }
 
   onMount(build);
@@ -568,42 +509,22 @@ export function inventoryNodeRadius(node: InventoryRenderNode): number {
   return 7;
 }
 
-function inventoryNodeShapePath(node: InventoryRenderNode): string {
-  const r = inventoryNodeRadius(node);
-  switch (node.kind) {
-    case 'device':
-      return `M0,${-r}L${r},0L0,${r}L${-r},0Z`;
-    case 'owner':
-      return polygonPath(r * 1.08, 5);
-    case 'location_asset':
-      return `M${-r},${-r}L${r},${-r}L${r},${r}L${-r},${r}Z`;
-    case 'cluster':
-      return polygonPath(r, 6);
-    case 'aggregate_group':
-      return polygonPath(r, 5);
-    case 'merge_candidate':
-      return polygonPath(r * 1.15, 3, Math.PI / 2);
-    default:
-      return circlePath(r);
-  }
-}
-
 export function inventoryNodeColor(
   node: Pick<InventoryRenderNode, 'kind'>,
 ): string {
   switch (node.kind) {
     case 'device':
-      return 'var(--color-accent)';
+      return 'var(--graph-device)';
     case 'owner':
-      return 'var(--color-info)';
+      return 'var(--graph-info)';
     case 'location_asset':
-      return 'var(--color-ok)';
+      return 'var(--graph-ok)';
     case 'cluster':
-      return 'var(--score-dense)';
+      return 'var(--graph-cluster)';
     case 'aggregate_group':
       return 'var(--color-text-tertiary)';
     case 'merge_candidate':
-      return 'var(--color-warn)';
+      return 'var(--graph-warn)';
     default:
       return 'var(--color-text-tertiary)';
   }
@@ -632,15 +553,15 @@ function inventoryNodeAriaLabel(node: InventoryRenderNode): string {
 function inventoryEdgeColor(kind: string): string {
   switch (kind) {
     case 'owns':
-      return 'var(--color-info)';
+      return 'var(--graph-info)';
     case 'located_at':
-      return 'var(--color-ok)';
+      return 'var(--graph-ok)';
     case 'cluster_member':
-      return 'var(--score-dense)';
+      return 'var(--graph-cluster)';
     case 'merge_candidate':
-      return 'var(--color-warn)';
+      return 'var(--graph-warn)';
     case 'same_device':
-      return 'var(--color-danger)';
+      return 'var(--graph-danger)';
     default:
       return 'var(--color-border)';
   }
@@ -659,8 +580,4 @@ function inventoryLinkDistance(kind: string): number {
     default:
       return 96;
   }
-}
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
 }

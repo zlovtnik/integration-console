@@ -1,4 +1,13 @@
-import { batch, createEffect, createMemo, on, onCleanup, onMount, Show, startTransition } from 'solid-js';
+import {
+  batch,
+  createEffect,
+  createMemo,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  startTransition,
+} from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { DedupQueue } from '~/components/inventory/DedupQueue';
 import { InventoryControls } from '~/components/inventory/InventoryControls';
@@ -59,7 +68,8 @@ export default function InventoryPage() {
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
   const { ready } = useInventoryUrlSync();
-  const { load, decideMerge, loadDedupQueue, cancelDedupQueue } = useInventory();
+  const { load, decideMerge, loadDedupQueue, cancelDedupQueue } =
+    useInventory();
 
   const graph = useInventoryGraph(
     () => svgRef,
@@ -67,6 +77,7 @@ export default function InventoryPage() {
     inventoryEdges,
     {
       selectedNodeId: selectedInventoryNodeId,
+      onClearSelection: () => setSelectedInventoryNodeId(null),
       pinnedNodeIds: pinnedInventoryNodeIds,
       visibleKinds: visibleInventoryKinds,
       grouping: () => inventoryFilters.grouping,

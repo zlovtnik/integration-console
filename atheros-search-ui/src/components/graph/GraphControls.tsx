@@ -29,6 +29,7 @@ import {
 import { suggestions } from '~/stores/suggestStore';
 import {
   edgeColor,
+  edgeDash,
   edgeKindLabel,
   nodeColor,
   nodeKindLabel,
@@ -97,7 +98,10 @@ function EdgeKindChip(props: { kind: EdgeKind }) {
     >
       <span
         class="graph-kind-chip-swatch graph-kind-chip-swatch--edge"
-        style={{ background: edgeColor(props.kind) }}
+        style={{
+          'border-top': `2px ${edgeDash(props.kind) ? 'dashed' : 'solid'} ${edgeColor(props.kind)}`,
+          background: 'transparent',
+        }}
         aria-hidden="true"
       />
       <span>{edgeKindLabel(props.kind)}</span>

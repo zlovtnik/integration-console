@@ -9,7 +9,7 @@ import {
   useForceLayout,
   type SimNodeDatum,
 } from './useForceLayout';
-import { circlePath, polygonPath } from '~/utils/graphShapes';
+import { useGraphPresentation } from './graphPresentation';
 
 export type SimNode = SimNodeDatum<GraphNode>;
 
@@ -24,6 +24,7 @@ export interface SimEdge extends d3.SimulationLinkDatum<SimNode> {
 
 export interface ForceGraphOptions {
   selectedNodeId?: Accessor<string | null>;
+  onClearSelection?: () => void;
   pinnedNodeIds?: Accessor<Set<string>>;
   visibleKinds?: Accessor<Set<NodeKind>>;
   visibleEdgeKinds?: Accessor<Set<EdgeKind>>;
@@ -40,9 +41,15 @@ export function useForceGraph(
   const layout = useForceLayout<GraphNode, SimEdge>(svgRef, {
     pinnedNodeIds: options.pinnedNodeIds,
   });
+  const presentation = useGraphPresentation<SimNode>(
+    svgRef,
+    () => options.selectedNodeId?.() ?? null,
+    () => options.onClearSelection?.(),
+  );
   let visibilityEffectReady = false;
 
   function build() {
+    presentation.reset();
     const prepared = layout.prepare(nodes());
     if (!prepared) return;
     const { svg, container, width, height, simNodes, nodeById } = prepared;
@@ -60,7 +67,7 @@ export function useForceGraph(
         return next;
       });
 
-    const defs = svg.append('defs');
+    const defs = presentation.prepare(svg);
     [
       'association',
       'probe',
@@ -74,7 +81,7 @@ export function useForceGraph(
     ].forEach((kind) => {
       defs
         .append('marker')
-        .attr('id', `arrow-${kind}`)
+        .attr('id', `${presentation.prefix}-arrow-${kind}`)
         .attr('viewBox', '0 -4 8 8')
         .attr('refX', 22)
         .attr('refY', 0)
@@ -97,9 +104,14 @@ export function useForceGraph(
       .attr('data-source-kind', (edge) => endpointKind(edge.source))
       .attr('data-target-kind', (edge) => endpointKind(edge.target))
       .attr('stroke', (edge) => edgeColor(edge.kind))
-      .attr('stroke-width', (edge) => Math.max(0.5, (edge.weight ?? 1) * 0.8))
-      .attr('stroke-opacity', 0.3)
-      .attr('marker-end', (edge) => `url(#arrow-${edge.kind})`);
+      .attr('stroke-width', (edge) => Math.max(0.5, edge.weight ?? 1))
+      .attr('stroke-opacity', (edge) => edgeOpacity(edge.kind))
+      .attr('stroke-dasharray', (edge) => edgeDash(edge.kind))
+      .style('--edge-opacity', (edge) => edgeOpacity(edge.kind))
+      .attr(
+        'marker-end',
+        (edge) => `url(#${presentation.prefix}-arrow-${edge.kind})`,
+      );
 
     link
       .append('title')
@@ -131,28 +143,23 @@ export function useForceGraph(
         }
         event.preventDefault();
         options.onNodeClick?.(item);
-      })
-      .on('mouseenter', (_, item) => options.onNodeHover?.(item))
-      .on('mouseleave', () => options.onNodeHover?.(null));
+      });
 
     node.call(dragBehavior);
 
-    node
-      .append('circle')
-      .attr('class', 'graph-node-ring')
-      .attr('r', (item) => nodeRadius(item) + 4)
-      .attr('fill', 'none')
-      .attr('stroke', (item) => nodeColor(item))
-      .attr('stroke-width', 0.5)
-      .attr('stroke-opacity', 0.25);
-
-    node
-      .append('path')
-      .attr('class', 'graph-node-body')
-      .attr('d', nodeShapePath)
-      .attr('fill', (item) => `${nodeColor(item)}28`)
-      .attr('stroke', (item) => nodeColor(item))
-      .attr('stroke-width', 1.5);
+    presentation.decorate(node, {
+      radius: nodeRadius,
+      color: nodeColor,
+      count: (item) =>
+        item.kind === 'aggregate_group'
+          ? item.occurrence_count
+          : item.kind === 'cluster'
+            ? item.cluster_size
+            : undefined,
+      alwaysLabel: (item) =>
+        item.kind === 'ap' || item.kind === 'aggregate_group',
+      onHover: options.onNodeHover,
+    });
 
     node
       .filter((item) => hasSeverityHalo(item))
@@ -166,20 +173,6 @@ export function useForceGraph(
         (item.risk_score ?? 0) > 0.5 ? '3 3' : 'none',
       )
       .attr('stroke-opacity', 0.65);
-
-    node
-      .append('text')
-      .attr('x', (item) => nodeRadius(item) + 5)
-      .attr('y', 0)
-      .attr('dominant-baseline', 'middle')
-      .attr('font-family', 'var(--font-mono)')
-      .attr('font-size', 11)
-      .attr('fill', 'var(--color-text-secondary)')
-      .attr('paint-order', 'stroke')
-      .attr('stroke', 'var(--color-bg)')
-      .attr('stroke-width', 3)
-      .attr('stroke-linejoin', 'round')
-      .text((item) => truncate(item.label, 22));
 
     let fitOnSimulationEnd = true;
     const simulation = d3
@@ -263,54 +256,19 @@ export function useForceGraph(
       .selectAll<SVGLineElement, SimEdge>('.graph-link')
       .style('display', (edge) => (edgeIsVisible(edge) ? null : 'none'))
       .attr('marker-end', (edge) =>
-        edgeIsVisible(edge) ? `url(#arrow-${edge.kind})` : null,
+        edgeIsVisible(edge)
+          ? `url(#${presentation.prefix}-arrow-${edge.kind})`
+          : null,
       );
 
+    presentation.paint();
     if (restartSimulation) layout.restart();
   }
 
   function applySelection(selected = options.selectedNodeId?.() ?? null) {
-    const el = svgRef();
-    if (!el) return;
-    const related = new Set<string>();
-    if (selected) {
-      related.add(selected);
-      for (const edge of edges()) {
-        if (edge.source === selected) related.add(edge.target);
-        if (edge.target === selected) related.add(edge.source);
-      }
-    }
-
-    d3.select(el)
-      .selectAll<SVGGElement, SimNode>('.graph-node')
-      .classed('selected', (item) => item.id === selected)
-      .classed(
-        'related',
-        (item) =>
-          selected !== null && item.id !== selected && related.has(item.id),
-      )
-      .classed('dimmed', (item) => selected !== null && !related.has(item.id));
-
-    d3.select(el)
-      .selectAll<SVGLineElement, SimEdge>('.graph-link')
-      .classed('selected', (edge) => {
-        if (!selected) return false;
-        return (
-          endpointId(edge.source) === selected ||
-          endpointId(edge.target) === selected
-        );
-      })
-      .classed('dimmed', (edge) => {
-        if (!selected) return false;
-        return (
-          endpointId(edge.source) !== selected &&
-          endpointId(edge.target) !== selected
-        );
-      });
-
-    if (selected) {
+    const related = presentation.paint();
+    if (selected && related.size)
       queueMicrotask(() => layout.fitToGraph(related, 80));
-    }
   }
 
   function applyPinned(
@@ -340,10 +298,6 @@ export function useForceGraph(
       return layout.nodeById().get(value)?.kind ?? 'device';
     }
     return value.kind;
-  }
-
-  function endpointId(value: string | SimNode): string {
-    return typeof value === 'string' ? value : value.id;
   }
 
   onMount(build);
@@ -387,54 +341,33 @@ function nodeLaneY(node: GraphNode, index: number, height: number): number {
 
 export function nodeRadius(node: GraphNode): number {
   if (node.kind === 'cluster') {
-    return 12 + Math.min((node.cluster_size ?? 1) * 1.5, 12);
+    return 14 + Math.min(Math.max(0, (node.cluster_size ?? 1) - 1) * 1.5, 12);
   }
   if (node.kind === 'aggregate_group') {
     return 13 + Math.min((node.occurrence_count ?? 1) * 0.4, 10);
   }
-  if (node.kind === 'ap') return 12;
+  if (node.kind === 'ap') return 18;
+  if (node.kind === 'client') return 7;
   if (node.kind === 'shadow_alert' || node.kind === 'alert') return 10;
   return 9;
-}
-
-function nodeShapePath(node: GraphNode): string {
-  const r = nodeRadius(node);
-  switch (node.kind) {
-    case 'device':
-      return `M0,${-r}L${r},0L0,${r}L${-r},0Z`;
-    case 'cluster':
-      return polygonPath(r, 6);
-    case 'ap':
-      return polygonPath(r * 1.15, 3, -Math.PI / 2);
-    case 'client':
-      return `M${-r},${-r}L${r},${-r}L${r},${r}L${-r},${r}Z`;
-    case 'shadow_alert':
-      return polygonPath(r * 1.1, 8);
-    case 'alert':
-      return polygonPath(r * 1.15, 3, Math.PI / 2);
-    case 'aggregate_group':
-      return polygonPath(r, 5);
-    default:
-      return circlePath(r);
-  }
 }
 
 export function nodeColor(node: Pick<GraphNode, 'kind'>): string {
   switch (node.kind) {
     case 'device':
-      return 'var(--color-accent)';
+      return 'var(--graph-device)';
     case 'cluster':
-      return 'var(--score-dense)';
+      return 'var(--graph-cluster)';
     case 'ap':
-      return 'var(--color-info)';
+      return 'var(--graph-info)';
     case 'client':
-      return 'var(--color-ok)';
+      return 'var(--graph-ok)';
     case 'shadow_alert':
-      return 'var(--color-danger)';
+      return 'var(--graph-danger)';
     case 'alert':
-      return 'var(--color-warn)';
+      return 'var(--graph-warn)';
     case 'embedding':
-      return 'var(--score-dense)';
+      return 'var(--graph-cluster)';
     case 'aggregate_group':
       return 'var(--color-text-tertiary)';
     default:
@@ -464,8 +397,8 @@ function hasSeverityHalo(item: SimNode): boolean {
 }
 
 function severityHaloColor(item: SimNode): string {
-  if ((item.risk_score ?? 0) > 0.5) return 'var(--color-danger)';
-  return 'var(--color-warn)';
+  if ((item.risk_score ?? 0) > 0.5) return 'var(--graph-danger)';
+  return 'var(--graph-warn)';
 }
 
 export function edgeKindLabel(kind: EdgeKind): string {
@@ -490,23 +423,23 @@ export function edgeKindLabel(kind: EdgeKind): string {
 export function edgeColor(kind: string): string {
   switch (kind) {
     case 'association':
-      return 'var(--color-accent)';
+      return 'var(--graph-accent)';
     case 'probe':
-      return 'var(--color-ok)';
+      return 'var(--graph-ok)';
     case 'cluster_member':
-      return 'var(--score-dense)';
+      return 'var(--graph-cluster)';
     case 'shadow':
-      return 'var(--color-danger)';
+      return 'var(--graph-danger)';
     case 'alert_ref':
-      return 'var(--color-warn)';
+      return 'var(--graph-warn)';
     case 'rf_proximity':
-      return 'var(--color-info)';
+      return 'var(--graph-info)';
     case 'roaming':
-      return 'var(--color-rose)';
+      return 'var(--graph-accent)';
     case 'same_channel':
-      return 'var(--color-info-soft)';
+      return 'var(--graph-info)';
     case 'vendor_link':
-      return 'var(--color-text-secondary)';
+      return 'var(--graph-ok)';
     default:
       return 'var(--color-border)';
   }
@@ -528,6 +461,24 @@ function linkDistance(kind: string): number {
   }
 }
 
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+export function edgeDash(kind: string): string | null {
+  if (kind === 'roaming' || kind === 'probe') return '6 3';
+  if (['same_channel', 'vendor_link', 'rf_proximity'].includes(kind))
+    return '2 5';
+  return null;
+}
+
+export function edgeOpacity(kind: string): number {
+  const values: Record<string, number> = {
+    association: 0.65,
+    cluster_member: 0.55,
+    roaming: 0.45,
+    same_channel: 0.22,
+    vendor_link: 0.22,
+    rf_proximity: 0.22,
+    probe: 0.4,
+    shadow: 0.72,
+    alert_ref: 0.62,
+  };
+  return values[kind] ?? 0.3;
 }

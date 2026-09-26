@@ -5,7 +5,12 @@ import {
   visibleGraphEdgeKinds,
   visibleGraphKinds,
 } from '~/stores/graphStore';
-import { edgeColor, edgeKindLabel, nodeKindLabel } from '~/hooks/useForceGraph';
+import {
+  edgeColor,
+  edgeDash,
+  edgeKindLabel,
+  nodeKindLabel,
+} from '~/hooks/useForceGraph';
 import type { NodeKind } from '~/api/types';
 
 function legendClass(kind: NodeKind): string {
@@ -50,7 +55,9 @@ export function GraphLegend() {
               >
                 <span
                   class="graph-legend-line"
-                  style={{ 'background-color': edgeColor(kind) }}
+                  style={{
+                    'border-top': `2px ${edgeDash(kind) ? 'dashed' : 'solid'} ${edgeColor(kind)}`,
+                  }}
                   aria-hidden="true"
                 />
                 <span>{edgeKindLabel(kind)}</span>

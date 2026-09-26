@@ -1,10 +1,33 @@
 .graph-page {
+  --graph-device: #94a3b8;
+  --graph-cluster: #a78bfa;
+  --graph-danger: #f87171;
+  --graph-warn: #fbbf24;
+  --graph-bg: #080b0e;
+  --graph-dot: #1a2129;
+  --graph-symbol: #080b0e;
+  --graph-info: #60a5fa;
+  --graph-ok: #34d399;
+  --graph-accent: #2dd4bf;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: calc(100vh - var(--nav-height));
   min-width: 0;
   overflow: hidden;
   background: var(--color-bg);
+}
+
+[data-theme='light'] .graph-page {
+  --graph-device: #526579;
+  --graph-cluster: #7c3aed;
+  --graph-danger: #dc2626;
+  --graph-warn: #b45309;
+  --graph-bg: var(--color-bg);
+  --graph-dot: #c5ced7;
+  --graph-symbol: #ffffff;
+  --graph-info: #2563eb;
+  --graph-ok: #15803d;
+  --graph-accent: #0f766e;
 }
 
 .graph-controls {
@@ -263,6 +286,13 @@
   height: 100%;
   min-height: 320px;
   touch-action: none;
+  background-color: var(--graph-bg);
+  background-image: radial-gradient(
+    circle,
+    var(--graph-dot) 0.65px,
+    transparent 0.8px
+  );
+  background-size: 28px 28px;
 }
 
 .graph-loading,
@@ -310,8 +340,118 @@
     opacity var(--duration-fast);
 }
 
+.graph-node-body {
+  fill-opacity: 0.88;
+  stroke-width: 0;
+}
+
+.graph-node-body--cluster {
+  fill-opacity: 0.1;
+  stroke-width: 1.5;
+  stroke-opacity: 0.55;
+  stroke-dasharray: 4 2;
+}
+
+.graph-node-ring {
+  stroke-opacity: 0;
+  stroke-width: 1;
+}
+
+.graph-node.highlighted .graph-node-ring {
+  stroke-opacity: 0.4;
+}
+
+.graph-node.selected .graph-node-ring {
+  stroke-dasharray: 3 2.5;
+}
+
+.graph-node:focus-visible {
+  outline: none;
+}
+
+.graph-node:focus-visible .graph-node-ring {
+  stroke-opacity: 1;
+  stroke-width: 2;
+}
+
+.graph-node-glow,
+.graph-node-ring,
+.graph-node-halo,
+.graph-node-icon,
+.graph-node-symbol,
+.graph-node-label {
+  pointer-events: none;
+}
+
+.graph-node-glow {
+  animation: graph-threat-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes graph-threat-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.graph-node-symbol {
+  fill: var(--graph-symbol);
+  font: 700 11px var(--font-mono);
+  text-anchor: middle;
+}
+
+.graph-node-symbol--count {
+  fill: var(--graph-cluster);
+}
+
+.graph-node-icon {
+  color: var(--graph-symbol);
+}
+
+.graph-node-label {
+  fill: var(--color-text-secondary);
+  font: 10px var(--font-mono);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--graph-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.graph-node-label--persistent,
+.graph-node.highlighted .graph-node-label,
+.graph-node.selected .graph-node-label,
+.graph-node.pinned .graph-node-label {
+  opacity: 1;
+}
+
+.graph-node.dimmed .graph-node-glow,
+.graph-node.dimmed .graph-node-label {
+  visibility: hidden;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-node-glow {
+    animation: none;
+    opacity: 0.45;
+  }
+
+  .graph-node-label,
+  .graph-node-body,
+  .graph-node-ring,
+  .graph-link {
+    transition: none;
+  }
+}
+
 .graph-node.selected .graph-node-body {
-  stroke-width: 3;
+  stroke-width: 2;
 }
 
 .graph-node.selected .graph-node-ring,
@@ -320,7 +460,7 @@
   stroke-width: 1.5;
 }
 
-.graph-node.pinned text {
+.graph-node.pinned .graph-node-label {
   fill: var(--color-text-primary);
 }
 
@@ -341,12 +481,12 @@
 }
 
 .graph-link.selected {
-  stroke-width: 2.5;
+  stroke-width: 1.5;
   stroke-opacity: 0.9;
 }
 
 .graph-link.dimmed {
-  stroke-opacity: 0.12;
+  stroke-opacity: calc(var(--edge-opacity, 0.3) * 0.08);
 }
 
 .graph-legend {
@@ -427,27 +567,27 @@
 }
 
 .graph-legend-dot--device {
-  background: var(--color-accent);
+  background: var(--graph-device);
 }
 
 .graph-legend-dot--cluster {
-  background: var(--score-dense);
+  background: var(--graph-cluster);
 }
 
 .graph-legend-dot--ap {
-  background: var(--color-info);
+  background: var(--graph-info);
 }
 
 .graph-legend-dot--client {
-  background: var(--color-ok);
+  background: var(--graph-ok);
 }
 
 .graph-legend-dot--shadow_alert {
-  background: var(--color-danger);
+  background: var(--graph-danger);
 }
 
 .graph-legend-dot--alert {
-  background: var(--color-warn);
+  background: var(--graph-warn);
 }
 
 .graph-legend-line {

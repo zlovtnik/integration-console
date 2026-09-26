@@ -61,6 +61,7 @@ export default function GraphPage() {
     () => renderModel().edges,
     {
       selectedNodeId,
+      onClearSelection: () => setSelectedNodeId(null),
       pinnedNodeIds,
       visibleKinds: visibleGraphKinds,
       visibleEdgeKinds: visibleGraphEdgeKinds,
@@ -127,7 +128,7 @@ export default function GraphPage() {
     onCleanup(() => window.removeEventListener('keydown', handleKeydown));
   });
 
-  createEffect(on([graphNodes, graphEdges], queueGraphRebuild));
+  createEffect(on(renderModel, queueGraphRebuild));
 
   createEffect(
     on(

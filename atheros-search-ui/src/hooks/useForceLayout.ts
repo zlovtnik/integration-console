@@ -56,6 +56,7 @@ export function useForceLayout<
       .attr('transform', zoomTransform.toString());
     zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
+      .clickDistance(4)
       .scaleExtent([0.05, 6])
       .on('zoom', (event) => container.attr('transform', event.transform));
     svg.call(zoomBehavior);
@@ -73,6 +74,7 @@ export function useForceLayout<
   function createDragBehavior() {
     return d3
       .drag<SVGGElement, SimNodeDatum<T>>()
+      .clickDistance(4)
       .on('start', (event, node) => {
         if (!event.active) sim?.alphaTarget(0.3).restart();
         node.fx = node.x;
