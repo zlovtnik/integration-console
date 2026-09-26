@@ -2,61 +2,63 @@ import { For } from 'solid-js';
 import {
   GRAPH_EDGE_KINDS,
   GRAPH_NODE_KINDS,
-  setGraphEdgeKindVisibility,
-  setGraphKindVisibility,
   visibleGraphEdgeKinds,
   visibleGraphKinds,
 } from '~/stores/graphStore';
 import { edgeColor, edgeKindLabel, nodeKindLabel } from '~/hooks/useForceGraph';
-import type { EdgeKind, NodeKind } from '~/api/types';
+import type { NodeKind } from '~/api/types';
 
 function legendClass(kind: NodeKind): string {
   return `graph-legend-dot graph-legend-dot--${kind}`;
 }
 
+function itemClass(visible: boolean, extra = ''): string {
+  return `graph-legend-item ${extra} ${visible ? '' : 'hidden'}`.trim();
+}
+
 export function GraphLegend() {
   return (
-    <div class="graph-legend" aria-label="Graph node and edge type visibility">
-      <For each={GRAPH_NODE_KINDS}>
-        {(kind) => (
-          <button
-            type="button"
-            class={`graph-legend-item ${
-              visibleGraphKinds().has(kind) ? '' : 'hidden'
-            }`}
-            aria-pressed={visibleGraphKinds().has(kind)}
-            onClick={() => setGraphKindVisibility(kind)}
-          >
-            <span class={legendClass(kind)} aria-hidden="true" />
-            <span>{nodeKindLabel(kind)}</span>
-          </button>
-        )}
-      </For>
-      <span
-        class="graph-legend-separator"
-        aria-hidden="true"
-        role="presentation"
-      />
-      <For each={GRAPH_EDGE_KINDS}>
-        {(kind) => (
-          <button
-            type="button"
-            class={`graph-legend-item graph-legend-item--edge ${
-              visibleGraphEdgeKinds().has(kind) ? '' : 'hidden'
-            }`}
-            aria-pressed={visibleGraphEdgeKinds().has(kind)}
-            title={`${edgeKindLabel(kind)} edges`}
-            onClick={() => setGraphEdgeKindVisibility(kind)}
-          >
-            <span
-              class="graph-legend-line"
-              style={{ 'background-color': edgeColor(kind) }}
-              aria-hidden="true"
-            />
-            <span>{edgeKindLabel(kind)}</span>
-          </button>
-        )}
-      </For>
+    <div
+      class="graph-legend graph-legend--grouped"
+      aria-label="Graph color key"
+    >
+      <div class="graph-legend-section">
+        <p class="graph-legend-heading">Nodes</p>
+        <ul class="graph-legend-list">
+          <For each={GRAPH_NODE_KINDS}>
+            {(kind) => (
+              <li class={itemClass(visibleGraphKinds().has(kind))}>
+                <span class={legendClass(kind)} aria-hidden="true" />
+                <span>{nodeKindLabel(kind)}</span>
+              </li>
+            )}
+          </For>
+        </ul>
+      </div>
+
+      <div class="graph-legend-section">
+        <p class="graph-legend-heading">Edges</p>
+        <ul class="graph-legend-list">
+          <For each={GRAPH_EDGE_KINDS}>
+            {(kind) => (
+              <li
+                class={itemClass(
+                  visibleGraphEdgeKinds().has(kind),
+                  'graph-legend-item--edge',
+                )}
+                title={`${edgeKindLabel(kind)} edges`}
+              >
+                <span
+                  class="graph-legend-line"
+                  style={{ 'background-color': edgeColor(kind) }}
+                  aria-hidden="true"
+                />
+                <span>{edgeKindLabel(kind)}</span>
+              </li>
+            )}
+          </For>
+        </ul>
+      </div>
     </div>
   );
 }

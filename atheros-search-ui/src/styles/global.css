@@ -175,6 +175,20 @@ body.filter-drawer-open {
   border-color: var(--color-border-strong);
 }
 
+.icon-btn-danger {
+  color: var(--color-text-tertiary);
+}
+
+.icon-btn-danger:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: color-mix(
+    in srgb,
+    var(--color-danger) 45%,
+    var(--color-border)
+  );
+}
+
 .app-layout {
   display: grid;
   grid-template-columns: minmax(260px, var(--filter-panel-width)) minmax(0, 1fr);
@@ -407,16 +421,24 @@ body.filter-drawer-open {
   background: var(--color-accent-strong);
 }
 
-.btn-secondary,
-.btn-ghost {
+.btn-secondary {
   color: var(--color-text-primary);
   background: var(--color-surface);
   border-color: var(--color-border);
 }
 
-.btn-secondary:hover,
-.btn-ghost:hover {
+.btn-secondary:hover {
   border-color: var(--color-border-strong);
+  background: var(--color-surface-2);
+}
+
+.btn-ghost {
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  color: var(--color-text-primary);
   background: var(--color-surface-2);
 }
 

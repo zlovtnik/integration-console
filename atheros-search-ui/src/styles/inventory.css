@@ -2,6 +2,11 @@
   position: relative;
 }
 
+.inventory-controls {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, auto) auto;
+  align-items: end;
+}
+
 .inventory-control-grid {
   grid-template-columns: repeat(4, minmax(136px, 1fr));
 }
@@ -224,6 +229,11 @@
 }
 
 @media (max-width: 1279px) {
+  .inventory-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
   .inventory-control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

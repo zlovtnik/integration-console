@@ -26,6 +26,7 @@ export interface ForceGraphOptions {
   selectedNodeId?: Accessor<string | null>;
   pinnedNodeIds?: Accessor<Set<string>>;
   visibleKinds?: Accessor<Set<NodeKind>>;
+  visibleEdgeKinds?: Accessor<Set<EdgeKind>>;
   onNodeClick?: (node: SimNode) => void;
   onNodeHover?: (node: SimNode | null) => void;
 }
@@ -97,7 +98,7 @@ export function useForceGraph(
       .attr('data-target-kind', (edge) => endpointKind(edge.target))
       .attr('stroke', (edge) => edgeColor(edge.kind))
       .attr('stroke-width', (edge) => Math.max(0.5, (edge.weight ?? 1) * 0.8))
-      .attr('stroke-opacity', 0.5)
+      .attr('stroke-opacity', 0.3)
       .attr('marker-end', (edge) => `url(#arrow-${edge.kind})`);
 
     link
@@ -172,7 +173,7 @@ export function useForceGraph(
       .attr('y', 0)
       .attr('dominant-baseline', 'middle')
       .attr('font-family', 'var(--font-mono)')
-      .attr('font-size', 9)
+      .attr('font-size', 11)
       .attr('fill', 'var(--color-text-secondary)')
       .attr('paint-order', 'stroke')
       .attr('stroke', 'var(--color-bg)')
@@ -235,6 +236,7 @@ export function useForceGraph(
   function applyVisibility(
     restartSimulation: boolean,
     visible = options.visibleKinds?.(),
+    visibleEdgeKinds = options.visibleEdgeKinds?.(),
   ) {
     const el = svgRef();
     if (!el) return;
@@ -252,7 +254,8 @@ export function useForceGraph(
     function edgeIsVisible(edge: SimEdge): boolean {
       return (
         kindIsVisible(endpointKind(edge.source)) &&
-        kindIsVisible(endpointKind(edge.target))
+        kindIsVisible(endpointKind(edge.target)) &&
+        (!visibleEdgeKinds || visibleEdgeKinds.has(edge.kind))
       );
     }
 
@@ -346,9 +349,9 @@ export function useForceGraph(
   onMount(build);
   createEffect(
     on(
-      () => options.visibleKinds?.(),
-      (visible) => {
-        applyVisibility(visibilityEffectReady, visible);
+      () => [options.visibleKinds?.(), options.visibleEdgeKinds?.()] as const,
+      ([visible, visibleEdgeKinds]) => {
+        applyVisibility(visibilityEffectReady, visible, visibleEdgeKinds);
         visibilityEffectReady = true;
       },
     ),
@@ -384,14 +387,14 @@ function nodeLaneY(node: GraphNode, index: number, height: number): number {
 
 export function nodeRadius(node: GraphNode): number {
   if (node.kind === 'cluster') {
-    return 10 + Math.min((node.cluster_size ?? 1) * 1.5, 12);
+    return 12 + Math.min((node.cluster_size ?? 1) * 1.5, 12);
   }
   if (node.kind === 'aggregate_group') {
-    return 11 + Math.min((node.occurrence_count ?? 1) * 0.4, 10);
+    return 13 + Math.min((node.occurrence_count ?? 1) * 0.4, 10);
   }
-  if (node.kind === 'ap') return 10;
-  if (node.kind === 'shadow_alert' || node.kind === 'alert') return 8;
-  return 7;
+  if (node.kind === 'ap') return 12;
+  if (node.kind === 'shadow_alert' || node.kind === 'alert') return 10;
+  return 9;
 }
 
 function nodeShapePath(node: GraphNode): string {
@@ -453,9 +456,7 @@ export function nodeKindLabel(kind: NodeKind): string {
 }
 
 function highSeverity(item: SimNode): boolean {
-  return (
-    item.alert_severity === 'high' || item.alert_severity === 'critical'
-  );
+  return item.alert_severity === 'high' || item.alert_severity === 'critical';
 }
 
 function hasSeverityHalo(item: SimNode): boolean {
@@ -501,11 +502,11 @@ export function edgeColor(kind: string): string {
     case 'rf_proximity':
       return 'var(--color-info)';
     case 'roaming':
-      return 'var(--color-border-focus)';
+      return 'var(--color-rose)';
     case 'same_channel':
-      return 'var(--color-info)';
+      return 'var(--color-info-soft)';
     case 'vendor_link':
-      return 'var(--score-sparse)';
+      return 'var(--color-text-secondary)';
     default:
       return 'var(--color-border)';
   }

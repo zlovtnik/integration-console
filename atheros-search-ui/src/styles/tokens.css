@@ -14,6 +14,8 @@
   --color-accent-strong: #14b8a6;
   --color-accent-ink: #041311;
   --color-info: #60a5fa;
+  --color-info-soft: #93c5fd;
+  --color-rose: #f472b6;
   --color-warn: #f59e0b;
   --color-warn-bg: #2a1d05;
   --color-danger: #f87171;
@@ -47,7 +49,7 @@
   --z-drawer: 50;
   --z-toast: 60;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
   --font-display: 'IBM Plex Mono', monospace;
   --duration-fast: 100ms;
   --duration-base: 200ms;

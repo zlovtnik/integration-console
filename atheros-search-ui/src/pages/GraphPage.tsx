@@ -30,6 +30,7 @@ import {
   selectedNodeId,
   setGraphFilters,
   setSelectedNodeId,
+  visibleGraphEdgeKinds,
   visibleGraphKinds,
 } from '~/stores/graphStore';
 import '~/styles/graph.css';
@@ -62,6 +63,7 @@ export default function GraphPage() {
       selectedNodeId,
       pinnedNodeIds,
       visibleKinds: visibleGraphKinds,
+      visibleEdgeKinds: visibleGraphEdgeKinds,
       onNodeClick: (node) => {
         if (node.id.startsWith('aggregate:')) {
           const apID = node.id.replace('aggregate:', '');
