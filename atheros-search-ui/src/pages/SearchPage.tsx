@@ -23,6 +23,7 @@ import { ModeSelector } from '~/components/ModeSelector';
 import { ResultCard } from '~/components/ResultCard';
 import { SearchBar } from '~/components/SearchBar';
 import { SkeletonCard } from '~/components/SkeletonCard';
+import { ReportStatus } from '~/components/ReportStatus';
 import { useKeyboardShortcuts } from '~/hooks/useKeyboardShortcuts';
 import { useScrollRestoration } from '~/hooks/useScrollRestoration';
 import { useSearchStream } from '~/hooks/useSearchStream';
@@ -423,6 +424,15 @@ export default function SearchPage() {
           >
             {resultMeta()}
           </h2>
+          <ReportStatus report={meta.report} generatedAt={meta.generated_at} />
+          <button
+            type="button"
+            class="btn btn-secondary"
+            disabled={loading() || !query().trim()}
+            onClick={() => void runSearch()}
+          >
+            Refresh results
+          </button>
 
           <Show when={streaming()}>
             <div

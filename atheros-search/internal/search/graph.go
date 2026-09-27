@@ -71,23 +71,37 @@ type GraphEdge struct {
 }
 
 type GraphResponse struct {
-	Nodes          []GraphNode `json:"nodes"`
-	Edges          []GraphEdge `json:"edges"`
-	GeneratedAt    time.Time   `json:"generated_at"`
-	NodeCount      int         `json:"node_count"`
-	EdgeCount      int         `json:"edge_count"`
-	NextPageCursor string      `json:"next_page_cursor,omitempty"`
-	TotalNodeCount *int        `json:"total_node_count,omitempty"`
-	TotalEdgeCount *int        `json:"total_edge_count,omitempty"`
+	Report         *ReportMetadata `json:"report,omitempty"`
+	Nodes          []GraphNode     `json:"nodes"`
+	Edges          []GraphEdge     `json:"edges"`
+	GeneratedAt    time.Time       `json:"generated_at"`
+	NodeCount      int             `json:"node_count"`
+	EdgeCount      int             `json:"edge_count"`
+	NextPageCursor string          `json:"next_page_cursor,omitempty"`
+	TotalNodeCount *int            `json:"total_node_count,omitempty"`
+	TotalEdgeCount *int            `json:"total_edge_count,omitempty"`
+	FocusReason    string          `json:"focus_reason,omitempty"`
 }
 
 // Graph queries projected identity-graph rows for the Integration Console.
-func (s *Service) Graph(ctx context.Context, filters GraphFilters) (*GraphResponse, error) {
-	filters, err := normalizeGraphFilters(filters)
+func (s *Service) Graph(ctx context.Context, filters GraphFilters) (response *GraphResponse, err error) {
+	filters, err = normalizeGraphFilters(filters)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if response != nil {
+			scope := filters
+			scope.PageCursor = ""
+			response.Report = reportMetadata(scope, "projected graph entity", "graph nodes (mixed entity kinds), not a physical asset count", "latest graph timestamps and cumulative edge evidence; historical interval absence cannot be established", len(response.Nodes), response.TotalNodeCount)
+		}
+	}()
 	if filters.Scope == "all" {
+		return s.graphPage(ctx, filters)
+	}
+	if filters.SourceMAC != "" {
+		filters.Scope = "all"
+		filters.PageSize = filters.Limit
 		return s.graphPage(ctx, filters)
 	}
 
@@ -261,6 +275,12 @@ func (s *Service) graphPage(ctx context.Context, filters GraphFilters) (*GraphRe
 	if len(focusIDs) > 0 {
 		nodeWhere += " AND n.node_id IN (" + pgPlaceholders(len(nodeArgs)+1, len(focusIDs)) + ")"
 		nodeArgs = append(nodeArgs, focusIDs...)
+	} else if filters.SourceMAC != "" {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		zero := 0
+		return &GraphResponse{Nodes: []GraphNode{}, Edges: []GraphEdge{}, GeneratedAt: time.Now().UTC(), TotalNodeCount: &zero, TotalEdgeCount: &zero, FocusReason: "Identifier not found in the selected projection scope."}, nil
 	}
 	var totalNodes int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM atheros_search.graph_nodes n WHERE `+nodeWhere, nodeArgs...).Scan(&totalNodes); err != nil {
@@ -683,8 +703,6 @@ func graphNodeFromRow(row graphNodeRow) GraphNode {
 	if row.ObservedAt.Valid {
 		utc := row.ObservedAt.Time.UTC()
 		node.ObservedAt = &utc
-		node.FirstSeen = &utc
-		node.LastSeen = &utc
 	}
 
 	var payload map[string]any
@@ -836,7 +854,7 @@ func focusGraphAroundMAC(nodes []GraphNode, edges []GraphEdge, mac string, hops 
 		}
 	}
 	if !found {
-		return nodes, edges
+		return []GraphNode{}, []GraphEdge{}
 	}
 
 	related := map[string]struct{}{deviceID: {}}

@@ -53,6 +53,12 @@ export function useUrlSync() {
       const nextKind = first(params.kind);
       const nextMode = first(params.mode);
       const urlFilters: SearchFilters = {};
+      if (typeof params.bssid === 'string' && params.bssid)
+        urlFilters.bssid = params.bssid;
+      if (first(params.context) === '1')
+        urlFilters.observed_ap_context_only = true;
+      if (typeof params.entity === 'string' && params.entity)
+        urlFilters.entity_query = params.entity;
       const locationIds = asList(params.loc);
       const sensorIds = asList(params.sensor);
       const frameSubtypes = asList(params.frame);
@@ -134,6 +140,9 @@ export function useUrlSync() {
     const macs = sourceMacParams(filters);
 
     const next: Record<string, string | string[] | undefined> = {
+      bssid: filters.bssid,
+      context: filters.observed_ap_context_only ? '1' : undefined,
+      entity: filters.entity_query,
       q: query() || undefined,
       kind:
         normalizeSearchKind(kind()) !== 'SEARCH_KIND_EVENT'

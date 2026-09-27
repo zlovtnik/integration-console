@@ -32,7 +32,7 @@ export type InventoryLimit =
   | (typeof INVENTORY_LIMITS)[number]
   | typeof INVENTORY_SCOPE_ALL;
 
-export type InventoryViewMode = 'graph' | 'dedup_queue';
+export type InventoryViewMode = 'table' | 'graph' | 'dedup_queue';
 
 function defaultVisibleKinds(): Set<InventoryNodeKind> {
   return new Set(INVENTORY_NODE_KINDS);
@@ -51,6 +51,8 @@ export const [inventoryLoading, setInventoryLoading] = createSignal(false);
 export const [inventoryError, setInventoryError] = createSignal<string | null>(
   null,
 );
+export const [inventoryDecisionNotice, setInventoryDecisionNotice] =
+  createSignal('');
 /** Loading progress for scope "all" (loaded vs total device coverage). */
 export const [inventoryCoverage, setInventoryCoverage] = createSignal<{
   loadedNodes: number;
@@ -73,7 +75,7 @@ export const [visibleInventoryKinds, setVisibleInventoryKinds] = createSignal<
   Set<InventoryNodeKind>
 >(defaultVisibleKinds());
 export const [inventoryViewMode, setInventoryViewMode] =
-  createSignal<InventoryViewMode>('graph');
+  createSignal<InventoryViewMode>('table');
 export const [expandedInventoryGroupIds, setExpandedInventoryGroupIds] =
   createSignal<Set<string>>(new Set());
 

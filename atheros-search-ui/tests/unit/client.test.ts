@@ -205,7 +205,7 @@ describe('api client normalization', () => {
     });
   });
 
-  it('falls back to device count for missing total registered inventory count', () => {
+  it('keeps missing registered counts unknown rather than counting device rows', () => {
     const response = normalizeInventoryResponse({
       nodes: [
         {
@@ -225,7 +225,7 @@ describe('api client normalization', () => {
     });
 
     expect(response.node_count).toBe(2);
-    expect(response.total_registered_count).toBe(1);
+    expect(response.total_registered_count).toBeUndefined();
   });
 });
 

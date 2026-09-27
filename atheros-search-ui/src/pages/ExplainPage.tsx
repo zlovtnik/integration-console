@@ -14,6 +14,7 @@ import { BoostBadge } from '~/components/BoostBadge';
 import { JsonViewer } from '~/components/JsonViewer';
 import { ScoreChart } from '~/components/ScoreChart';
 import { SkeletonExplain } from '~/components/SkeletonExplain';
+import { isSameOriginRelative } from '~/auth/returnPath';
 
 export default function ExplainPage() {
   const params = useParams();
@@ -59,6 +60,8 @@ export default function ExplainPage() {
   });
 
   const backHref = createMemo(() => {
+    const back = searchParams.return;
+    if (typeof back === 'string' && isSameOriginRelative(back)) return back;
     const query = queryParam();
     const kind = typeof searchParams.kind === 'string' ? searchParams.kind : '';
     return `/?q=${encodeURIComponent(query)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
@@ -108,6 +111,11 @@ export default function ExplainPage() {
       </nav>
 
       <h1 class="display">Explain: {sourceKey()}</h1>
+      <p>
+        Ranking is recomputed for this query and record kind. This endpoint does
+        not apply location, sensor, time or entity filters. Back restores the
+        original investigation scope.
+      </p>
 
       <Show when={!explain.loading} fallback={<SkeletonExplain />}>
         <Show
@@ -136,15 +144,15 @@ export default function ExplainPage() {
                       class="explain-section"
                     >
                       <h2 id="score-breakdown-title" class="heading-1">
-                        Score breakdown
+                        Raw ranking factors
                       </h2>
                       <Show
                         when={scoresAvailable()}
                         fallback={
                           <p class="caption" role="status">
-                            Ranking scores are unavailable for this record.
-                            Open an explanation from a search result or graph
-                            node to compare it against a query.
+                            Ranking scores are unavailable for this record. Open
+                            an explanation from a search result or graph node to
+                            compare it against a query.
                           </p>
                         }
                       >
@@ -161,9 +169,8 @@ export default function ExplainPage() {
                       Record not found
                     </h2>
                     <p class="caption" role="status">
-                      No record with this source key exists in the current
-                      data set. It may have been removed or the link may be
-                      outdated.
+                      No record with this source key exists in the current data
+                      set. It may have been removed or the link may be outdated.
                     </p>
                   </section>
                 </Show>

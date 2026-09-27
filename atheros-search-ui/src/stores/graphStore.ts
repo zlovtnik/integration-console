@@ -42,7 +42,7 @@ function defaultVisibleKinds(): Set<NodeKind> {
 }
 
 function defaultVisibleEdgeKinds(): Set<EdgeKind> {
-  return new Set(GRAPH_EDGE_KINDS);
+  return new Set(['association']);
 }
 
 function graphKindFilter(kinds: Set<NodeKind>): NodeKind[] | undefined {
@@ -69,7 +69,8 @@ export const [graphCoverage, setGraphCoverage] = createSignal<{
   complete: boolean;
 } | null>(null);
 export const [graphFilters, setGraphFilters] = createStore<GraphFilters>({
-  scope: GRAPH_SCOPE_ALL,
+  limit: 200,
+  edge_kinds: ['association'],
 });
 export const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(
   null,
@@ -105,10 +106,7 @@ export function setGraphKindVisibility(kind: NodeKind, visible?: boolean) {
   });
 }
 
-export function setGraphEdgeKindVisibility(
-  kind: EdgeKind,
-  visible?: boolean,
-) {
+export function setGraphEdgeKindVisibility(kind: EdgeKind, visible?: boolean) {
   setVisibleGraphEdgeKinds((prev) => {
     const next = new Set(prev);
     const shouldShow = visible ?? !next.has(kind);
@@ -121,7 +119,7 @@ export function setGraphEdgeKindVisibility(
 }
 
 export function resetGraphFilters() {
-  setGraphFilters(reconcile({ scope: GRAPH_SCOPE_ALL }));
+  setGraphFilters(reconcile({ limit: 200, edge_kinds: ['association'] }));
   setVisibleGraphKinds(defaultVisibleKinds());
   setVisibleGraphEdgeKinds(defaultVisibleEdgeKinds());
 }
@@ -204,9 +202,7 @@ export function saveCurrentGraphView(name: string): GraphSavedView[] {
   };
   const next = [
     view,
-    ...loadGraphSavedViews().filter(
-      (existing) => existing.name !== trimmed,
-    ),
+    ...loadGraphSavedViews().filter((existing) => existing.name !== trimmed),
   ].slice(0, MAX_SAVED_VIEWS);
   persistGraphSavedViews(next);
   return next;

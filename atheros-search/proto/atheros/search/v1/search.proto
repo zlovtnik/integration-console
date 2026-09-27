@@ -3,6 +3,7 @@ syntax = "proto3";
 package atheros.search.v1;
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1;searchv1";
 
@@ -49,6 +50,9 @@ message SearchFilters {
   repeated string event_types = 15;
   repeated string proxy_device_ids = 16;
   repeated string classifications = 17;
+  string bssid = 18;
+  bool observed_ap_context_only = 19;
+  string entity_query = 20;
 }
 
 message SearchRequest {
@@ -69,6 +73,8 @@ message SearchResponse {
   int32 dense_result_count = 5;
   int32 sparse_result_count = 6;
   int32 fused_result_count = 7;
+  google.protobuf.Struct report = 8;
+  google.protobuf.Timestamp generated_at = 9;
 }
 
 message SearchResult {
@@ -114,6 +120,7 @@ message ExplainResponse {
   float threat_boost = 5;
   repeated string boost_reasons = 6;
   double sequence_log_prob = 7;
+  string ranking_method = 8;
 }
 
 message SuggestFiltersRequest {

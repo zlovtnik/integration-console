@@ -40,7 +40,7 @@ func httpStatusFromError(err error) int {
 	if strings.Contains(msg, "request body too large") {
 		return http.StatusRequestEntityTooLarge
 	}
-	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
+	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported inventory sort") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
 		return http.StatusBadRequest
 	}
 	if strings.Contains(msg, "merge candidate not found") {
@@ -190,7 +190,17 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			}
 			streamed++
 		}
-		if _, err := io.WriteString(w, `{"type":"done"}`+"\n"); err != nil {
+		metadata := proto.Clone(resp).(*searchv1.SearchResponse)
+		metadata.Results = nil
+		encodedMeta, err := protojson.Marshal(metadata)
+		if err != nil {
+			return
+		}
+		done, err := json.Marshal(map[string]any{"type": "done", "meta": json.RawMessage(encodedMeta)})
+		if err != nil {
+			return
+		}
+		if _, err := io.WriteString(w, string(done)+"\n"); err != nil {
 			log.Warn().Err(err).Int("streamed", streamed).Dur("latency", time.Since(start)).Msg("search stream done marker write error")
 			return
 		}
@@ -268,6 +278,14 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Msg("suggest filters completed")
 		writeProtoJSON(w, http.StatusOK, resp, log)
 	})
+	registerJSON(mux, "GET", "/v1/inventory/merge-candidates/{candidate_id}", tokenAuth, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
+		resp, err := svc.PairDetail(r.Context(), params["candidate_id"])
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
 	registerJSON(mux, "POST", "/v1/inventory", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
 		reqID := requestID()
@@ -308,6 +326,38 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Int("edges", len(resp.Edges)).
 			Int("total_registered", resp.TotalRegisteredCount).
 			Msg("inventory completed")
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSON(mux, "POST", "/v1/network-map", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			return
+		}
+		var filters search.NetworkFilters
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&filters); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid network scope.")
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeError(w, http.StatusBadRequest, "Invalid network scope.")
+			return
+		}
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(body, &raw) != nil {
+			writeError(w, http.StatusBadRequest, "Invalid network scope.")
+			return
+		}
+		if _, focused := raw["ap_bssid"]; focused && strings.TrimSpace(filters.APBSSID) == "" {
+			writeError(w, http.StatusBadRequest, "AP focus requires a BSSID.")
+			return
+		}
+		resp, err := svc.Network(r.Context(), filters)
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, resp)
 	})
 	registerJSON(mux, "POST", "/v1/graph", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {

@@ -1,73 +1,56 @@
-import { createMemo, For } from 'solid-js';
+import { For } from 'solid-js';
 import type { ExplainResponse } from '~/api/types';
 
 export function ScoreChart(props: { explain: ExplainResponse }) {
-  const score = (value: number | null | undefined) => value ?? 0;
-  const denseScore = () => score(props.explain.dense_score);
-  const sparseScore = () => score(props.explain.sparse_score);
-  const fusedScore = () => score(props.explain.fused_score);
-  const threatBoost = () => score(props.explain.threat_boost);
-  const maxScore = createMemo(() =>
-    Math.max(denseScore(), sparseScore(), fusedScore(), threatBoost(), 1),
-  );
-  const bars = () => [
+  const factors = () => [
     {
-      label: 'Semantic',
-      title:
-        'Vector embedding cosine similarity - how conceptually similar this result is to your query',
-      value: denseScore(),
-      className: 'chart-fill--dense',
+      label: 'Cosine similarity',
+      method: 'Vector cosine, unitless (-1 to 1)',
+      value: props.explain.dense_score,
     },
     {
-      label: 'Keyword',
-      title:
-        'BM25 keyword rank - exact term overlap between the result and your query',
-      value: sparseScore(),
-      className: 'chart-fill--sparse',
+      label: 'Keyword rank',
+      method: 'PostgreSQL ts_rank_cd, unitless',
+      value: props.explain.sparse_score,
     },
     {
-      label: 'Fused',
-      title:
-        'Reciprocal Rank Fusion score - combined ranking from semantic and keyword signals',
-      value: fusedScore(),
-      className: 'chart-fill--fused',
+      label: 'Relevance rank',
+      method:
+        (props.explain.ranking_method === 'hybrid'
+          ? 'Reciprocal rank fusion'
+          : props.explain.ranking_method === 'sparse'
+            ? 'PostgreSQL ts_rank_cd'
+            : props.explain.ranking_method === 'dense'
+              ? 'Vector cosine'
+              : 'Method unavailable') + ', unitless',
+      value: props.explain.fused_score,
     },
     {
-      label: 'Boost',
-      title:
-        'Threat boost - additional score added for results matching known threat signatures',
-      value: threatBoost(),
-      className: 'chart-fill--threat',
+      label: 'Threat ranking adjustment',
+      method: 'Signature boost, unitless rank',
+      value: props.explain.threat_boost,
     },
   ];
-
   return (
-    <figure class="score-chart-figure" aria-label="Score breakdown chart">
-      <figcaption class="sr-only">
-        Score breakdown: dense {denseScore().toFixed(3)}, sparse{' '}
-        {sparseScore().toFixed(3)}, fused {fusedScore().toFixed(3)}, threat
-        boost {threatBoost().toFixed(3)}.
-      </figcaption>
-      <div class="score-chart" role="presentation">
-        <For each={bars()}>
-          {(bar) => (
-            <div class="chart-row">
-              <span class="chart-label" title={bar.title}>
-                {bar.label}
-              </span>
-              <div class="chart-track" aria-hidden="true">
-                <div
-                  class={`chart-fill ${bar.className}`}
-                  style={{
-                    width: `${Math.max(0, Math.min(bar.value / maxScore(), 1)) * 100}%`,
-                  }}
-                />
-              </div>
-              <span class="chart-value mono">{bar.value.toFixed(3)}</span>
+    <div>
+      <dl class="graph-detail-list">
+        <For each={factors()}>
+          {(factor) => (
+            <div>
+              <dt>
+                {factor.label} ({factor.method})
+              </dt>
+              <dd>
+                {factor.value == null ? 'Unavailable' : factor.value.toFixed(4)}
+              </dd>
             </div>
           )}
         </For>
-      </div>
-    </figure>
+      </dl>
+      <p>
+        These factors use different scales. They are not additive components or
+        identity/risk probabilities.
+      </p>
+    </div>
   );
 }

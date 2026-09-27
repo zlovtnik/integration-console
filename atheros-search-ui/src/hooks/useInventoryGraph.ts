@@ -101,6 +101,7 @@ export function useInventoryGraph(
       'cluster_member',
       'merge_candidate',
       'same_device',
+      'candidate_pair',
     ].forEach((kind) => {
       defs
         .append('marker')
@@ -562,6 +563,8 @@ function inventoryEdgeColor(kind: string): string {
       return 'var(--graph-warn)';
     case 'same_device':
       return 'var(--graph-danger)';
+    case 'candidate_pair':
+      return 'var(--graph-info)';
     default:
       return 'var(--color-border)';
   }
@@ -572,6 +575,7 @@ function inventoryLinkDistance(kind: string): number {
     case 'cluster_member':
       return 54;
     case 'same_device':
+    case 'candidate_pair':
     case 'merge_candidate':
       return 64;
     case 'owns':

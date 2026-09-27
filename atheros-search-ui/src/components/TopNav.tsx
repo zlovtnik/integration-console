@@ -12,6 +12,7 @@ import { ApiStatus } from './ApiStatus';
 import { ShortcutsModal } from './ShortcutsModal';
 import { ThemeToggle } from './ThemeToggle';
 import { shortcutsOpen, setShortcutsOpen } from '~/stores/uiStore';
+import { reportLink } from '~/utils/reportNavigation';
 
 export function TopNav() {
   const location = useLocation();
@@ -29,7 +30,7 @@ export function TopNav() {
         <ul role="list" class="nav-links">
           <li>
             <A
-              href="/"
+              href={reportLink('/', location.pathname, location.search)}
               class="nav-link"
               aria-current={location.pathname === '/' ? 'page' : undefined}
             >
@@ -39,7 +40,7 @@ export function TopNav() {
           </li>
           <li>
             <A
-              href="/graph"
+              href={reportLink('/graph', location.pathname, location.search)}
               class="nav-link"
               aria-current={location.pathname === '/graph' ? 'page' : undefined}
             >
@@ -49,7 +50,11 @@ export function TopNav() {
           </li>
           <li>
             <A
-              href="/inventory"
+              href={reportLink(
+                '/inventory',
+                location.pathname,
+                location.search,
+              )}
               class="nav-link"
               aria-current={
                 location.pathname === '/inventory' ? 'page' : undefined

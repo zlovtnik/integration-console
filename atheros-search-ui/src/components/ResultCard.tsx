@@ -70,7 +70,7 @@ export function ResultCard(props: {
   const titleId = () => `card-title-${safeId()}`;
 
   return (
-      <article
+    <article
       class={`result-card result-card--${props.result.source_kind || 'unknown'} ${
         props.focused ? 'result-card--focused' : ''
       }`}
@@ -132,7 +132,9 @@ export function ResultCard(props: {
         </Show>
         <Show when={typeof props.result.blocked === 'boolean'}>
           <dt class="sr-only">Blocked state</dt>
-          <dd class="caption">{props.result.blocked ? 'Blocked' : 'Allowed'}</dd>
+          <dd class="caption">
+            {props.result.blocked ? 'Blocked' : 'Allowed'}
+          </dd>
         </Show>
         <Show when={props.result.classification}>
           <dt class="sr-only">Classification</dt>
@@ -141,7 +143,8 @@ export function ResultCard(props: {
         <Show when={props.result.window_start && props.result.window_end}>
           <dt class="sr-only">Window</dt>
           <dd class="caption">
-            {formatDateTime(props.result.window_start!)} – {formatDateTime(props.result.window_end!)}
+            {formatDateTime(props.result.window_start!)} –{' '}
+            {formatDateTime(props.result.window_end!)}
           </dd>
         </Show>
       </dl>
@@ -171,7 +174,7 @@ export function ResultCard(props: {
           <span>{expanded() ? 'Hide detail' : 'Show detail'}</span>
         </button>
         <A
-          href={`/explain/${encodeURIComponent(sourceKey())}?query=${encodeURIComponent(props.queryText)}&kind=${encodeURIComponent(props.kind)}`}
+          href={`/explain/${encodeURIComponent(sourceKey())}?query=${encodeURIComponent(props.queryText)}&kind=${encodeURIComponent(props.kind)}&return=${encodeURIComponent(window.location.pathname + window.location.search)}`}
           class="btn btn-ghost"
         >
           <ExternalLink size={16} aria-hidden="true" />

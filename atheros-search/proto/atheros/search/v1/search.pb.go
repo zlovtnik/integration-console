@@ -9,6 +9,7 @@ package searchv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -139,26 +140,29 @@ func (SearchMode) EnumDescriptor() ([]byte, []int) {
 }
 
 type SearchFilters struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	LocationIds       []string               `protobuf:"bytes,1,rep,name=location_ids,json=locationIds,proto3" json:"location_ids,omitempty"`
-	SensorIds         []string               `protobuf:"bytes,2,rep,name=sensor_ids,json=sensorIds,proto3" json:"sensor_ids,omitempty"`
-	Ssid              string                 `protobuf:"bytes,3,opt,name=ssid,proto3" json:"ssid,omitempty"`
-	SourceMac         string                 `protobuf:"bytes,4,opt,name=source_mac,json=sourceMac,proto3" json:"source_mac,omitempty"`
-	FrameSubtypes     []string               `protobuf:"bytes,5,rep,name=frame_subtypes,json=frameSubtypes,proto3" json:"frame_subtypes,omitempty"`
-	ObservedAfter     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=observed_after,json=observedAfter,proto3" json:"observed_after,omitempty"`
-	ObservedBefore    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=observed_before,json=observedBefore,proto3" json:"observed_before,omitempty"`
-	ThreatOnly        bool                   `protobuf:"varint,8,opt,name=threat_only,json=threatOnly,proto3" json:"threat_only,omitempty"`
-	HandshakeOnly     bool                   `protobuf:"varint,9,opt,name=handshake_only,json=handshakeOnly,proto3" json:"handshake_only,omitempty"`
-	SecurityFlagsMask int32                  `protobuf:"varint,10,opt,name=security_flags_mask,json=securityFlagsMask,proto3" json:"security_flags_mask,omitempty"`
-	Tags              []string               `protobuf:"bytes,11,rep,name=tags,proto3" json:"tags,omitempty"`
-	SourceMacs        []string               `protobuf:"bytes,12,rep,name=source_macs,json=sourceMacs,proto3" json:"source_macs,omitempty"`
-	Host              string                 `protobuf:"bytes,13,opt,name=host,proto3" json:"host,omitempty"`
-	Blocked           *bool                  `protobuf:"varint,14,opt,name=blocked,proto3,oneof" json:"blocked,omitempty"`
-	EventTypes        []string               `protobuf:"bytes,15,rep,name=event_types,json=eventTypes,proto3" json:"event_types,omitempty"`
-	ProxyDeviceIds    []string               `protobuf:"bytes,16,rep,name=proxy_device_ids,json=proxyDeviceIds,proto3" json:"proxy_device_ids,omitempty"`
-	Classifications   []string               `protobuf:"bytes,17,rep,name=classifications,proto3" json:"classifications,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	LocationIds           []string               `protobuf:"bytes,1,rep,name=location_ids,json=locationIds,proto3" json:"location_ids,omitempty"`
+	SensorIds             []string               `protobuf:"bytes,2,rep,name=sensor_ids,json=sensorIds,proto3" json:"sensor_ids,omitempty"`
+	Ssid                  string                 `protobuf:"bytes,3,opt,name=ssid,proto3" json:"ssid,omitempty"`
+	SourceMac             string                 `protobuf:"bytes,4,opt,name=source_mac,json=sourceMac,proto3" json:"source_mac,omitempty"`
+	FrameSubtypes         []string               `protobuf:"bytes,5,rep,name=frame_subtypes,json=frameSubtypes,proto3" json:"frame_subtypes,omitempty"`
+	ObservedAfter         *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=observed_after,json=observedAfter,proto3" json:"observed_after,omitempty"`
+	ObservedBefore        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=observed_before,json=observedBefore,proto3" json:"observed_before,omitempty"`
+	ThreatOnly            bool                   `protobuf:"varint,8,opt,name=threat_only,json=threatOnly,proto3" json:"threat_only,omitempty"`
+	HandshakeOnly         bool                   `protobuf:"varint,9,opt,name=handshake_only,json=handshakeOnly,proto3" json:"handshake_only,omitempty"`
+	SecurityFlagsMask     int32                  `protobuf:"varint,10,opt,name=security_flags_mask,json=securityFlagsMask,proto3" json:"security_flags_mask,omitempty"`
+	Tags                  []string               `protobuf:"bytes,11,rep,name=tags,proto3" json:"tags,omitempty"`
+	SourceMacs            []string               `protobuf:"bytes,12,rep,name=source_macs,json=sourceMacs,proto3" json:"source_macs,omitempty"`
+	Host                  string                 `protobuf:"bytes,13,opt,name=host,proto3" json:"host,omitempty"`
+	Blocked               *bool                  `protobuf:"varint,14,opt,name=blocked,proto3,oneof" json:"blocked,omitempty"`
+	EventTypes            []string               `protobuf:"bytes,15,rep,name=event_types,json=eventTypes,proto3" json:"event_types,omitempty"`
+	ProxyDeviceIds        []string               `protobuf:"bytes,16,rep,name=proxy_device_ids,json=proxyDeviceIds,proto3" json:"proxy_device_ids,omitempty"`
+	Classifications       []string               `protobuf:"bytes,17,rep,name=classifications,proto3" json:"classifications,omitempty"`
+	Bssid                 string                 `protobuf:"bytes,18,opt,name=bssid,proto3" json:"bssid,omitempty"`
+	ObservedApContextOnly bool                   `protobuf:"varint,19,opt,name=observed_ap_context_only,json=observedApContextOnly,proto3" json:"observed_ap_context_only,omitempty"`
+	EntityQuery           string                 `protobuf:"bytes,20,opt,name=entity_query,json=entityQuery,proto3" json:"entity_query,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *SearchFilters) Reset() {
@@ -310,6 +314,27 @@ func (x *SearchFilters) GetClassifications() []string {
 	return nil
 }
 
+func (x *SearchFilters) GetBssid() string {
+	if x != nil {
+		return x.Bssid
+	}
+	return ""
+}
+
+func (x *SearchFilters) GetObservedApContextOnly() bool {
+	if x != nil {
+		return x.ObservedApContextOnly
+	}
+	return false
+}
+
+func (x *SearchFilters) GetEntityQuery() string {
+	if x != nil {
+		return x.EntityQuery
+	}
+	return ""
+}
+
 type SearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
@@ -411,6 +436,8 @@ type SearchResponse struct {
 	DenseResultCount  int32                  `protobuf:"varint,5,opt,name=dense_result_count,json=denseResultCount,proto3" json:"dense_result_count,omitempty"`
 	SparseResultCount int32                  `protobuf:"varint,6,opt,name=sparse_result_count,json=sparseResultCount,proto3" json:"sparse_result_count,omitempty"`
 	FusedResultCount  int32                  `protobuf:"varint,7,opt,name=fused_result_count,json=fusedResultCount,proto3" json:"fused_result_count,omitempty"`
+	Report            *structpb.Struct       `protobuf:"bytes,8,opt,name=report,proto3" json:"report,omitempty"`
+	GeneratedAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -492,6 +519,20 @@ func (x *SearchResponse) GetFusedResultCount() int32 {
 		return x.FusedResultCount
 	}
 	return 0
+}
+
+func (x *SearchResponse) GetReport() *structpb.Struct {
+	if x != nil {
+		return x.Report
+	}
+	return nil
+}
+
+func (x *SearchResponse) GetGeneratedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.GeneratedAt
+	}
+	return nil
 }
 
 type SearchResult struct {
@@ -807,6 +848,7 @@ type ExplainResponse struct {
 	ThreatBoost     float32                `protobuf:"fixed32,5,opt,name=threat_boost,json=threatBoost,proto3" json:"threat_boost,omitempty"`
 	BoostReasons    []string               `protobuf:"bytes,6,rep,name=boost_reasons,json=boostReasons,proto3" json:"boost_reasons,omitempty"`
 	SequenceLogProb float64                `protobuf:"fixed64,7,opt,name=sequence_log_prob,json=sequenceLogProb,proto3" json:"sequence_log_prob,omitempty"`
+	RankingMethod   string                 `protobuf:"bytes,8,opt,name=ranking_method,json=rankingMethod,proto3" json:"ranking_method,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -888,6 +930,13 @@ func (x *ExplainResponse) GetSequenceLogProb() float64 {
 		return x.SequenceLogProb
 	}
 	return 0
+}
+
+func (x *ExplainResponse) GetRankingMethod() string {
+	if x != nil {
+		return x.RankingMethod
+	}
+	return ""
 }
 
 type SuggestFiltersRequest struct {
@@ -1006,7 +1055,7 @@ var File_atheros_search_v1_search_proto protoreflect.FileDescriptor
 
 const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\n" +
-	"\x1eatheros/search/v1/search.proto\x12\x11atheros.search.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x94\x05\n" +
+	"\x1eatheros/search/v1/search.proto\x12\x11atheros.search.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x86\x06\n" +
 	"\rSearchFilters\x12!\n" +
 	"\flocation_ids\x18\x01 \x03(\tR\vlocationIds\x12\x1d\n" +
 	"\n" +
@@ -1030,7 +1079,10 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\vevent_types\x18\x0f \x03(\tR\n" +
 	"eventTypes\x12(\n" +
 	"\x10proxy_device_ids\x18\x10 \x03(\tR\x0eproxyDeviceIds\x12(\n" +
-	"\x0fclassifications\x18\x11 \x03(\tR\x0fclassificationsB\n" +
+	"\x0fclassifications\x18\x11 \x03(\tR\x0fclassifications\x12\x14\n" +
+	"\x05bssid\x18\x12 \x01(\tR\x05bssid\x127\n" +
+	"\x18observed_ap_context_only\x18\x13 \x01(\bR\x15observedApContextOnly\x12!\n" +
+	"\fentity_query\x18\x14 \x01(\tR\ventityQueryB\n" +
 	"\n" +
 	"\b_blocked\"\xa2\x02\n" +
 	"\rSearchRequest\x12\x14\n" +
@@ -1041,7 +1093,7 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\x05top_k\x18\x05 \x01(\x05R\x04topK\x12%\n" +
 	"\x0emin_similarity\x18\x06 \x01(\x02R\rminSimilarity\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\a \x01(\tR\tsessionId\"\xd7\x02\n" +
+	"session_id\x18\a \x01(\tR\tsessionId\"\xc7\x03\n" +
 	"\x0eSearchResponse\x12\x19\n" +
 	"\bquery_id\x18\x01 \x01(\x03R\aqueryId\x129\n" +
 	"\aresults\x18\x02 \x03(\v2\x1f.atheros.search.v1.SearchResultR\aresults\x12:\n" +
@@ -1049,7 +1101,9 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\x0ffallback_reason\x18\x04 \x01(\tR\x0efallbackReason\x12,\n" +
 	"\x12dense_result_count\x18\x05 \x01(\x05R\x10denseResultCount\x12.\n" +
 	"\x13sparse_result_count\x18\x06 \x01(\x05R\x11sparseResultCount\x12,\n" +
-	"\x12fused_result_count\x18\a \x01(\x05R\x10fusedResultCount\"\xac\b\n" +
+	"\x12fused_result_count\x18\a \x01(\x05R\x10fusedResultCount\x12/\n" +
+	"\x06report\x18\b \x01(\v2\x17.google.protobuf.StructR\x06report\x12=\n" +
+	"\fgenerated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\"\xac\b\n" +
 	"\fSearchResult\x12\x1d\n" +
 	"\n" +
 	"source_key\x18\x01 \x01(\tR\tsourceKey\x12!\n" +
@@ -1096,7 +1150,7 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x1d\n" +
 	"\n" +
 	"source_key\x18\x02 \x01(\tR\tsourceKey\x121\n" +
-	"\x04kind\x18\x03 \x01(\x0e2\x1d.atheros.search.v1.SearchKindR\x04kind\"\x89\x02\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\x1d.atheros.search.v1.SearchKindR\x04kind\"\xb0\x02\n" +
 	"\x0fExplainResponse\x12\x1d\n" +
 	"\n" +
 	"source_key\x18\x01 \x01(\tR\tsourceKey\x12\x1f\n" +
@@ -1107,7 +1161,8 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"fusedScore\x12!\n" +
 	"\fthreat_boost\x18\x05 \x01(\x02R\vthreatBoost\x12#\n" +
 	"\rboost_reasons\x18\x06 \x03(\tR\fboostReasons\x12*\n" +
-	"\x11sequence_log_prob\x18\a \x01(\x01R\x0fsequenceLogProb\"/\n" +
+	"\x11sequence_log_prob\x18\a \x01(\x01R\x0fsequenceLogProb\x12%\n" +
+	"\x0eranking_method\x18\b \x01(\tR\rrankingMethod\"/\n" +
 	"\x15SuggestFiltersRequest\x12\x16\n" +
 	"\x06prefix\x18\x01 \x01(\tR\x06prefix\"\x97\x01\n" +
 	"\x16SuggestFiltersResponse\x12\x14\n" +
@@ -1165,6 +1220,7 @@ var file_atheros_search_v1_search_proto_goTypes = []any{
 	(*SuggestFiltersResponse)(nil), // 9: atheros.search.v1.SuggestFiltersResponse
 	nil,                            // 10: atheros.search.v1.SearchResult.HighlightsEntry
 	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),        // 12: google.protobuf.Struct
 }
 var file_atheros_search_v1_search_proto_depIdxs = []int32{
 	11, // 0: atheros.search.v1.SearchFilters.observed_after:type_name -> google.protobuf.Timestamp
@@ -1174,24 +1230,26 @@ var file_atheros_search_v1_search_proto_depIdxs = []int32{
 	2,  // 4: atheros.search.v1.SearchRequest.filters:type_name -> atheros.search.v1.SearchFilters
 	5,  // 5: atheros.search.v1.SearchResponse.results:type_name -> atheros.search.v1.SearchResult
 	1,  // 6: atheros.search.v1.SearchResponse.mode_used:type_name -> atheros.search.v1.SearchMode
-	11, // 7: atheros.search.v1.SearchResult.observed_at:type_name -> google.protobuf.Timestamp
-	10, // 8: atheros.search.v1.SearchResult.highlights:type_name -> atheros.search.v1.SearchResult.HighlightsEntry
-	11, // 9: atheros.search.v1.SearchResult.window_start:type_name -> google.protobuf.Timestamp
-	11, // 10: atheros.search.v1.SearchResult.window_end:type_name -> google.protobuf.Timestamp
-	0,  // 11: atheros.search.v1.ExplainRequest.kind:type_name -> atheros.search.v1.SearchKind
-	3,  // 12: atheros.search.v1.SearchService.Search:input_type -> atheros.search.v1.SearchRequest
-	3,  // 13: atheros.search.v1.SearchService.SearchStream:input_type -> atheros.search.v1.SearchRequest
-	6,  // 14: atheros.search.v1.SearchService.Explain:input_type -> atheros.search.v1.ExplainRequest
-	8,  // 15: atheros.search.v1.SearchService.SuggestFilters:input_type -> atheros.search.v1.SuggestFiltersRequest
-	4,  // 16: atheros.search.v1.SearchService.Search:output_type -> atheros.search.v1.SearchResponse
-	5,  // 17: atheros.search.v1.SearchService.SearchStream:output_type -> atheros.search.v1.SearchResult
-	7,  // 18: atheros.search.v1.SearchService.Explain:output_type -> atheros.search.v1.ExplainResponse
-	9,  // 19: atheros.search.v1.SearchService.SuggestFilters:output_type -> atheros.search.v1.SuggestFiltersResponse
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	12, // 7: atheros.search.v1.SearchResponse.report:type_name -> google.protobuf.Struct
+	11, // 8: atheros.search.v1.SearchResponse.generated_at:type_name -> google.protobuf.Timestamp
+	11, // 9: atheros.search.v1.SearchResult.observed_at:type_name -> google.protobuf.Timestamp
+	10, // 10: atheros.search.v1.SearchResult.highlights:type_name -> atheros.search.v1.SearchResult.HighlightsEntry
+	11, // 11: atheros.search.v1.SearchResult.window_start:type_name -> google.protobuf.Timestamp
+	11, // 12: atheros.search.v1.SearchResult.window_end:type_name -> google.protobuf.Timestamp
+	0,  // 13: atheros.search.v1.ExplainRequest.kind:type_name -> atheros.search.v1.SearchKind
+	3,  // 14: atheros.search.v1.SearchService.Search:input_type -> atheros.search.v1.SearchRequest
+	3,  // 15: atheros.search.v1.SearchService.SearchStream:input_type -> atheros.search.v1.SearchRequest
+	6,  // 16: atheros.search.v1.SearchService.Explain:input_type -> atheros.search.v1.ExplainRequest
+	8,  // 17: atheros.search.v1.SearchService.SuggestFilters:input_type -> atheros.search.v1.SuggestFiltersRequest
+	4,  // 18: atheros.search.v1.SearchService.Search:output_type -> atheros.search.v1.SearchResponse
+	5,  // 19: atheros.search.v1.SearchService.SearchStream:output_type -> atheros.search.v1.SearchResult
+	7,  // 20: atheros.search.v1.SearchService.Explain:output_type -> atheros.search.v1.ExplainResponse
+	9,  // 21: atheros.search.v1.SearchService.SuggestFilters:output_type -> atheros.search.v1.SuggestFiltersResponse
+	18, // [18:22] is the sub-list for method output_type
+	14, // [14:18] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_atheros_search_v1_search_proto_init() }

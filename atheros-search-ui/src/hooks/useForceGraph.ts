@@ -404,7 +404,7 @@ function severityHaloColor(item: SimNode): string {
 export function edgeKindLabel(kind: EdgeKind): string {
   switch (kind) {
     case 'association':
-      return 'Device-AP association';
+      return 'Observed AP context';
     case 'cluster_member':
       return 'Identity cluster member';
     case 'rf_proximity':

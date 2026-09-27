@@ -31,6 +31,9 @@ func TestSimilarityInventoryIncludesPendingMergeCandidate(t *testing.T) {
 	require.Contains(t, nodes, "merge:candidate-1")
 	require.Contains(t, nodes, "cluster:candidate-1")
 	require.Len(t, edges, 5)
+	for _, edge := range edges {
+		require.NotEqual(t, InventoryEdgeSameDevice, edge.Kind)
+	}
 	require.NoError(t, tx.Rollback())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -43,7 +46,7 @@ func TestInventoryAllScopeReturnsBoundedDevicePage(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM atheros_search.devices d`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
-	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM atheros_search.devices WHERE registered`).
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM atheros_search.devices d WHERE .* AND d.registered`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectQuery(`(?s)FROM atheros_search.devices d.*ORDER BY d.mac.*LIMIT \$1`).
 		WithArgs(3).

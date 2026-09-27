@@ -26,7 +26,7 @@ test('submits a streaming search and renders an expandable result', async ({
   await expect(
     page.getByRole('heading', { name: 'event:lab:001' }),
   ).toBeVisible();
-  await expect(page.getByRole('meter', { name: 'Score 91.0%' })).toBeVisible();
+  await expect(page.getByText('Relevance rank: 0.9100')).toBeVisible();
 
   await page.getByRole('button', { name: 'Show detail' }).click();
   await expect(page.getByText('"channel": 11')).toBeVisible();

@@ -63,6 +63,7 @@ type RawSearchResult = Partial<SearchResult> & {
 };
 
 type RawSearchResponse = Omit<Partial<SearchResponse>, 'results'> & {
+  generatedAt?: unknown;
   queryId?: unknown;
   modeUsed?: unknown;
   fallbackReason?: unknown;
@@ -324,15 +325,9 @@ export function normalizeSearchResult(raw: RawSearchResult): SearchResult {
   if (host) result.host = host;
   const blocked = optionalBoolean(raw.blocked);
   if (blocked !== undefined) result.blocked = blocked;
-  const proxyEventType = firstString(
-    raw.proxy_event_type,
-    raw.proxyEventType,
-  );
+  const proxyEventType = firstString(raw.proxy_event_type, raw.proxyEventType);
   if (proxyEventType) result.proxy_event_type = proxyEventType;
-  const proxyDeviceId = firstString(
-    raw.proxy_device_id,
-    raw.proxyDeviceId,
-  );
+  const proxyDeviceId = firstString(raw.proxy_device_id, raw.proxyDeviceId);
   if (proxyDeviceId) result.proxy_device_id = proxyDeviceId;
   const windowStart = firstString(raw.window_start, raw.windowStart);
   if (windowStart) result.window_start = windowStart;
@@ -347,6 +342,9 @@ export function normalizeSearchMeta(
   raw: RawSearchResponse,
 ): Partial<SearchResponse> {
   const meta: Partial<SearchResponse> = {};
+  if (raw.report) meta.report = raw.report as import('./types').ReportMetadata;
+  const generated = firstString(raw.generated_at, raw.generatedAt);
+  if (generated) meta.generated_at = generated;
   const modeUsed = firstString(raw.mode_used, raw.modeUsed);
   const fallbackReason = firstString(raw.fallback_reason, raw.fallbackReason);
   const denseResultCount = firstNumber(
@@ -380,6 +378,7 @@ export function normalizeSearchResponse(
   const rawResults = Array.isArray(raw.results) ? raw.results : [];
 
   return {
+    ...meta,
     query_id: meta.query_id ?? 0,
     results: rawResults.map((result) =>
       normalizeSearchResult(result as RawSearchResult),
@@ -394,7 +393,9 @@ export function normalizeSearchResponse(
 
 type RawExplainResponse = Record<string, unknown>;
 
-export function normalizeExplainResponse(raw: RawExplainResponse): ExplainResponse {
+export function normalizeExplainResponse(
+  raw: RawExplainResponse,
+): ExplainResponse {
   const normalized: ExplainResponse = {
     source_key: firstString(raw.source_key, raw.sourceKey),
     dense_score: firstNumber(raw.dense_score, raw.denseScore),
@@ -402,10 +403,7 @@ export function normalizeExplainResponse(raw: RawExplainResponse): ExplainRespon
     fused_score: firstNumber(raw.fused_score, raw.fusedScore),
     threat_boost: firstNumber(raw.threat_boost, raw.threatBoost),
     boost_reasons: stringArray(raw.boost_reasons ?? raw.boostReasons),
-    sequence_log_prob: firstNumber(
-      raw.sequence_log_prob,
-      raw.sequenceLogProb,
-    ),
+    sequence_log_prob: firstNumber(raw.sequence_log_prob, raw.sequenceLogProb),
   };
   const sequenceTokens = stringArray(
     raw.sequence_tokens ?? raw.sequenceTokens ?? [],
@@ -425,6 +423,8 @@ export function normalizeExplainResponse(raw: RawExplainResponse): ExplainRespon
     normalized.scores_available = found === undefined || found;
   }
   const sourceKind = firstString(raw.source_kind, raw.sourceKind);
+  const method = firstString(raw.ranking_method, raw.rankingMethod);
+  if (method) normalized.ranking_method = method;
   if (sourceKind) normalized.source_kind = sourceKind;
   return normalized;
 }
@@ -469,6 +469,14 @@ function normalizeInventoryNode(raw: RawInventoryNode): InventoryNode {
   const tags = stringArray(raw.tags);
 
   if (mac) node.mac = mac;
+  const registered = optionalBoolean(raw.registered);
+  if (registered !== undefined) node.registered = registered;
+  const noAPLink = optionalBoolean(raw.no_ap_link_in_projection);
+  if (noAPLink !== undefined) node.no_ap_link_in_projection = noAPLink;
+  const pending = optionalNumber(raw.pending_review_count);
+  if (pending !== undefined) node.pending_review_count = pending;
+  const firstSeen = firstString(raw.first_seen);
+  if (firstSeen) node.first_seen = firstSeen;
   if (knownMacs.length > 0) node.known_macs = knownMacs;
   if (displayName) node.display_name = displayName;
   if (ownerId) node.owner_id = ownerId;
@@ -520,16 +528,16 @@ export function normalizeInventoryResponse(
       raw.edgeCount,
       normalizedEdges.length,
     ),
-    total_registered_count: firstNumber(
-      raw.total_registered_count,
-      raw.totalRegisteredCount,
-      normalizedNodes.filter((node) => node.kind === 'device').length,
-    ),
   };
-  const nextPageCursor = firstString(
-    raw.next_page_cursor,
-    raw.nextPageCursor,
+  const registeredCount = optionalNumber(
+    raw.total_registered_count,
+    raw.totalRegisteredCount,
   );
+  if (registeredCount !== undefined)
+    response.total_registered_count = registeredCount;
+  if (raw.report)
+    response.report = raw.report as import('./types').ReportMetadata;
+  const nextPageCursor = firstString(raw.next_page_cursor, raw.nextPageCursor);
   if (nextPageCursor) response.next_page_cursor = nextPageCursor;
   const totalNodeCount = optionalNumber(
     raw.total_node_count,
@@ -646,9 +654,10 @@ async function request<T>(
 
   let response: Response;
   try {
-    response = path.startsWith('/v1/') && path !== '/v1/healthz'
-      ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit)
-      : await fetch(`${env.apiBase}${path}`, requestInit);
+    response =
+      path.startsWith('/v1/') && path !== '/v1/healthz'
+        ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit)
+        : await fetch(`${env.apiBase}${path}`, requestInit);
   } finally {
     timeout.cleanup();
   }
@@ -661,6 +670,26 @@ async function request<T>(
 }
 
 export const api = {
+  etlHealth: (signal?: AbortSignal) =>
+    request<{
+      measured_at: string;
+      ingest_pending: number;
+      ingest_failed: number;
+      embedding_pending: number;
+      embedding_failed: number;
+    }>('/v1/etl/health', {}, signal, 3000),
+  network: (filters: import('./types').NetworkFilters, signal?: AbortSignal) =>
+    request<import('./types').NetworkResponse>(
+      '/v1/network-map',
+      { method: 'POST', body: JSON.stringify(filters) },
+      signal,
+    ),
+  pairDetail: (candidateId: string, signal?: AbortSignal) =>
+    request<import('./types').PairDetail>(
+      `/v1/inventory/merge-candidates/${encodeURIComponent(candidateId)}`,
+      {},
+      signal,
+    ),
   search: async (body: SearchRequest, signal?: AbortSignal) =>
     normalizeSearchResponse(
       await request<RawSearchResponse>(

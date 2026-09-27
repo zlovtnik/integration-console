@@ -1,277 +1,246 @@
-import { For } from 'solid-js';
-import { LocateFixed, RefreshCw, RotateCcw } from 'lucide-solid';
+import { For, Show } from 'solid-js';
 import {
-  INVENTORY_LIMITS,
-  INVENTORY_SCOPE_ALL,
-  inventoryCoverage,
   inventoryFilters,
   inventoryLoading,
-  inventoryMeta,
   inventoryViewMode,
   resetInventoryFilters,
   setInventoryFilters,
   setInventoryViewMode,
 } from '~/stores/inventoryStore';
-import type { InventoryFilters } from '~/api/types';
 
-const GROUPINGS: {
-  value: InventoryFilters['grouping'];
-  label: string;
-  title: string;
-}[] = [
-  {
-    value: 'registry',
-    label: 'Registry',
-    title: 'Known devices, active and inactive',
-  },
-  {
-    value: 'cmdb',
-    label: 'CMDB',
-    title: 'Owner and location relationships',
-  },
-  {
-    value: 'similarity',
-    label: 'Similarity',
-    title: 'Fingerprint clusters and merge candidates',
-  },
-];
-
-function splitList(value: string): string[] | undefined {
-  const values = value
+function list(value: string) {
+  return value
     .split(',')
-    .map((item) => item.trim())
+    .map((v) => v.trim())
     .filter(Boolean);
-  return values.length > 0 ? values : undefined;
 }
-
-function joinList(value: string[] | undefined): string {
-  return value?.join(', ') ?? '';
-}
-
-function limitIndex(): number {
-  const index = INVENTORY_LIMITS.indexOf(
-    (inventoryFilters.limit ?? 400) as (typeof INVENTORY_LIMITS)[number],
-  );
-  return index >= 0 ? index : 2;
-}
-
-function coverageLabel(): string {
-  const coverage = inventoryCoverage();
-  if (!coverage) return '';
-  const total = coverage.totalDevices;
-  if (coverage.complete && total > 0) {
-    return `All ${total} devices`;
-  }
-  if (total > 0) {
-    return `${coverage.loadedNodes} / ${total} loaded`;
-  }
-  return `${coverage.loadedNodes} loaded`;
-}
-
-function confidencePercent(): string {
-  return Math.round(
-    (inventoryFilters.min_dedup_confidence ?? 0) * 100,
-  ).toString();
-}
-
 export function InventoryControls(props: {
   onRefresh: () => void;
   onResetView: () => void;
 }) {
-  function handleSubmit(event: SubmitEvent) {
-    event.preventDefault();
-    props.onRefresh();
-  }
-
+  const preset = () =>
+    inventoryFilters.needs_identity_review
+      ? 'review'
+      : inventoryFilters.registered === true
+        ? 'registered'
+        : 'all';
+  const applied = () =>
+    [
+      inventoryFilters.query ? 'Search: ' + inventoryFilters.query : '',
+      inventoryFilters.owner_ids?.length
+        ? 'Owner: ' + inventoryFilters.owner_ids.join(', ')
+        : '',
+      inventoryFilters.location_ids?.length
+        ? 'Location: ' + inventoryFilters.location_ids.join(', ')
+        : '',
+      inventoryFilters.sensor_ids?.length
+        ? 'Sensor: ' + inventoryFilters.sensor_ids.join(', ')
+        : '',
+      inventoryFilters.observed_after
+        ? 'After: ' + inventoryFilters.observed_after
+        : '',
+      inventoryFilters.observed_before
+        ? 'Before: ' + inventoryFilters.observed_before
+        : '',
+      preset() === 'review'
+        ? 'Needs identity review'
+        : preset() === 'registered'
+          ? 'Registered'
+          : 'All identifiers',
+      inventoryFilters.tags?.length
+        ? 'Tags: ' + inventoryFilters.tags.join(', ')
+        : '',
+      inventoryFilters.active_only ? 'Active registry rows' : '',
+      'Sort: ' + (inventoryFilters.sort ?? 'last_observed'),
+    ].filter(Boolean);
   return (
-    <form class="graph-controls inventory-controls" onSubmit={handleSubmit}>
-      <div class="graph-control-grid inventory-control-grid">
-        <label class="field graph-field">
-          <span>Owners</span>
+    <div class="report-controls">
+      <div class="report-control-grid">
+        <label class="field">
+          <span>Identifier or name</span>
           <input
-            value={joinList(inventoryFilters.owner_ids)}
-            placeholder="security, facilities"
-            onInput={(event) =>
+            type="search"
+            value={inventoryFilters.query ?? ''}
+            onInput={(e) => setInventoryFilters('query', e.currentTarget.value)}
+          />
+        </label>
+        <label class="field">
+          <span>Owner</span>
+          <input
+            value={inventoryFilters.owner_ids?.join(', ') ?? ''}
+            onInput={(e) =>
+              setInventoryFilters('owner_ids', list(e.currentTarget.value))
+            }
+          />
+        </label>
+        <label class="field">
+          <span>Location</span>
+          <input
+            value={inventoryFilters.location_ids?.join(', ') ?? ''}
+            onInput={(e) =>
+              setInventoryFilters('location_ids', list(e.currentTarget.value))
+            }
+          />
+        </label>
+        <label class="field">
+          <span>Identifiers</span>
+          <select
+            value={preset()}
+            onChange={(e) => {
               setInventoryFilters(
-                'owner_ids',
-                splitList(event.currentTarget.value),
-              )
-            }
-          />
-        </label>
-
-        <label class="field graph-field">
-          <span>Locations</span>
-          <input
-            value={joinList(inventoryFilters.location_ids)}
-            placeholder="lab-east, floor-2"
-            onInput={(event) =>
+                'registered',
+                e.currentTarget.value === 'registered' ? true : undefined,
+              );
               setInventoryFilters(
-                'location_ids',
-                splitList(event.currentTarget.value),
-              )
-            }
-          />
-        </label>
-
-        <label class="field graph-field">
-          <span>Tags</span>
-          <input
-            value={joinList(inventoryFilters.tags)}
-            placeholder="printer, managed"
-            onInput={(event) =>
-              setInventoryFilters('tags', splitList(event.currentTarget.value))
-            }
-          />
-        </label>
-
-        <label class="field graph-field">
-          <span>Confidence {confidencePercent()}%</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            value={confidencePercent()}
-            onInput={(event) =>
-              setInventoryFilters(
-                'min_dedup_confidence',
-                Number(event.currentTarget.value) / 100,
-              )
-            }
-          />
-        </label>
-      </div>
-
-      <fieldset
-        class="segmented-control inventory-grouping"
-        role="radiogroup"
-        aria-label="Inventory grouping"
-      >
-        <legend class="sr-only">Inventory grouping</legend>
-        <For each={GROUPINGS}>
-          {(option) => (
-            <label class="seg-option" title={option.title}>
-              <input
-                type="radio"
-                name="inventory-grouping"
-                value={option.value}
-                checked={inventoryFilters.grouping === option.value}
-                onChange={() => setInventoryFilters('grouping', option.value)}
-              />
-              <span>{option.label}</span>
-            </label>
-          )}
-        </For>
-      </fieldset>
-
-      <div class="graph-actions inventory-actions">
-        <fieldset
-          class="segmented-control inventory-view-mode"
-          role="radiogroup"
-          aria-label="Inventory view"
-        >
-          <legend class="sr-only">Inventory view</legend>
-          <label class="seg-option">
-            <input
-              type="radio"
-              name="inventory-view"
-              checked={inventoryViewMode() === 'graph'}
-              onChange={() => setInventoryViewMode('graph')}
-            />
-            <span>Graph</span>
-          </label>
-          <label class="seg-option">
-            <input
-              type="radio"
-              name="inventory-view"
-              checked={inventoryViewMode() === 'dedup_queue'}
-              onChange={() => setInventoryViewMode('dedup_queue')}
-            />
-            <span>Queue</span>
-          </label>
-        </fieldset>
-
-        <label class="switch-inline">
-          <input
-            type="checkbox"
-            checked={inventoryFilters.active_only ?? false}
-            onChange={(event) =>
-              setInventoryFilters(
-                'active_only',
-                event.currentTarget.checked || undefined,
-              )
-            }
-          />
-          <span>Active only</span>
-        </label>
-
-        <label class="field graph-limit-field">
-          <span>
-            {inventoryFilters.scope === INVENTORY_SCOPE_ALL
-              ? 'Devices All'
-              : `Limit ${inventoryFilters.limit ?? 400}`}
-          </span>
-          <input
-            type="range"
-            min="0"
-            max={String(INVENTORY_LIMITS.length)}
-            step="1"
-            value={
-              inventoryFilters.scope === INVENTORY_SCOPE_ALL
-                ? String(INVENTORY_LIMITS.length)
-                : limitIndex()
-            }
-            onInput={(event) => {
-              const index = Number(event.currentTarget.value);
-              if (index >= INVENTORY_LIMITS.length) {
-                setInventoryFilters('limit', undefined);
-                setInventoryFilters('scope', INVENTORY_SCOPE_ALL);
-              } else {
-                setInventoryFilters('scope', undefined);
-                setInventoryFilters(
-                  'limit',
-                  INVENTORY_LIMITS[index] ?? 400,
-                );
-              }
+                'needs_identity_review',
+                e.currentTarget.value === 'review',
+              );
             }}
-          />
+          >
+            <option value="all">All identifiers</option>
+            <option value="registered">Registered</option>
+            <option value="review">Needs identity review</option>
+          </select>
         </label>
-
-        <span class="graph-stat" aria-live="polite">
-          <strong>{inventoryMeta.node_count ?? 0}</strong> nodes
-          <strong>{inventoryMeta.edge_count ?? 0}</strong> edges
-          <strong>{inventoryMeta.total_registered_count ?? 0}</strong> devices
-          {coverageLabel() ? <span>{coverageLabel()}</span> : null}
-        </span>
-
+      </div>
+      <div class="report-toolbar">
+        <fieldset class="segmented-control" aria-label="Inventory view">
+          <legend class="sr-only">Inventory view</legend>
+          <For each={['table', 'graph', 'dedup_queue'] as const}>
+            {(view) => (
+              <label class="seg-option">
+                <input
+                  type="radio"
+                  name="inventory-view"
+                  checked={inventoryViewMode() === view}
+                  onChange={() => setInventoryViewMode(view)}
+                />
+                <span>
+                  {view === 'dedup_queue'
+                    ? 'Identity review'
+                    : view === 'table'
+                      ? 'Table'
+                      : 'Graph'}
+                </span>
+              </label>
+            )}
+          </For>
+        </fieldset>
+        <Show when={inventoryViewMode() !== 'table'}>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            disabled={inventoryLoading()}
+            onClick={() => props.onRefresh()}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onClick={() => props.onResetView()}
+          >
+            Reset view
+          </button>
+        </Show>
+      </div>
+      <details>
+        <summary>Advanced</summary>
+        <div class="report-control-grid">
+          <label class="field">
+            <span>Tags</span>
+            <input
+              value={inventoryFilters.tags?.join(', ') ?? ''}
+              onInput={(e) =>
+                setInventoryFilters('tags', list(e.currentTarget.value))
+              }
+            />
+          </label>
+          <label class="field">
+            <span>Minimum candidate score (0 to 1)</span>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={inventoryFilters.min_dedup_confidence ?? 0.75}
+              onChange={(e) =>
+                setInventoryFilters(
+                  'min_dedup_confidence',
+                  Number(e.currentTarget.value),
+                )
+              }
+            />
+          </label>
+          <Show when={inventoryViewMode() === 'graph'}>
+            <label class="field">
+              <span>Graph grouping</span>
+              <select
+                value={inventoryFilters.grouping}
+                onChange={(e) =>
+                  setInventoryFilters(
+                    'grouping',
+                    e.currentTarget.value as 'registry' | 'cmdb' | 'similarity',
+                  )
+                }
+              >
+                <option value="registry">Registry</option>
+                <option value="cmdb">Owner / location</option>
+                <option value="similarity">Pending similarity</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Graph limit</span>
+              <select
+                value={
+                  inventoryFilters.scope === 'all'
+                    ? 'all'
+                    : String(inventoryFilters.limit ?? 400)
+                }
+                onChange={(e) => {
+                  setInventoryFilters(
+                    'scope',
+                    e.currentTarget.value === 'all' ? 'all' : undefined,
+                  );
+                  setInventoryFilters(
+                    'limit',
+                    e.currentTarget.value === 'all'
+                      ? undefined
+                      : Number(e.currentTarget.value),
+                  );
+                }}
+              >
+                <option value="all">All (paginated)</option>
+                <For each={[100, 200, 400, 800]}>
+                  {(limit) => <option value={limit}>{limit}</option>}
+                </For>
+              </select>
+            </label>
+          </Show>
+          <label>
+            <input
+              type="checkbox"
+              checked={inventoryFilters.active_only ?? false}
+              onChange={(e) =>
+                setInventoryFilters('active_only', e.currentTarget.checked)
+              }
+            />{' '}
+            Active registry rows (does not imply online)
+          </label>
+        </div>
+      </details>
+      <div class="report-toolbar" aria-label="Applied filters">
+        <For each={applied()}>
+          {(label) => <span class="filter-chip">{label}</span>}
+        </For>
         <button
           type="button"
           class="btn btn-secondary"
-          onClick={() => props.onResetView()}
+          onClick={resetInventoryFilters}
         >
-          <LocateFixed size={16} aria-hidden="true" />
-          <span>Reset view</span>
-        </button>
-
-        <button
-          type="button"
-          class="btn btn-secondary"
-          onClick={() => resetInventoryFilters()}
-        >
-          <RotateCcw size={16} aria-hidden="true" />
-          <span>Reset filters</span>
-        </button>
-
-        <button
-          type="submit"
-          class="btn btn-primary"
-          disabled={inventoryLoading()}
-        >
-          <RefreshCw size={16} aria-hidden="true" />
-          <span>{inventoryLoading() ? 'Loading' : 'Refresh'}</span>
+          Reset filters
         </button>
       </div>
-    </form>
+    </div>
   );
 }

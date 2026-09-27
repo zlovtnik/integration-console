@@ -67,8 +67,10 @@ func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind st
 	}
 	vector := VectorLiteral(qvec)
 	query := denseKindQuery()
-
-	rows, err := pool.QueryContext(ctx, query, vector, overfetch, model, embeddingKindForSourceKind(kind), kind)
+	scope, scopeArgs := documentScopeSQL("candidate", opts.Filters, 6)
+	query = strings.Replace(query, "  ORDER BY embedding_row.embedding", scope+"\n  ORDER BY embedding_row.embedding", 1)
+	args := append([]any{vector, overfetch, model, embeddingKindForSourceKind(kind), kind}, scopeArgs...)
+	rows, err := pool.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

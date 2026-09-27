@@ -10,6 +10,7 @@ import {
   inventoryDedupLoading,
   inventoryDedupMeta,
   inventoryFilters,
+  inventoryError,
 } from '~/stores/inventoryStore';
 
 interface QueueItem {
@@ -43,7 +44,8 @@ function candidateDevices(
 }
 
 function deviceLabels(devices: InventoryNode[]): string {
-  if (devices.length > 0) return devices.map((device) => device.label).join(' / ');
+  if (devices.length > 0)
+    return devices.map((device) => device.label).join(' / ');
   return inventoryDedupLoading()
     ? 'Loading identities...'
     : 'Unresolved identities';
@@ -60,12 +62,12 @@ export function DedupQueue(props: {
     new Set(),
   );
   const queueItems = createMemo<QueueItem[]>(() => {
-    const nodes = new Map(inventoryDedupDevices().map((node) => [node.id, node]));
+    const nodes = new Map(
+      inventoryDedupDevices().map((node) => [node.id, node]),
+    );
     const minConfidence = inventoryFilters.min_dedup_confidence ?? 0;
     return inventoryDedupCandidates()
-      .filter(
-        (node) => (node.dedup_confidence ?? 0) >= minConfidence,
-      )
+      .filter((node) => (node.dedup_confidence ?? 0) >= minConfidence)
       .map((candidate) => ({
         candidate,
         devices: candidateDevices(candidate, nodes),
@@ -122,6 +124,12 @@ export function DedupQueue(props: {
           <span>{inventoryDedupError()}</span>
         </div>
       </Show>
+      <Show when={inventoryError()}>
+        <p role="alert">
+          {inventoryError()} Retry the decision using the same action. Evidence
+          is retained.
+        </p>
+      </Show>
 
       <Show
         when={queueItems().length > 0}
@@ -165,9 +173,7 @@ export function DedupQueue(props: {
                 <div role="cell">
                   <ScoreBar
                     variant="single"
-                    label={`Dedup confidence ${(
-                      (item.candidate.dedup_confidence ?? 0) * 100
-                    ).toFixed(1)}%`}
+                    label="Candidate score (0 to 1)"
                     result={confidenceResult(
                       item.candidate.dedup_confidence ?? 0,
                     )}
@@ -195,7 +201,7 @@ export function DedupQueue(props: {
                   <button
                     type="button"
                     class="icon-btn"
-                    aria-label={`Defer ${item.candidate.label}`}
+                    aria-label={`Record needs more data for ${item.candidate.label}`}
                     disabled={isCandidateBusy(item.candidate.id)}
                     onClick={() =>
                       void decide(item.candidate.id, 'needs_more_data')

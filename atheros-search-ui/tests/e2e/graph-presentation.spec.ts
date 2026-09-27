@@ -72,7 +72,21 @@ async function openGraph(page: Page, path: string) {
   await page.route('**/v1/inventory', (route) =>
     route.fulfill({ json: inventory }),
   );
-  await page.goto(path);
+  await page.goto(
+    path === '/inventory' ? '/inventory?view=graph&limit=400' : path,
+  );
+  if (path === '/graph') {
+    await page
+      .getByText('Advanced projection explorer', { exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Open projection explorer' })
+      .click();
+    await page.getByRole('button', { name: /^Edges/ }).click();
+    await page.getByRole('button', { name: 'shadow', exact: true }).click();
+    await page.getByRole('button', { name: 'probe', exact: true }).click();
+    await page.keyboard.press('Escape');
+  }
   await expect(page.locator('.graph-node')).toHaveCount(6);
 }
 
@@ -106,7 +120,7 @@ for (const path of ['/graph', '/inventory']) {
     if (path === '/graph') {
       await page.getByRole('button', { name: /^Edges/ }).click();
       await page
-        .getByRole('button', { name: 'Device-AP association', exact: true })
+        .getByRole('button', { name: 'Observed AP context', exact: true })
         .click();
       await expect(node(page, 'client')).toHaveClass(/dimmed/);
       await page.keyboard.press('Escape');
@@ -163,7 +177,10 @@ for (const path of ['/graph', '/inventory']) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(glow).toHaveCSS('animation-name', 'none');
     await expect(glow).toHaveCSS('opacity', '0.45');
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Refresh', exact: true })
+      .last()
+      .click();
     await expect(node(page, 'threat').locator('.graph-node-glow')).toHaveCount(
       1,
     );
@@ -272,7 +289,17 @@ for (const path of ['/graph', '/inventory']) {
     await page.route(`**/v1${path}`, (route) =>
       route.fulfill({ json: response }),
     );
-    await page.goto(path);
+    await page.goto(
+      path === '/inventory' ? '/inventory?view=graph&limit=800' : path,
+    );
+    if (path === '/graph') {
+      await page
+        .getByText('Advanced projection explorer', { exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: 'Open projection explorer' })
+        .click();
+    }
     const aggregate = page.locator('.graph-node[data-kind="aggregate_group"]');
     await expect(aggregate.locator('circle.graph-node-body')).toHaveCount(1);
     await expect(aggregate.locator('.graph-node-symbol')).toHaveText('401');

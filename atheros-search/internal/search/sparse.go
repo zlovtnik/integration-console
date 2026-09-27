@@ -85,7 +85,9 @@ ORDER BY ts_rank_cd(d.search_vector, websearch_to_tsquery('simple', $1)) DESC,
          d.observed_at DESC,
          d.source_id ASC
 LIMIT $3`
-	return scanSparseRows(ctx, pool, querySQL, opts, query, kind, overfetch)
+	scope, args := documentScopeSQL("d", opts.Filters, 4)
+	querySQL = strings.Replace(querySQL, "\nORDER BY", scope+"\nORDER BY", 1)
+	return scanSparseRows(ctx, pool, querySQL, opts, append([]any{query, kind, overfetch}, args...)...)
 }
 
 func sparseWildcard(ctx context.Context, pool *sql.DB, kind string, opts Options, limit int) ([]RawResult, error) {
@@ -118,7 +120,9 @@ FROM atheros_search.search_documents d
 WHERE d.source_kind = $1 AND d.status = 'active'
 ORDER BY d.observed_at DESC, d.source_id ASC
 LIMIT $2`
-	return scanSparseRows(ctx, pool, query, opts, kind, limit)
+	scope, args := documentScopeSQL("d", opts.Filters, 3)
+	query = strings.Replace(query, "\nORDER BY", scope+"\nORDER BY", 1)
+	return scanSparseRows(ctx, pool, query, opts, append([]any{kind, limit}, args...)...)
 }
 
 func scanSparseRows(ctx context.Context, pool *sql.DB, query string, opts Options, args ...any) ([]RawResult, error) {

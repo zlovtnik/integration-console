@@ -117,6 +117,10 @@ function compactSourceMacs(source: SearchFilters): string[] | undefined {
 
 export function cleanFilters(source: SearchFilters): SearchFilters {
   const next: SearchFilters = {};
+  if (source.bssid?.trim()) next.bssid = source.bssid.trim();
+  if (source.observed_ap_context_only) next.observed_ap_context_only = true;
+  if (source.entity_query?.trim())
+    next.entity_query = source.entity_query.trim();
   const locations = compactList(source.location_ids);
   const sensors = compactList(source.sensor_ids);
   const frameSubtypes = compactList(source.frame_subtypes);

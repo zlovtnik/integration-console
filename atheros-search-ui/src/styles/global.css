@@ -1385,14 +1385,37 @@ body.filter-drawer-open {
 }
 
 @media (max-width: 720px) {
+  :root {
+    --nav-height: 112px;
+  }
   .top-nav {
     grid-template-columns: 1fr auto;
+    grid-template-rows: 58px 54px;
     gap: var(--space-3);
     padding: 0 var(--space-4);
   }
 
   .nav-links {
-    display: none;
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: space-around;
+    gap: 0;
+    margin: 0;
+    padding: 0 0 var(--space-2);
+  }
+
+  .logo {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .nav-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .nav-link {
+    min-height: 44px;
+    padding: 0 var(--space-2);
   }
 
   .search-bar-wrap input[type='search'],

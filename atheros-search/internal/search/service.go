@@ -166,6 +166,19 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 	for _, result := range fused {
 		resp.Results = append(resp.Results, toProtoResult(result))
 	}
+	report := reportMetadata(req.Filters, "versioned source record", "returned ranked records (not distinct physical assets or a full-result count)", "event times of returned records; result budget may truncate coverage", len(fused), nil)
+	for _, result := range fused {
+		if result.ObservedAt != nil {
+			if report.ObservationStart == nil || result.ObservedAt.Before(*report.ObservationStart) {
+				report.ObservationStart = result.ObservedAt
+			}
+			if report.ObservationEnd == nil || result.ObservedAt.After(*report.ObservationEnd) {
+				report.ObservationEnd = result.ObservedAt
+			}
+		}
+	}
+	resp.Report = reportStruct(report)
+	resp.GeneratedAt = timestamppb.Now()
 	return resp, nil
 }
 
@@ -195,10 +208,12 @@ func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*s
 		ThreatBoost:     details.ThreatBoost,
 		BoostReasons:    details.BoostReasons,
 		SequenceLogProb: details.SequenceLogProb,
+		RankingMethod:   details.RankingMethod,
 	}, nil
 }
 
 type ExplainDetails struct {
+	RankingMethod   string   `json:"ranking_method,omitempty"`
 	SourceKey       string   `json:"sourceKey"`
 	DenseScore      float32  `json:"denseScore,omitempty"`
 	SparseScore     float32  `json:"sparseScore,omitempty"`
@@ -260,6 +275,7 @@ LIMIT 1`, args...).Scan(&sourceKind)
 	for _, result := range resp.Results {
 		if result.SourceKey == req.SourceKey {
 			return &ExplainDetails{
+				RankingMethod:   modeName(resp.ModeUsed),
 				SourceKey:       result.SourceKey,
 				DenseScore:      result.CosineSimilarity,
 				SparseScore:     result.KeywordRank,

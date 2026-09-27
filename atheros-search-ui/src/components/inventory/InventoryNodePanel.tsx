@@ -4,6 +4,7 @@ import { Pin, PinOff, X } from 'lucide-solid';
 import type { InventoryNode } from '~/api/types';
 import { DetailRow } from '~/components/graph/graphPanelUtils';
 import { inventoryNodeKindLabel } from '~/hooks/useInventoryGraph';
+import { reportLink } from '~/utils/reportNavigation';
 import {
   pinnedInventoryNodeIds,
   toggleInventoryPin,
@@ -29,11 +30,24 @@ function eventSearchHref(node: InventoryNode): string {
     k: '200',
   });
   for (const mac of deviceMacs(node)) params.append('mac', mac);
+  const shared = new URLSearchParams(
+    reportLink('/', window.location.pathname, window.location.search).split(
+      '?',
+    )[1],
+  );
+  for (const key of ['loc', 'sensor', 'after', 'before', 'scope_change'])
+    for (const value of shared.getAll(key)) params.append(key, value);
   return `/?${params.toString()}`;
 }
 
 function networkGraphHref(node: InventoryNode): string {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams(
+    reportLink(
+      '/graph',
+      window.location.pathname,
+      window.location.search,
+    ).split('?')[1],
+  );
   const mac = deviceMacs(node)[0];
   if (mac) params.set('mac', mac);
   return params.toString() ? `/graph?${params.toString()}` : '/graph';
@@ -85,18 +99,46 @@ export function InventoryNodePanel(props: {
       </div>
 
       <section class="graph-panel-section">
+        <Show when={props.node.no_ap_link_in_projection === true}>
+          <p title="The latest graph projection may omit retained observations from the selected interval or sensor/site scope.">
+            No AP link in this projection. This does not establish that the
+            identifier never connected or indicate risk.
+          </p>
+        </Show>
         <dl class="graph-detail-list">
           <DetailRow label="Display name" value={props.node.display_name} />
           <DetailRow label="MAC" value={props.node.mac} />
           <DetailRow label="Owner" value={props.node.owner_id} />
           <DetailRow label="Location" value={props.node.location_id} />
-          <DetailRow label="Active" value={props.node.active} />
+          <DetailRow
+            label="Registry active (not online status)"
+            value={props.node.active}
+          />
+          <DetailRow
+            label="Registration"
+            value={
+              props.node.registered === undefined
+                ? 'Unknown'
+                : props.node.registered
+                  ? 'Registered'
+                  : 'Unregistered'
+            }
+          />
           <DetailRow
             label="Registered"
             value={props.node.first_registered}
             date
           />
-          <DetailRow label="Last seen" value={props.node.last_seen} date />
+          <DetailRow
+            label="First observed"
+            value={props.node.first_seen}
+            date
+          />
+          <DetailRow
+            label="Last observed (registry lifetime)"
+            value={props.node.last_seen}
+            date
+          />
         </dl>
       </section>
 

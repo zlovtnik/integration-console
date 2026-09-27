@@ -11,16 +11,16 @@ const result = {
 } as SearchResult;
 
 describe('ScoreBar', () => {
-  it('announces score to assistive technology', () => {
-    const { getByRole } = render(() => <ScoreBar result={result} />);
-    const meter = getByRole('meter');
-
-    expect(meter).toHaveAttribute('aria-valuenow', '82');
-    expect(meter).toHaveAttribute('aria-label', 'Score 82.0%');
+  it('shows the raw rank without percent or additive segments', () => {
+    const { getByText, container } = render(() => <ScoreBar result={result} />);
+    getByText('Relevance rank: 0.8200');
+    getByText('Cosine similarity (unitless, -1 to 1)');
+    expect(container.textContent).not.toContain('%');
+    expect(container.querySelector('.score-seg')).toBeNull();
   });
 
   it('announces when no score breakdown is available', () => {
-    const { getByRole, getByText } = render(() => (
+    const { getByText } = render(() => (
       <ScoreBar
         result={
           {
@@ -32,12 +32,6 @@ describe('ScoreBar', () => {
         }
       />
     ));
-    const meter = getByRole('meter');
-
-    expect(meter).toHaveAttribute(
-      'aria-label',
-      'Score 0.0%, no score breakdown',
-    );
-    getByText('no score breakdown');
+    getByText('Relevance rank: 0.0000');
   });
 });

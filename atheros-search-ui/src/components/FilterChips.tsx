@@ -23,6 +23,24 @@ function removeListItem(
 export function FilterChips() {
   const chips = createMemo<Chip[]>(() => {
     const next: Chip[] = [];
+    if (filters.bssid)
+      next.push({
+        id: 'bssid',
+        label: 'BSSID: ' + filters.bssid,
+        remove: () => setFilters('bssid', undefined),
+      });
+    if (filters.observed_ap_context_only)
+      next.push({
+        id: 'ap-context',
+        label: 'Observed AP context',
+        remove: () => setFilters('observed_ap_context_only', undefined),
+      });
+    if (filters.entity_query)
+      next.push({
+        id: 'entity',
+        label: 'Entity: ' + filters.entity_query,
+        remove: () => setFilters('entity_query', undefined),
+      });
     filters.location_ids?.forEach((value) =>
       next.push({
         id: `loc-${value}`,

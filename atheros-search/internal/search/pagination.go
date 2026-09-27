@@ -22,6 +22,8 @@ type pageCursor struct {
 	NodeAfter   string `json:"n,omitempty"`
 	EdgeAfter   string `json:"e,omitempty"`
 	DeviceAfter string `json:"d,omitempty"`
+	TimeAfter   string `json:"t,omitempty"`
+	CountAfter  int    `json:"c,omitempty"`
 	NodesDone   bool   `json:"nd,omitempty"`
 	EdgesDone   bool   `json:"ed,omitempty"`
 }

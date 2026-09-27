@@ -23,6 +23,9 @@ export const SEARCH_MODES = [
 export type SearchMode = (typeof SEARCH_MODES)[number];
 
 export interface SearchFilters {
+  bssid?: string;
+  observed_ap_context_only?: boolean;
+  entity_query?: string;
   location_ids?: string[];
   sensor_ids?: string[];
   ssid?: string;
@@ -82,6 +85,8 @@ export interface SearchResult {
 }
 
 export interface SearchResponse {
+  report?: ReportMetadata;
+  generated_at?: string;
   query_id: number;
   results: SearchResult[];
   mode_used: SearchMode;
@@ -92,6 +97,7 @@ export interface SearchResponse {
 }
 
 export interface ExplainResponse {
+  ranking_method?: string;
   source_key: string;
   dense_score: number;
   sparse_score: number;
@@ -129,6 +135,10 @@ export type InventoryNodeKind =
   | 'aggregate_group';
 
 export interface InventoryNode {
+  registered?: boolean;
+  first_seen?: string;
+  pending_review_count?: number;
+  no_ap_link_in_projection?: boolean;
   id: string;
   kind: InventoryNodeKind;
   label: string;
@@ -154,11 +164,20 @@ export interface InventoryEdge {
     | 'located_at'
     | 'cluster_member'
     | 'merge_candidate'
+    | 'candidate_pair'
     | 'same_device';
   weight?: number;
 }
 
 export interface InventoryFilters {
+  registered?: boolean;
+  needs_identity_review?: boolean;
+  query?: string;
+  source_macs?: string[];
+  sensor_ids?: string[];
+  observed_after?: Rfc3339Timestamp;
+  observed_before?: Rfc3339Timestamp;
+  sort?: 'last_observed' | 'identifier';
   grouping: 'registry' | 'cmdb' | 'similarity';
   location_ids?: string[];
   owner_ids?: string[];
@@ -167,18 +186,19 @@ export interface InventoryFilters {
   tags?: string[];
   limit?: number;
   /** Opt-in complete pagination; see GraphFilters.scope. */
-  scope?: 'all';
+  scope?: 'all' | 'page';
   page_cursor?: string;
   page_size?: number;
 }
 
 export interface InventoryResponse {
+  report?: ReportMetadata;
   nodes: InventoryNode[];
   edges: InventoryEdge[];
   generated_at: string;
   node_count: number;
   edge_count: number;
-  total_registered_count: number;
+  total_registered_count?: number;
   next_page_cursor?: string | null;
   total_node_count?: number;
   total_edge_count?: number;
@@ -187,6 +207,21 @@ export interface InventoryResponse {
 }
 
 export type MergeDecision = 'merge' | 'not_match' | 'needs_more_data';
+
+export interface PairDetail {
+  candidate_id: string;
+  mac_a: string;
+  mac_b: string;
+  confidence: number;
+  computed_at: string;
+  status: string;
+  evidence: Record<string, unknown>;
+  projection_run_id: string;
+  devices: InventoryNode[];
+  decision?: string;
+  decided_by?: string;
+  decided_at?: string;
+}
 
 export interface MergeDecisionResponse {
   candidate_id: string;
@@ -266,6 +301,8 @@ export type EdgeKind =
   | 'vendor_link';
 
 export interface GraphResponse {
+  report?: ReportMetadata;
+  focus_reason?: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
   generated_at: string;
@@ -279,6 +316,23 @@ export interface GraphResponse {
   /** Present only for scope: "all" requests. */
   total_node_count?: number;
   total_edge_count?: number;
+}
+
+export interface ReportMetadata {
+  scope: unknown;
+  entity_grain: string;
+  count_meaning: string;
+  observation_start?: string;
+  observation_end?: string;
+  observation_basis: string;
+  freshness: 'unavailable' | 'fresh' | 'stale';
+  source_watermark?: string;
+  projection_watermark?: string;
+  loaded_rows: number;
+  total_rows?: number;
+  incomplete_coverage: boolean;
+  unavailable_capabilities: string[];
+  live: boolean;
 }
 
 export interface GraphFilters {
@@ -301,6 +355,45 @@ export interface GraphFilters {
   scope?: 'all';
   page_cursor?: string;
   page_size?: number;
+}
+
+export interface NetworkFilters {
+  ssid?: string;
+  source_macs?: string[];
+  location_ids?: string[];
+  sensor_ids?: string[];
+  observed_after?: Rfc3339Timestamp;
+  observed_before?: Rfc3339Timestamp;
+  source_mac?: string;
+  query?: string;
+  ap_bssid?: string;
+  page_size?: number;
+  page_cursor?: string;
+  include_hints?: boolean;
+}
+export interface NetworkResponse {
+  access_points: {
+    bssid: string;
+    name: string;
+    identifier_count: number;
+    first_observed: string;
+    last_observed: string;
+    evidence_status: string;
+  }[];
+  roster: {
+    mac: string;
+    name: string;
+    first_observed: string;
+    last_observed: string;
+    record_count: number;
+  }[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  generated_at: string;
+  next_page_cursor?: string;
+  total_rows: number;
+  focus_reason?: string;
+  report: ReportMetadata;
 }
 
 export function isSearchKind(value: unknown): value is SearchKind {

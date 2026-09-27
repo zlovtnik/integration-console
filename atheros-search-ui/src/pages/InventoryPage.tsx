@@ -2,6 +2,8 @@ import {
   batch,
   createEffect,
   createMemo,
+  createResource,
+  createSignal,
   on,
   onCleanup,
   onMount,
@@ -11,6 +13,8 @@ import {
 import { AlertTriangle } from 'lucide-solid';
 import { DedupQueue } from '~/components/inventory/DedupQueue';
 import { InventoryControls } from '~/components/inventory/InventoryControls';
+import { InventoryTable } from '~/components/inventory/InventoryTable';
+import { api } from '~/api/client';
 import { InventoryLegend } from '~/components/inventory/InventoryLegend';
 import { InventoryNodePanel } from '~/components/inventory/InventoryNodePanel';
 import { MergeCandidatePanel } from '~/components/inventory/MergeCandidatePanel';
@@ -22,9 +26,11 @@ import {
   expandedInventoryGroupIds,
   inventoryEdges,
   inventoryError,
+  inventoryDecisionNotice,
   inventoryFilters,
   inventoryLoading,
   inventoryNodes,
+  inventoryDedupCandidates,
   inventoryViewMode,
   pinnedInventoryNodeIds,
   selectedInventoryNodeId,
@@ -34,9 +40,11 @@ import {
 } from '~/stores/inventoryStore';
 import '~/styles/graph.css';
 import '~/styles/inventory.css';
+import '~/styles/reports.css';
 
 function snapshotFilters(): InventoryFilters {
   const filters: InventoryFilters = {
+    ...inventoryFilters,
     grouping:
       inventoryViewMode() === 'dedup_queue'
         ? 'similarity'
@@ -64,6 +72,35 @@ function snapshotFilters(): InventoryFilters {
 }
 
 export default function InventoryPage() {
+  const [detailError, setDetailError] = createSignal('');
+  let detailController: AbortController | undefined;
+  const [rowDetail, { refetch: retryDetail }] = createResource(
+    () =>
+      selectedInventoryNodeId()?.startsWith('device:')
+        ? selectedInventoryNodeId()
+        : null,
+    async (id) => {
+      detailController?.abort();
+      detailController = new AbortController();
+      setDetailError('');
+      try {
+        const response = await api.inventory(
+          {
+            grouping: 'registry',
+            scope: 'page',
+            page_size: 1,
+            source_macs: [id!.slice(7)],
+          },
+          detailController.signal,
+        );
+        return response.nodes[0] ?? null;
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError'))
+          setDetailError('Identifier detail unavailable.');
+        return null;
+      }
+    },
+  );
   let svgRef: SVGSVGElement | undefined;
   let filterReloadTimer: number | undefined;
   let rebuildQueued = false;
@@ -92,17 +129,28 @@ export default function InventoryPage() {
 
   const selected = createMemo(
     () =>
+      (selectedInventoryNodeId()?.startsWith('device:') &&
+      rowDetail()?.id === selectedInventoryNodeId()
+        ? rowDetail()
+        : null) ??
       inventoryNodes().find((node) => node.id === selectedInventoryNodeId()) ??
+      inventoryDedupCandidates().find(
+        (node) => node.id === selectedInventoryNodeId(),
+      ) ??
       null,
   );
   const dataFilterKey = createMemo(() =>
     JSON.stringify({
+      ...inventoryFilters,
       grouping: inventoryFilters.grouping,
       view_mode: inventoryViewMode(),
       owner_ids: inventoryFilters.owner_ids ?? [],
       location_ids: inventoryFilters.location_ids ?? [],
       active_only: inventoryFilters.active_only ?? false,
       min_dedup_confidence: inventoryFilters.min_dedup_confidence ?? 0,
+      query: inventoryFilters.query,
+      registered: inventoryFilters.registered,
+      needs_identity_review: inventoryFilters.needs_identity_review,
       tags: inventoryFilters.tags ?? [],
       scope: inventoryFilters.scope ?? '',
       limit: inventoryFilters.limit ?? 0,
@@ -136,7 +184,7 @@ export default function InventoryPage() {
   createEffect(
     on(ready, (isReady) => {
       if (isReady) {
-        void load(snapshotFilters());
+        if (inventoryViewMode() !== 'table') void load(snapshotFilters());
         if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
       }
     }),
@@ -149,7 +197,7 @@ export default function InventoryPage() {
         if (!ready()) return;
         window.clearTimeout(filterReloadTimer);
         filterReloadTimer = window.setTimeout(() => {
-          void load(snapshotFilters());
+          if (inventoryViewMode() !== 'table') void load(snapshotFilters());
           if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
         }, 250);
       },
@@ -173,6 +221,7 @@ export default function InventoryPage() {
   onCleanup(() => {
     window.clearTimeout(filterReloadTimer);
     cancelDedupQueue();
+    detailController?.abort();
   });
 
   function queueGraphRebuild() {
@@ -194,50 +243,85 @@ export default function InventoryPage() {
   return (
     <main id="main-content" class="graph-page inventory-page" tabIndex={-1}>
       <InventoryControls
-        onRefresh={() => void load(snapshotFilters())}
+        onRefresh={() => {
+          void load(snapshotFilters());
+          if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
+        }}
         onResetView={() => graph.resetZoom()}
       />
-
+      <Show when={inventoryDecisionNotice()}>
+        <p role="status">{inventoryDecisionNotice()}</p>
+      </Show>
+      <Show when={inventoryViewMode() === 'table'}>
+        <InventoryTable />
+      </Show>
+      <Show when={rowDetail.loading}>
+        <p role="status">Loading identifier detail...</p>
+      </Show>
+      <Show when={detailError()}>
+        <p role="alert">
+          {detailError()}{' '}
+          <button type="button" onClick={() => void retryDetail()}>
+            Retry detail
+          </button>
+        </p>
+      </Show>
       <Show
-        when={inventoryViewMode() === 'dedup_queue'}
-        fallback={
-          <div class="graph-canvas-wrap inventory-canvas-wrap">
-            <Show when={inventoryLoading()}>
-              <div class="inventory-loading" role="status">
-                Building inventory...
-              </div>
-            </Show>
-            <Show when={inventoryError()}>
-              <div class="inventory-error" role="alert">
-                <AlertTriangle size={16} aria-hidden="true" />
-                <span>{inventoryError()}</span>
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  onClick={() => void load(snapshotFilters())}
-                >
-                  Retry
-                </button>
-              </div>
-            </Show>
-            <Show when={!inventoryLoading() && inventoryNodes().length === 0}>
-              <div class="inventory-empty" role="status">
-                No inventory devices match the current filters.
-              </div>
-            </Show>
-            <svg
-              ref={svgRef}
-              class="graph-canvas inventory-canvas"
-              aria-label="Device inventory graph"
-            />
-            <InventoryLegend />
-          </div>
+        when={
+          selectedInventoryNodeId()?.startsWith('device:') &&
+          !rowDetail.loading &&
+          !rowDetail() &&
+          !detailError()
         }
       >
-        <DedupQueue
-          onSelect={(candidateId) => setSelectedInventoryNodeId(candidateId)}
-          onDecision={handleDecision}
-        />
+        <p role="status">
+          This identifier is not in the registry projection. Refresh the report
+          to check for changes.
+        </p>
+      </Show>
+
+      <Show when={inventoryViewMode() !== 'table'}>
+        <Show
+          when={inventoryViewMode() === 'dedup_queue'}
+          fallback={
+            <div class="graph-canvas-wrap inventory-canvas-wrap">
+              <Show when={inventoryLoading()}>
+                <div class="inventory-loading" role="status">
+                  Building inventory...
+                </div>
+              </Show>
+              <Show when={inventoryError()}>
+                <div class="inventory-error" role="alert">
+                  <AlertTriangle size={16} aria-hidden="true" />
+                  <span>{inventoryError()}</span>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    onClick={() => void load(snapshotFilters())}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </Show>
+              <Show when={!inventoryLoading() && inventoryNodes().length === 0}>
+                <div class="inventory-empty" role="status">
+                  No observed identifiers match the current filters.
+                </div>
+              </Show>
+              <svg
+                ref={svgRef}
+                class="graph-canvas inventory-canvas"
+                aria-label="Device inventory graph"
+              />
+              <InventoryLegend />
+            </div>
+          }
+        >
+          <DedupQueue
+            onSelect={(candidateId) => setSelectedInventoryNodeId(candidateId)}
+            onDecision={handleDecision}
+          />
+        </Show>
       </Show>
 
       <Show when={selected()}>

@@ -9,16 +9,6 @@ const KINDS: { value: SearchKind; label: string; title: string }[] = [
     title: 'Single wireless frame events such as probe requests or deauths',
   },
   {
-    value: 'SEARCH_KIND_BEHAVIOUR',
-    label: 'Behaviour',
-    title: 'Patterns of activity across multiple frames',
-  },
-  {
-    value: 'SEARCH_KIND_SEQUENCE',
-    label: 'Sequence',
-    title: 'Ordered event chains from a device',
-  },
-  {
     value: 'SEARCH_KIND_DEVICE',
     label: 'Device',
     title: 'Per-device profiles and identity',

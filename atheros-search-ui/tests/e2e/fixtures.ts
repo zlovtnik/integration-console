@@ -2,6 +2,10 @@ import type { Page, Route } from '@playwright/test';
 import type {
   GraphFilters,
   GraphResponse,
+  InventoryResponse,
+  InventoryFilters,
+  NetworkResponse,
+  NetworkFilters,
   SearchRequest,
   SearchResult,
 } from '~/api/types';
@@ -266,6 +270,10 @@ export function graphForFilters(body: unknown): GraphResponse {
 }
 
 interface MockApiOptions {
+  inventory?: (body: InventoryFilters) => InventoryResponse;
+  network?: (body: NetworkFilters) => NetworkResponse;
+  onInventoryRequest?: (body: InventoryFilters) => void;
+  onNetworkRequest?: (body: NetworkFilters) => void;
   results?: SearchResult[];
   graph?: GraphResponse | ((body: unknown) => GraphResponse);
   onGraphRequest?: (body: unknown) => void;
@@ -283,6 +291,109 @@ function json(route: Route, body: unknown) {
 export async function mockApi(page: Page, options: MockApiOptions = {}) {
   const results = options.results ?? [mockResult];
   const graph = options.graph ?? mockGraph;
+  await page.route('**/v1/etl/health', (route) =>
+    json(route, {
+      measured_at: '2026-09-27T12:00:00Z',
+      ingest_pending: 1,
+      ingest_failed: 0,
+      embedding_pending: 2,
+      embedding_failed: 0,
+    }),
+  );
+  await page.route('**/v1/inventory', (route) => {
+    const body = route.request().postDataJSON() as InventoryFilters;
+    options.onInventoryRequest?.(body);
+    return json(
+      route,
+      options.inventory?.(body) ?? {
+        generated_at: '2026-09-27T12:00:00Z',
+        node_count: 1,
+        edge_count: 0,
+        total_device_count: 1,
+        total_registered_count: 0,
+        nodes: [
+          {
+            id: 'device:aa:bb:cc:dd:ee:ff',
+            mac: 'aa:bb:cc:dd:ee:ff',
+            kind: 'device',
+            label: 'Lab identifier',
+            active: true,
+            registered: false,
+            pending_review_count: 0,
+            last_seen: '2026-09-27T11:00:00Z',
+          },
+        ],
+        edges: [],
+      },
+    );
+  });
+  await page.route('**/v1/network-map', (route) => {
+    const body = route.request().postDataJSON() as NetworkFilters;
+    options.onNetworkRequest?.(body);
+    return json(
+      route,
+      options.network?.(body) ?? {
+        access_points: [
+          {
+            bssid: '22:33:44:55:66:77',
+            name: 'Lab AP',
+            identifier_count: 1,
+            first_observed: '2026-09-27T10:00:00Z',
+            last_observed: '2026-09-27T11:00:00Z',
+            evidence_status: 'Searchable evidence; coverage unverified',
+          },
+        ],
+        roster: body.ap_bssid
+          ? [
+              {
+                mac: 'aa:bb:cc:dd:ee:ff',
+                name: 'Lab identifier',
+                first_observed: '2026-09-27T10:00:00Z',
+                last_observed: '2026-09-27T11:00:00Z',
+                record_count: 2,
+              },
+            ]
+          : [],
+        nodes: body.ap_bssid
+          ? [
+              { id: 'ap:' + body.ap_bssid, kind: 'ap', label: 'Lab AP' },
+              {
+                id: 'device:aa:bb:cc:dd:ee:ff',
+                kind: 'device',
+                label: 'Lab identifier',
+                mac: 'aa:bb:cc:dd:ee:ff',
+              },
+            ]
+          : [],
+        edges: body.ap_bssid
+          ? [
+              {
+                id: 'e1',
+                source: 'device:aa:bb:cc:dd:ee:ff',
+                target: 'ap:' + body.ap_bssid,
+                kind: 'association',
+                weight: 2,
+                weight_basis: 'searchable_record_count',
+              },
+            ]
+          : [],
+        generated_at: '2026-09-27T12:00:00Z',
+        total_rows: 1,
+        report: {
+          scope: body,
+          entity_grain: body.ap_bssid ? 'observed MAC identifier' : 'AP BSSID',
+          count_meaning: 'distinct scoped identifiers',
+          observation_basis: 'retained searchable records',
+          freshness: 'unavailable',
+          loaded_rows: 1,
+          total_rows: 1,
+          incomplete_coverage: true,
+          unavailable_capabilities: ['sensor_coverage'],
+          live: true,
+        },
+      },
+    );
+  });
 
   await page.route('**/healthz', (route) => json(route, { status: 'ok' }));
   await page.route('**/v1/suggest/filters**', (route) =>

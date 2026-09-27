@@ -143,6 +143,11 @@ Key routes:
 
 ### Graph and inventory contracts
 
+The [reporting workmap](../../../docs/atheros-reporting-workmap.md) and
+[reporting data contract](../../../docs/atheros-reporting-data-contract.md)
+record the reviewed business semantics, accuracy gaps and proposed redesign.
+They distinguish current contracts from planned additive capabilities.
+
 `POST /v1/graph` accepts optional filters:
 
 - `location_ids`, `sensor_ids`, `ssid`, `source_mac`, `kinds`
@@ -153,10 +158,26 @@ Node kinds returned to clients are UI-facing (`device`, `ap`, `cluster`,
 as follows: `access_point` → `ap`, `identity_cluster` → `cluster`.
 Edge kinds map as follows: `observed_at` → `association`,
 `identity_member` → `cluster_member`. When `source_mac` is set, the service
-loads that anchor device and returns only its neighborhood.
+attempts to load that anchor device and return its neighborhood. The reviewed
+missing-anchor fallback can widen results; correcting it is tracked in
+[Plan 001](../../../plans/001-report-accuracy.md).
+
+The `observed_at` projection counts frames with a source MAC and BSSID. Its
+public `association` name does not prove a verified session or current
+connectivity. Graph first/last-seen values currently share `observed_at` and
+must not be used to reconstruct activity history.
 
 Inventory grouping accepts `registry`, `cmdb`, and `similarity`. Similarity
 grouping may include `min_dedup_confidence`.
+
+Inventory rows represent observed MAC identifiers. Similarity grouping creates
+pending pair-based review nodes; its `similarity_cluster_id` is not a confirmed
+identity-cluster identifier. `total_registered_count` is a global count rather
+than a filtered inventory count.
+
+Public Search supports event, device, proxy event, blocked-host window and
+Cross. Behaviour and sequence Search are explicitly retired. Existing document
+preparation and vector-table support do not change that public API decision.
 
 ### Merge decisions
 

@@ -9,6 +9,8 @@ test('graph filters auto-refresh topology requests', async ({ page }) => {
   });
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   await expect(page.locator('.graph-node[data-kind="cluster"]')).toBeVisible();
 
   await page.getByLabel('Source MAC').fill('aa:bb:cc:dd:ee:ff');
@@ -31,6 +33,8 @@ test('graph paints nodes without NaN transforms on first load', async ({
   await mockApi(page);
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
 
   await expect(page.locator('.graph-node').first()).toBeVisible();
   await page.waitForTimeout(2_000);
@@ -48,6 +52,8 @@ test('SSID filter scopes visible graph topology', async ({ page }) => {
   await mockApi(page, { graph: graphForFilters });
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   await page.getByLabel('SSID').fill('lab-net');
 
   await expect(
@@ -77,6 +83,8 @@ test('cluster search events action requests a sparse 200-event entity timeline',
   });
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
   await page.getByRole('link', { name: 'Search events' }).click();
 
@@ -111,6 +119,8 @@ test('cluster search events preserves the active graph SSID scope', async ({
   });
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   await page.getByLabel('SSID').fill('lab-net');
   await expect
     .poll(() =>
@@ -155,6 +165,8 @@ test('graph event search does not inherit stale min similarity from search URL',
   searchRequests.length = 0;
 
   await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
   await page.getByRole('link', { name: 'Search events' }).click();
 

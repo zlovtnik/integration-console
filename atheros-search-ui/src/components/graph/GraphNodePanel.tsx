@@ -78,6 +78,13 @@ function eventSearchHref(node: GraphNode): string {
     k: '200',
   });
   for (const mac of eventSourceMacs(node)) params.append('mac', mac);
+  for (const loc of graphFilters.location_ids ?? []) params.append('loc', loc);
+  for (const sensor of graphFilters.sensor_ids ?? [])
+    params.append('sensor', sensor);
+  if (graphFilters.observed_after)
+    params.set('after', graphFilters.observed_after);
+  if (graphFilters.observed_before)
+    params.set('before', graphFilters.observed_before);
   const ssids = eventSSIDs(node);
   const ssid = ssids.length === 1 ? ssids[0] : undefined;
   if (ssid) params.set('ssid', ssid);
@@ -103,6 +110,7 @@ function explainHref(node: GraphNode): string | null {
   const params = new URLSearchParams({
     query: node.mac ?? node.label,
     kind: node.explain_kind ?? 'SEARCH_KIND_DEVICE',
+    return: window.location.pathname + window.location.search,
   });
   return `/explain/${encodeURIComponent(node.explain_source_key)}?${params.toString()}`;
 }
@@ -157,11 +165,13 @@ export function GraphNodePanel(props: {
       .filter((node): node is GraphNode => Boolean(node)),
   );
 
-  const associatedAP = createMemo(() => {
-    const edge = graphEdges().find(
+  const associatedAPs = createMemo(() => {
+    const edges = graphEdges().filter(
       (item) => item.kind === 'association' && item.source === props.node.id,
     );
-    return edge ? nodesById().get(edge.target) : undefined;
+    return edges
+      .map((edge) => nodesById().get(edge.target))
+      .filter((node): node is GraphNode => !!node);
   });
 
   const connectedClients = createMemo(() =>
@@ -241,6 +251,11 @@ export function GraphNodePanel(props: {
           <DetailRow label="Sensor" value={props.node.sensor_id} />
           <DetailRow label="First seen" value={props.node.first_seen} date />
           <DetailRow label="Last seen" value={props.node.last_seen} date />
+          <DetailRow
+            label="Latest projected observation"
+            value={props.node.created_at}
+            date
+          />
         </dl>
       </section>
 
@@ -255,6 +270,10 @@ export function GraphNodePanel(props: {
           </dl>
         </section>
         <NodeLinkList title="Clusters" nodes={deviceClusters()} />
+        <NodeLinkList
+          title="Observed AP context in this projection"
+          nodes={associatedAPs()}
+        />
       </Show>
 
       <Show when={props.node.kind === 'cluster'}>
@@ -282,7 +301,7 @@ export function GraphNodePanel(props: {
           <dl class="graph-detail-list">
             <DetailRow label="Enabled" value={props.node.enabled} />
             <DetailRow
-              label="Connected clients"
+              label="Observed identifiers in loaded projection"
               value={connectedClients().length}
             />
             <DetailRow label="Risk score" value={props.node.risk_score} />
@@ -290,7 +309,7 @@ export function GraphNodePanel(props: {
             <DetailRow label="Severity" value={props.node.alert_severity} />
           </dl>
         </section>
-        <NodeLinkList title="Clients" nodes={connectedClients()} />
+        <NodeLinkList title="Observed identifiers" nodes={connectedClients()} />
       </Show>
 
       <Show when={props.node.kind === 'client'}>
@@ -301,8 +320,8 @@ export function GraphNodePanel(props: {
           </dl>
         </section>
         <NodeLinkList
-          title="Associated AP"
-          nodes={associatedAP() ? [associatedAP()!] : []}
+          title="Observed AP context in this projection"
+          nodes={associatedAPs()}
         />
       </Show>
 

@@ -24,6 +24,7 @@ import {
   setInventoryLoading,
   setInventoryMeta,
   setInventoryNodes,
+  setInventoryDecisionNotice,
 } from '~/stores/inventoryStore';
 
 const DEDUP_PAGE_SIZE = 500;
@@ -48,7 +49,9 @@ function applyInventoryResponse(response: InventoryResponse) {
       generated_at: response.generated_at,
       node_count: response.node_count,
       edge_count: response.edge_count,
-      total_registered_count: response.total_registered_count,
+      ...(response.total_registered_count === undefined
+        ? {}
+        : { total_registered_count: response.total_registered_count }),
     });
   });
 }
@@ -71,7 +74,7 @@ export function useInventory() {
         const edgeIds = new Set<string>();
         const nodes: InventoryNode[] = [];
         const edges: InventoryEdge[] = [];
-        let totalRegistered = 0;
+        let totalRegistered: number | undefined;
         let totalDevices: number | undefined;
         let loadedDevices = 0;
         let generatedAt = '';
@@ -110,7 +113,9 @@ export function useInventory() {
               generated_at: generatedAt,
               node_count: nodes.length,
               edge_count: edges.length,
-              total_registered_count: totalRegistered,
+              ...(totalRegistered === undefined
+                ? {}
+                : { total_registered_count: totalRegistered }),
             };
             if (totalDevices !== undefined) {
               meta.total_device_count = totalDevices;
@@ -164,13 +169,28 @@ export function useInventory() {
   }
 
   async function decideMerge(candidateId: string, decision: MergeDecision) {
+    setInventoryError(null);
+    setInventoryDedupError(null);
+    setInventoryDecisionNotice('');
     try {
-      await api.mergeDecision(stripMergeNodePrefix(candidateId), decision);
+      const recorded = await api.mergeDecision(
+        stripMergeNodePrefix(candidateId),
+        decision,
+      );
+      if (!recorded.accepted)
+        throw new Error('Decision was not accepted. Evidence is retained.');
+      setInventoryDecisionNotice(
+        `Decision recorded: ${recorded.decision}, by ${recorded.decided_by ?? 'Unknown'}, at ${recorded.decided_at ?? 'Unknown'}. Identity projection update is not confirmed.`,
+      );
       removeMergeCandidate(candidateId);
       removeDedupCandidate(candidateId);
       return true;
     } catch (err) {
       setInventoryError((err as Error).message || 'Merge decision failed.');
+      setInventoryDedupError(
+        (err as Error).message ||
+          'Decision failed. Retry the decision; evidence is retained.',
+      );
       return false;
     }
   }
@@ -219,10 +239,13 @@ export async function loadDedupQueue(): Promise<void> {
   try {
     const confidence = inventoryFilters.min_dedup_confidence;
     const filters: InventoryFilters = {
+      ...inventoryFilters,
       grouping: 'similarity',
       scope: INVENTORY_SCOPE_ALL,
       page_size: DEDUP_PAGE_SIZE,
     };
+    delete filters.limit;
+    delete filters.page_cursor;
     if (inventoryFilters.owner_ids) {
       filters.owner_ids = [...inventoryFilters.owner_ids];
     }

@@ -1,13 +1,15 @@
 import { useSearchParams } from '@solidjs/router';
-import { batch, createEffect, createSignal, onMount } from 'solid-js';
+import { batch, createEffect, createSignal, on, untrack } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import type { InventoryFilters } from '~/api/types';
+import { asRfc3339 } from '~/utils/timestamp';
 import {
   INVENTORY_SCOPE_ALL,
   inventoryFilters,
   inventoryViewMode,
   setInventoryFilters,
   setInventoryViewMode,
+  setSelectedInventoryNodeId,
   type InventoryViewMode,
 } from '~/stores/inventoryStore';
 
@@ -31,51 +33,92 @@ function grouping(value: string | undefined): InventoryFilters['grouping'] {
 }
 
 function viewMode(value: string | undefined): InventoryViewMode {
-  return value === 'dedup_queue' ? 'dedup_queue' : 'graph';
+  return value === 'dedup_queue' || value === 'graph' ? value : 'table';
 }
 
 export function useInventoryUrlSync() {
   const [params, setParams] = useSearchParams();
   const [ready, setReady] = createSignal(false);
 
-  onMount(() => {
-    batch(() => {
-      const parsedLimit = Number(first(params.limit));
-      const parsedMin = Number(first(params.min));
-      // A bookmarked numeric limit is preserved exactly; otherwise the
-      // default scope covers every device in the filtered inventory.
-      const hasNumericLimit =
-        Number.isFinite(parsedLimit) && parsedLimit > 0 && first(params.limit) !== undefined;
-      const nextFilters: InventoryFilters = {
-        grouping: grouping(first(params.grouping)),
-        min_dedup_confidence:
-          Number.isFinite(parsedMin) && parsedMin >= 0
-            ? parsedMin
-            : DEFAULT_MIN_DEDUP_CONFIDENCE,
-      };
-      if (hasNumericLimit) {
-        nextFilters.limit = parsedLimit;
-      } else {
-        nextFilters.scope = INVENTORY_SCOPE_ALL;
-      }
-      const locationIds = asList(params.loc);
-      const ownerIds = asList(params.owner);
-      const tags = asList(params.tag);
+  let writing = false;
+  createEffect(
+    on(
+      () => JSON.stringify(params),
+      () => {
+        if (writing) return;
+        batch(() => {
+          const parsedLimit = Number(first(params.limit));
+          const parsedMin = Number(first(params.min));
+          // A bookmarked numeric limit is preserved exactly; otherwise the
+          // default scope covers every device in the filtered inventory.
+          const hasNumericLimit =
+            Number.isFinite(parsedLimit) &&
+            parsedLimit > 0 &&
+            first(params.limit) !== undefined;
+          const nextFilters: InventoryFilters = {
+            grouping: grouping(first(params.grouping)),
+            min_dedup_confidence:
+              Number.isFinite(parsedMin) && parsedMin >= 0
+                ? parsedMin
+                : DEFAULT_MIN_DEDUP_CONFIDENCE,
+          };
+          if (hasNumericLimit) {
+            nextFilters.limit = parsedLimit;
+          } else {
+            nextFilters.scope = INVENTORY_SCOPE_ALL;
+          }
+          const locationIds = asList(params.loc);
+          const ownerIds = asList(params.owner);
+          const tags = asList(params.tag);
 
-      if (locationIds) nextFilters.location_ids = locationIds;
-      if (ownerIds) nextFilters.owner_ids = ownerIds;
-      if (tags) nextFilters.tags = tags;
-      if (params.active) nextFilters.active_only = first(params.active) === '1';
+          if (locationIds) nextFilters.location_ids = locationIds;
+          if (ownerIds) nextFilters.owner_ids = ownerIds;
+          if (tags) nextFilters.tags = tags;
+          if (params.active)
+            nextFilters.active_only = first(params.active) === '1';
+          if (first(params.q)) nextFilters.query = first(params.q)!;
+          if (first(params.preset) === 'registered')
+            nextFilters.registered = true;
+          if (first(params.preset) === 'review')
+            nextFilters.needs_identity_review = true;
+          nextFilters.sort =
+            first(params.sort) === 'identifier'
+              ? 'identifier'
+              : 'last_observed';
+          const sensors = asList(params.sensor);
+          if (sensors) nextFilters.sensor_ids = sensors;
+          const macs = asList(params.mac);
+          if (macs) nextFilters.source_macs = macs;
+          const after = first(params.after);
+          const before = first(params.before);
+          const validAfter = asRfc3339(after ?? '');
+          const validBefore = asRfc3339(before ?? '');
+          if (validAfter) nextFilters.observed_after = validAfter;
+          if (validBefore) nextFilters.observed_before = validBefore;
 
-      setInventoryFilters(reconcile(nextFilters));
-      setInventoryViewMode(viewMode(first(params.view)));
-      setReady(true);
-    });
-  });
+          setInventoryFilters(reconcile(nextFilters));
+          setInventoryViewMode(viewMode(first(params.view)));
+          setSelectedInventoryNodeId(first(params.node) ?? null);
+          setReady(true);
+        });
+      },
+    ),
+  );
 
   createEffect(() => {
     if (!ready()) return;
     const next: Record<string, string | string[] | undefined> = {
+      q: inventoryFilters.query || undefined,
+      preset: inventoryFilters.needs_identity_review
+        ? 'review'
+        : inventoryFilters.registered === true
+          ? 'registered'
+          : undefined,
+      sort: inventoryFilters.sort === 'identifier' ? 'identifier' : undefined,
+      sensor: inventoryFilters.sensor_ids,
+      mac: inventoryFilters.source_macs,
+      after: inventoryFilters.observed_after,
+      before: inventoryFilters.observed_before,
       grouping:
         inventoryFilters.grouping === 'registry'
           ? undefined
@@ -93,14 +136,18 @@ export function useInventoryUrlSync() {
           ? String(inventoryFilters.min_dedup_confidence)
           : undefined,
       tag: inventoryFilters.tags?.length ? inventoryFilters.tags : undefined,
-      limit: inventoryFilters.limit !== undefined
-        ? String(inventoryFilters.limit)
-        : undefined,
-      view:
-        inventoryViewMode() === 'dedup_queue' ? inventoryViewMode() : undefined,
+      limit:
+        inventoryFilters.limit !== undefined
+          ? String(inventoryFilters.limit)
+          : undefined,
+      view: inventoryViewMode() === 'table' ? undefined : inventoryViewMode(),
     };
 
-    setParams(next, { replace: true });
+    writing = true;
+    untrack(() => setParams(next, { replace: true }));
+    queueMicrotask(() => {
+      writing = false;
+    });
   });
 
   return { ready };
