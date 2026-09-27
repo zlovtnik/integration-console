@@ -5,6 +5,8 @@ import { MergeCandidatePanel } from '~/components/inventory/MergeCandidatePanel'
 import { DedupQueue } from '~/components/inventory/DedupQueue';
 import {
   setInventoryError,
+  setInventoryDedupError,
+  setInventoryDecisionError,
   setInventoryNodes,
   setInventoryEdges,
 } from '~/stores/inventoryStore';
@@ -13,6 +15,8 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   setInventoryError(null);
+  setInventoryDedupError(null);
+  setInventoryDecisionError(null);
 });
 
 describe('independent pair review', () => {
@@ -58,9 +62,18 @@ describe('independent pair review', () => {
     const { getByRole } = render(() => (
       <DedupQueue onSelect={() => {}} onDecision={() => {}} />
     ));
-    setInventoryError('Decision request failed');
+    setInventoryDecisionError('Decision request failed');
     expect(getByRole('alert')).toHaveTextContent('Decision request failed');
     expect(getByRole('alert')).toHaveTextContent('Evidence is retained');
+  });
+  it('keeps queue-load failures separate from decision retry messaging', () => {
+    const { getByRole, queryByText } = render(() => (
+      <DedupQueue onSelect={() => {}} onDecision={() => {}} />
+    ));
+    setInventoryError('Unrelated inventory error');
+    setInventoryDedupError('Queue load failed');
+    expect(getByRole('alert')).toHaveTextContent('Queue load failed');
+    expect(queryByText(/Retry the decision/)).toBeNull();
   });
   it('retries unavailable pair evidence', async () => {
     const fetch = vi

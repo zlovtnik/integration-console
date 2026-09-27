@@ -172,8 +172,8 @@ grouping may include `min_dedup_confidence`.
 
 Inventory rows represent observed MAC identifiers. Similarity grouping creates
 pending pair-based review nodes; its `similarity_cluster_id` is not a confirmed
-identity-cluster identifier. `total_registered_count` is a global count rather
-than a filtered inventory count.
+identity-cluster identifier. `total_registered_count` counts registered devices
+matching the request filters.
 
 Public Search supports event, device, proxy event, blocked-host window and
 Cross. Behaviour and sequence Search are explicitly retired. Existing document

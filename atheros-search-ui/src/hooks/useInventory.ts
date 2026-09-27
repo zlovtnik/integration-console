@@ -17,6 +17,7 @@ import {
   setInventoryDedupDevices,
   setInventoryDedupEdges,
   setInventoryDedupError,
+  setInventoryDecisionError,
   setInventoryDedupLoading,
   setInventoryDedupMeta,
   setInventoryEdges,
@@ -170,7 +171,7 @@ export function useInventory() {
 
   async function decideMerge(candidateId: string, decision: MergeDecision) {
     setInventoryError(null);
-    setInventoryDedupError(null);
+    setInventoryDecisionError(null);
     setInventoryDecisionNotice('');
     try {
       const recorded = await api.mergeDecision(
@@ -187,9 +188,8 @@ export function useInventory() {
       return true;
     } catch (err) {
       setInventoryError((err as Error).message || 'Merge decision failed.');
-      setInventoryDedupError(
-        (err as Error).message ||
-          'Decision failed. Retry the decision; evidence is retained.',
+      setInventoryDecisionError(
+        (err as Error).message || 'Merge decision failed.',
       );
       return false;
     }
@@ -235,6 +235,7 @@ export async function loadDedupQueue(): Promise<void> {
   const requestId = ++dedupRequestId;
   setInventoryDedupLoading(true);
   setInventoryDedupError(null);
+  setInventoryDecisionError(null);
 
   try {
     const confidence = inventoryFilters.min_dedup_confidence;

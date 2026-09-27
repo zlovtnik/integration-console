@@ -7,6 +7,7 @@ import {
   INVENTORY_SCOPE_ALL,
   inventoryFilters,
   inventoryViewMode,
+  selectedInventoryNodeId,
   setInventoryFilters,
   setInventoryViewMode,
   setSelectedInventoryNodeId,
@@ -108,6 +109,7 @@ export function useInventoryUrlSync() {
   createEffect(() => {
     if (!ready()) return;
     const next: Record<string, string | string[] | undefined> = {
+      node: selectedInventoryNodeId() ?? undefined,
       q: inventoryFilters.query || undefined,
       preset: inventoryFilters.needs_identity_review
         ? 'review'

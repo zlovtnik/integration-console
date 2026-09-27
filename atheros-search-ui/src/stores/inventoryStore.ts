@@ -109,6 +109,9 @@ export const [inventoryDedupLoading, setInventoryDedupLoading] =
 export const [inventoryDedupError, setInventoryDedupError] = createSignal<
   string | null
 >(null);
+export const [inventoryDecisionError, setInventoryDecisionError] = createSignal<
+  string | null
+>(null);
 
 export function toggleInventoryPin(id: string) {
   setPinnedInventoryNodeIds((prev) => {
@@ -158,7 +161,6 @@ export function clearInventory() {
   setInventoryEdges([]);
   setInventoryMeta(reconcile({}));
   setInventoryError(null);
-  setSelectedInventoryNodeId(null);
   setInventoryCoverage(null);
 }
 

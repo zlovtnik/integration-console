@@ -7,10 +7,10 @@ import {
   inventoryDedupDevices,
   inventoryDedupEdges,
   inventoryDedupError,
+  inventoryDecisionError,
   inventoryDedupLoading,
   inventoryDedupMeta,
   inventoryFilters,
-  inventoryError,
 } from '~/stores/inventoryStore';
 
 interface QueueItem {
@@ -124,10 +124,10 @@ export function DedupQueue(props: {
           <span>{inventoryDedupError()}</span>
         </div>
       </Show>
-      <Show when={inventoryError()}>
+      <Show when={inventoryDecisionError()}>
         <p role="alert">
-          {inventoryError()} Retry the decision using the same action. Evidence
-          is retained.
+          {inventoryDecisionError()} Retry the decision using the same action.
+          Evidence is retained.
         </p>
       </Show>
 

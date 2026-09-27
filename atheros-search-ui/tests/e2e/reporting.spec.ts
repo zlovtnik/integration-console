@@ -90,6 +90,29 @@ test('inventory uses bounded server presets, pages, and independent row detail',
   ).toBeVisible();
 });
 
+test('inventory graph selection survives direct URL reload and clears on close', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/inventory?view=graph&limit=100');
+  const node = page.locator(
+    '.inventory-node[data-node-id="device:aa:bb:cc:dd:ee:ff"]',
+  );
+  await expect(node).toBeVisible();
+  await node.focus();
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('node'))
+    .toBe('device:aa:bb:cc:dd:ee:ff');
+  await page.reload();
+  await expect(page.getByRole('complementary')).toBeVisible();
+  await expect(page).toHaveURL(/node=device%3Aaa%3Abb%3Acc%3Add%3Aee%3Aff/);
+  await page.getByRole('button', { name: 'Close inventory details' }).click();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('node'))
+    .toBeNull();
+});
+
 test('AP selection, roster member and Search carry the same scope', async ({
   page,
 }) => {
