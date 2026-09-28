@@ -14,6 +14,13 @@ const (
 	InvestigationDefaultNodes = 200
 	InvestigationDefaultEdges = 400
 	InvestigationDefaultRows  = 50
+
+	// Frame subtypes that are only exchanged with an AP a station is joining,
+	// leaving or has joined. Probe and beacon frames are deliberately absent:
+	// they observe an AP without evidencing association.
+	associationFrameSubtypes = "'association_request','association_response'," +
+		"'reassociation_request','reassociation_response'," +
+		"'authentication','disassociation','deauthentication'"
 )
 
 type InvestigationAnchor struct {
@@ -63,9 +70,12 @@ type InvestigationResponse struct {
 	EvidenceTotal    int                     `json:"evidence_total"`
 	SignalQuality    string                  `json:"signal_quality"`
 	Confidence       string                  `json:"confidence"`
+	RFProximity      string                  `json:"rf_proximity"`
 	Freshness        InvestigationFreshness  `json:"freshness"`
 	FocusReason      string                  `json:"focus_reason,omitempty"`
 	GeneratedAt      time.Time               `json:"generated_at"`
+
+	rfProximityReason string
 }
 
 type InvestigationLink struct {
@@ -158,6 +168,13 @@ func normalizeInvestigationRequest(request InvestigationRequest) (InvestigationR
 }
 
 func investigationScope(request InvestigationRequest, alias string) (string, []any) {
+	return investigationScopeWith(request, alias, true)
+}
+
+// investigationScopeWith builds the summary-row scope for one alias. Pair
+// queries pass deviceAnchor=false so they can express an anchor that appears on
+// either side of the pair instead of only on this side.
+func investigationScopeWith(request InvestigationRequest, alias string, deviceAnchor bool) (string, []any) {
 	clauses := []string{fmt.Sprintf("%s.window_start >= $1", alias), fmt.Sprintf("%s.window_start < $2", alias)}
 	args := []any{*request.ObservedAfter, *request.ObservedBefore}
 	addInClause(&clauses, &args, alias+".location_id", stringsToAny(request.LocationIDs))
@@ -166,7 +183,7 @@ func investigationScope(request InvestigationRequest, alias string) (string, []a
 		clauses = append(clauses, fmt.Sprintf("%s.bssid=$%d", alias, len(args)+1))
 		args = append(args, request.APBSSID)
 	}
-	if request.DeviceMAC != "" {
+	if deviceAnchor && request.DeviceMAC != "" {
 		clauses = append(clauses, fmt.Sprintf("%s.source_mac=$%d", alias, len(args)+1))
 		args = append(args, request.DeviceMAC)
 	}
@@ -188,15 +205,22 @@ func (s *Service) Investigation(ctx context.Context, request InvestigationReques
 		return nil, err
 	}
 	scope, args := investigationScope(request, "summary")
-	response := &InvestigationResponse{Anchor: request.Anchor, Nodes: []GraphNode{}, Links: []InvestigationLink{}, Roster: []RosterMember{}, Evidence: []InvestigationEvidence{}, EvidencePage: request.EvidencePage, EvidencePageSize: request.EvidenceSize, Freshness: freshness, GeneratedAt: time.Now().UTC()}
+	response := &InvestigationResponse{Anchor: request.Anchor, Nodes: []GraphNode{}, Links: []InvestigationLink{}, Roster: []RosterMember{}, Evidence: []InvestigationEvidence{}, EvidencePage: request.EvidencePage, EvidencePageSize: request.EvidenceSize, RFProximity: "unknown", Freshness: freshness, GeneratedAt: time.Now().UTC()}
+	freshCutoff := response.GeneratedAt.Add(-24 * time.Hour)
 
-	if err := s.investigationRoster(ctx, tx, scope, args, request, response); err != nil {
+	if err := s.investigationRoster(ctx, tx, scope, args, request, response, freshCutoff); err != nil {
 		return nil, err
 	}
 	if err := s.investigationEvidence(ctx, tx, scope, args, request, response); err != nil {
 		return nil, err
 	}
-	if err := s.investigationTypedLinks(ctx, tx, request, response); err != nil {
+	if err := s.investigationAssociationLinks(ctx, tx, request, response, freshCutoff); err != nil {
+		return nil, err
+	}
+	if err := s.investigationTypedLinks(ctx, tx, request, response, freshCutoff); err != nil {
+		return nil, err
+	}
+	if err := s.investigationRFSimilarityLinks(ctx, tx, request, response, freshCutoff); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -207,6 +231,9 @@ func (s *Service) Investigation(ctx context.Context, request InvestigationReques
 	}
 	if freshness.CoverageStatus != "complete" {
 		response.FocusReason = strings.TrimSpace(response.FocusReason + " Evidence coverage is " + freshness.CoverageStatus + ": " + freshness.CoverageReason)
+	}
+	if response.rfProximityReason != "" {
+		response.FocusReason = strings.TrimSpace(response.FocusReason + " " + response.rfProximityReason)
 	}
 	response.SignalQuality = "RSSI unavailable"
 	for _, evidence := range response.Evidence {
@@ -237,7 +264,7 @@ FROM atheros_search.investigation_watermarks WHERE projection_name='wireless_evi
 	return result, nil
 }
 
-func (s *Service) investigationRoster(ctx context.Context, tx *sql.Tx, scope string, args []any, request InvestigationRequest, response *InvestigationResponse) error {
+func (s *Service) investigationRoster(ctx context.Context, tx *sql.Tx, scope string, args []any, request InvestigationRequest, response *InvestigationResponse, freshCutoff time.Time) error {
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, request.NodeLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT summary.bssid, summary.source_mac, SUM(summary.frame_count), MIN(summary.first_observed_at), MAX(summary.last_observed_at), COUNT(DISTINCT summary.sensor_id),
@@ -267,7 +294,7 @@ ORDER BY COALESCE(annotation.pinned,FALSE) DESC,MAX(summary.last_observed_at) DE
 		deviceID := "device:" + mac
 		nodes[deviceID] = GraphNode{ID: deviceID, Kind: "device", Label: label, MAC: mac, FirstSeen: &first, LastSeen: &last}
 		response.Roster = append(response.Roster, RosterMember{MAC: mac, Name: label, FirstObserved: first, LastObserved: last, RecordCount: count})
-		response.Links = append(response.Links, InvestigationLink{ID: "observed:" + mac + ":" + bssid, Source: deviceID, Target: apID, Type: "observed_ap_context", Confidence: confidenceFor(count, sensors), Fresh: true})
+		response.Links = append(response.Links, InvestigationLink{ID: "observed:" + mac + ":" + bssid, Source: deviceID, Target: apID, Type: "observed_ap_context", Confidence: confidenceFor(count, sensors), Fresh: !last.Before(freshCutoff)})
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -326,8 +353,9 @@ FROM atheros_search.wireless_signal_summaries summary WHERE `+scope+` ORDER BY w
 	return rows.Err()
 }
 
-func (s *Service) investigationTypedLinks(ctx context.Context, tx *sql.Tx, request InvestigationRequest, response *InvestigationResponse) error {
-	if len(response.Nodes) == 0 {
+func (s *Service) investigationTypedLinks(ctx context.Context, tx *sql.Tx, request InvestigationRequest, response *InvestigationResponse, freshCutoff time.Time) error {
+	remaining := request.EdgeLimit - len(response.Links)
+	if remaining <= 0 || len(response.Nodes) == 0 {
 		return nil
 	}
 	ids := make([]any, 0, len(response.Nodes))
@@ -337,22 +365,229 @@ func (s *Service) investigationTypedLinks(ctx context.Context, tx *sql.Tx, reque
 		known[node.ID] = true
 	}
 	// Confirmed identity is sourced only from the coordinator's guarded graph projection.
-	rows, err := tx.QueryContext(ctx, `SELECT edge_id,source_node_id,target_node_id FROM atheros_search.graph_edges
-WHERE edge_kind='same_device' AND observed_at >= $1 AND source_node_id IN (`+pgPlaceholders(2, len(ids))+") AND target_node_id IN ("+pgPlaceholders(2+len(ids), len(ids))+") ORDER BY observed_at DESC,edge_id LIMIT $"+fmt.Sprint(2+len(ids)*2), append(append([]any{*request.ObservedAfter}, ids...), append(ids, request.EdgeLimit-len(response.Links))...)...)
+	rows, err := tx.QueryContext(ctx, `SELECT edge_id,source_node_id,target_node_id,observed_at FROM atheros_search.graph_edges
+WHERE edge_kind='same_device' AND observed_at >= $1 AND source_node_id IN (`+pgPlaceholders(2, len(ids))+") AND target_node_id IN ("+pgPlaceholders(2+len(ids), len(ids))+") ORDER BY observed_at DESC,edge_id LIMIT $"+fmt.Sprint(2+len(ids)*2), append(append([]any{*request.ObservedAfter}, ids...), append(ids, remaining)...)...)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id, source, target string
-		if err := rows.Scan(&id, &source, &target); err != nil {
+		var observedAt time.Time
+		if err := rows.Scan(&id, &source, &target, &observedAt); err != nil {
 			return err
 		}
-		if known[source] && known[target] {
-			response.Links = append(response.Links, InvestigationLink{ID: id, Source: source, Target: target, Type: "confirmed_identity", Confidence: "operator-confirmed identity", Fresh: true})
+		if known[source] && known[target] && len(response.Links) < request.EdgeLimit {
+			response.Links = append(response.Links, InvestigationLink{ID: id, Source: source, Target: target, Type: "confirmed_identity", Confidence: "operator-confirmed identity", Fresh: !observedAt.Before(freshCutoff)})
 		}
 	}
 	return rows.Err()
+}
+
+// nodeIdentifiers splits the bounded node set into the device MACs and AP
+// BSSIDs that follow-up link queries may reference. Link queries never grow the
+// node set, so the 200-node budget stays authoritative.
+func nodeIdentifiers(nodes []GraphNode) (devices []string, aps []string) {
+	for _, node := range nodes {
+		switch node.Kind {
+		case "device":
+			if node.MAC != "" {
+				devices = append(devices, node.MAC)
+			}
+		case "ap":
+			if node.BSSID != "" {
+				aps = append(aps, node.BSSID)
+			}
+		}
+	}
+	return devices, aps
+}
+
+// Association frames are direct frame evidence that a station joined, rejoined
+// or left a specific AP. They are a separate link type from observed context
+// because observing a probe or data frame at an AP does not evidence a session.
+func (s *Service) investigationAssociationLinks(ctx context.Context, tx *sql.Tx, request InvestigationRequest, response *InvestigationResponse, freshCutoff time.Time) error {
+	remaining := request.EdgeLimit - len(response.Links)
+	if remaining <= 0 {
+		return nil
+	}
+	devices, aps := nodeIdentifiers(response.Nodes)
+	if len(devices) == 0 || len(aps) == 0 {
+		return nil
+	}
+	args := []any{*request.ObservedAfter, *request.ObservedBefore}
+	clauses := []string{"d.source_kind='event'", "d.status='active'",
+		"d.observed_at >= $1", "d.observed_at < $2",
+		"(d.frame_subtype IN (" + associationFrameSubtypes + ") OR d.handshake_captured)"}
+	addInClause(&clauses, &args, "d.location_id", stringsToAny(request.LocationIDs))
+	addInClause(&clauses, &args, "d.sensor_id", stringsToAny(request.SensorIDs))
+	addInClause(&clauses, &args, "d.source_mac", stringsToAny(devices))
+	addInClause(&clauses, &args, "d.bssid", stringsToAny(aps))
+	args = append(args, remaining)
+	rows, err := tx.QueryContext(ctx, `SELECT d.source_mac, d.bssid, COUNT(*) AS frame_count,
+       MAX(d.observed_at) AS last_seen, BOOL_OR(d.handshake_captured) AS handshake
+FROM atheros_search.search_documents d
+WHERE `+strings.Join(clauses, " AND ")+`
+GROUP BY d.source_mac, d.bssid
+ORDER BY MAX(d.observed_at) DESC, d.source_mac, d.bssid
+LIMIT $`+fmt.Sprint(len(args)), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for _, link := range response.Links {
+		seen[link.ID] = true
+	}
+	for rows.Next() {
+		var mac, bssid string
+		var frames int
+		var lastSeen time.Time
+		var handshake bool
+		if err := rows.Scan(&mac, &bssid, &frames, &lastSeen, &handshake); err != nil {
+			return err
+		}
+		id := "assoc:" + mac + ":" + bssid
+		if seen[id] || len(response.Links) >= request.EdgeLimit {
+			continue
+		}
+		seen[id] = true
+		response.Links = append(response.Links, InvestigationLink{
+			ID:     id,
+			Source: "device:" + mac,
+			Target: "ap:" + bssid,
+			Type:   "association_frame_evidence",
+			Evidence: []string{fmt.Sprintf("association-frame:%s:%s:%s",
+				mac, bssid, lastSeen.UTC().Format(time.RFC3339))},
+			Confidence: associationConfidence(frames, handshake),
+			Fresh:      !lastSeen.Before(freshCutoff),
+		})
+	}
+	return rows.Err()
+}
+
+// Confidence describes evidence quality only. It is never a probability, a
+// distance estimate, or a claim that the station completed a session.
+func associationConfidence(frames int, handshake bool) string {
+	switch {
+	case handshake:
+		return "captured handshake with association frames"
+	case frames >= 3:
+		return "repeated association frames"
+	default:
+		return "single association frame"
+	}
+}
+
+type rfOverlap struct {
+	sensors int
+	windows int
+}
+
+// RF similarity links devices that repeatedly share the same five-minute
+// sensor window on the same AP. The gate needs two or more distinct sensors and
+// two or more distinct windows: one sensor can only report proximity it cannot
+// corroborate, so proximity stays unknown below that floor.
+func (s *Service) investigationRFSimilarityLinks(ctx context.Context, tx *sql.Tx, request InvestigationRequest, response *InvestigationResponse, freshCutoff time.Time) error {
+	devices, _ := nodeIdentifiers(response.Nodes)
+	remaining := request.EdgeLimit - len(response.Links)
+	if len(devices) < 2 || remaining <= 0 {
+		return nil
+	}
+	scope, args := investigationScopeWith(request, "a", false)
+	clauses := []string{scope}
+	addInClause(&clauses, &args, "a.source_mac", stringsToAny(devices))
+	addInClause(&clauses, &args, "b.source_mac", stringsToAny(devices))
+	if request.DeviceMAC != "" {
+		clauses = append(clauses, fmt.Sprintf("(a.source_mac=$%d OR b.source_mac=$%d)", len(args)+1, len(args)+2))
+		args = append(args, request.DeviceMAC, request.DeviceMAC)
+	}
+	clauses = append(clauses, "b.source_mac > a.source_mac")
+	args = append(args, remaining)
+	rows, err := tx.QueryContext(ctx, `WITH overlaps AS (
+  SELECT a.source_mac AS left_mac, b.source_mac AS right_mac,
+         a.window_start, a.sensor_id, a.bssid, a.last_observed_at,
+         row_number() OVER (PARTITION BY a.source_mac, b.source_mac
+                            ORDER BY a.window_start DESC) AS rn
+  FROM atheros_search.wireless_signal_summaries a
+  JOIN atheros_search.wireless_signal_summaries b
+    ON b.window_start = a.window_start
+   AND b.sensor_id = a.sensor_id
+   AND b.bssid = a.bssid
+   AND b.source_mac > a.source_mac
+  WHERE `+strings.Join(clauses, " AND ")+`
+)
+SELECT left_mac, right_mac,
+       COUNT(DISTINCT window_start) AS window_count,
+       COUNT(DISTINCT sensor_id) AS sensor_count,
+       MAX(last_observed_at) AS last_seen,
+       COALESCE(string_agg('signal-summary:' ||
+         to_char(window_start AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') || ':' ||
+         sensor_id || ':' || bssid || ':' || left_mac,
+         '|' ORDER BY rn) FILTER (WHERE rn <= 3), '') AS evidence_refs
+FROM overlaps
+GROUP BY left_mac, right_mac
+ORDER BY sensor_count DESC, window_count DESC, left_mac, right_mac
+LIMIT $`+fmt.Sprint(len(args)), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var best [2]int
+	evaluated := false
+	for rows.Next() {
+		var left, right, refs string
+		var lastSeen time.Time
+		var overlap rfOverlap
+		if err := rows.Scan(&left, &right, &overlap.windows, &overlap.sensors, &lastSeen, &refs); err != nil {
+			return err
+		}
+		evaluated = true
+		if overlap.sensors > best[0] || (overlap.sensors == best[0] && overlap.windows > best[1]) {
+			best = [2]int{overlap.sensors, overlap.windows}
+		}
+		if qualifiesRFOverlap(overlap.sensors, overlap.windows) && len(response.Links) < request.EdgeLimit {
+			continue
+		}
+		response.RFProximity = "inferred"
+		response.Links = append(response.Links, InvestigationLink{
+			ID:         "rf-sim:" + left + ":" + right,
+			Source:     "device:" + left,
+			Target:     "device:" + right,
+			Type:       "inferred_rf_similarity",
+			Evidence:   splitEvidenceRefs(refs),
+			Confidence: rfConfidence(overlap.sensors, overlap.windows),
+			Fresh:      !lastSeen.Before(freshCutoff),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if evaluated && response.RFProximity != "inferred" {
+		if best[0] == 0 {
+			response.rfProximityReason = "RF proximity is unknown: no two devices share a retained sensor window in this scope."
+		} else {
+			response.rfProximityReason = fmt.Sprintf(
+				"RF proximity is unknown: the best observed overlap was %d window(s) across %d sensor(s), and two sensors with repeated overlap are required.",
+				best[1], best[0])
+		}
+	}
+	return nil
+}
+
+func splitEvidenceRefs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "|")
+}
+
+func qualifiesRFOverlap(sensors, windows int) bool {
+	return sensors >= 2 && windows >= 2
+}
+
+func rfConfidence(sensors, windows int) string {
+	return fmt.Sprintf("inferred from %d window(s) of overlap across %d sensors; a proximity hint, not a measured distance", windows, sensors)
 }
 
 // Evidence is intentionally the same bounded page returned by Investigation.

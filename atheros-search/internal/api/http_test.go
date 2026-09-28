@@ -67,6 +67,7 @@ func TestHTTPStatusFromError(t *testing.T) {
 		{name: "merge decision validation", err: errors.New("unsupported merge decision \"undo_merge\""), want: http.StatusBadRequest},
 		{name: "merge candidate missing", err: errors.New("merge candidate not found"), want: http.StatusNotFound},
 		{name: "merge already decided", err: errors.New("merge candidate already decided"), want: http.StatusConflict},
+		{name: "annotation conflict", err: search.ErrAnnotationConflict, want: http.StatusConflict},
 		{name: "generic required failure", err: errors.New("required background cleanup failed"), want: http.StatusInternalServerError},
 		{name: "fallback", err: errors.New("boom"), want: http.StatusInternalServerError},
 	}
