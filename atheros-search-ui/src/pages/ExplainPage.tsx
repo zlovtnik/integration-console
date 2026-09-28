@@ -16,6 +16,7 @@ import { ScoreChart } from '~/components/ScoreChart';
 import { SkeletonExplain } from '~/components/SkeletonExplain';
 import { isSameOriginRelative } from '~/auth/returnPath';
 import type { SearchFilters } from '~/api/types';
+import type { Rfc3339Timestamp } from '~/utils/timestamp';
 
 export default function ExplainPage() {
   const params = useParams();
@@ -44,7 +45,7 @@ export default function ExplainPage() {
       kind: kindParam(),
     };
   };
-  const scopedFilters = (): SearchFilters | undefined => {
+const scopedFilters = (): SearchFilters => {
     const filters: SearchFilters = {};
     const list = (key: string) =>
       typeof searchParams[key] === 'string'
@@ -58,9 +59,9 @@ export default function ExplainPage() {
     if (macs.length) filters.source_macs = macs;
     if (typeof searchParams.bssid === 'string') filters.bssid = searchParams.bssid;
     if (typeof searchParams.ssid === 'string') filters.ssid = searchParams.ssid;
-    if (typeof searchParams.after === 'string') filters.observed_after = searchParams.after;
-    if (typeof searchParams.before === 'string') filters.observed_before = searchParams.before;
-    return Object.keys(filters).length ? filters : undefined;
+    if (typeof searchParams.after === 'string') filters.observed_after = searchParams.after as Rfc3339Timestamp;
+    if (typeof searchParams.before === 'string') filters.observed_before = searchParams.before as Rfc3339Timestamp;
+    return filters;
   };
   const [explain] = createResource(explainRequest, async (request) => {
     const controller = new AbortController();
