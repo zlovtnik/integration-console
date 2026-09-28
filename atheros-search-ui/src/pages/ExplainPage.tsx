@@ -15,6 +15,7 @@ import { JsonViewer } from '~/components/JsonViewer';
 import { ScoreChart } from '~/components/ScoreChart';
 import { SkeletonExplain } from '~/components/SkeletonExplain';
 import { isSameOriginRelative } from '~/auth/returnPath';
+import type { SearchFilters } from '~/api/types';
 
 export default function ExplainPage() {
   const params = useParams();
@@ -43,17 +44,35 @@ export default function ExplainPage() {
       kind: kindParam(),
     };
   };
+  const scopedFilters = (): SearchFilters | undefined => {
+    const filters: SearchFilters = {};
+    const list = (key: string) =>
+      typeof searchParams[key] === 'string'
+        ? searchParams[key].split(',').map((item) => item.trim()).filter(Boolean)
+        : [];
+    const locations = list('loc');
+    const sensors = list('sensor');
+    const macs = list('mac');
+    if (locations.length) filters.location_ids = locations;
+    if (sensors.length) filters.sensor_ids = sensors;
+    if (macs.length) filters.source_macs = macs;
+    if (typeof searchParams.bssid === 'string') filters.bssid = searchParams.bssid;
+    if (typeof searchParams.ssid === 'string') filters.ssid = searchParams.ssid;
+    if (typeof searchParams.after === 'string') filters.observed_after = searchParams.after;
+    if (typeof searchParams.before === 'string') filters.observed_before = searchParams.before;
+    return Object.keys(filters).length ? filters : undefined;
+  };
   const [explain] = createResource(explainRequest, async (request) => {
     const controller = new AbortController();
     controllers.add(controller);
 
     try {
-      return await api.explain(
-        request.sourceKey,
-        request.query,
-        request.kind,
-        controller.signal,
-      );
+      return await api.explainScoped({
+        source_key: request.sourceKey,
+        query: request.query,
+        kind: request.kind,
+        filters: scopedFilters(),
+      }, controller.signal);
     } finally {
       controllers.delete(controller);
     }
@@ -112,9 +131,8 @@ export default function ExplainPage() {
 
       <h1 class="display">Explain: {sourceKey()}</h1>
       <p>
-        Ranking is recomputed for this query and record kind. This endpoint does
-        not apply location, sensor, time or entity filters. Back restores the
-        original investigation scope.
+        Ranking is calculated directly for this record in the current location,
+        sensor, AP, identifier, and time scope. Back restores the investigation.
       </p>
 
       <Show when={!explain.loading} fallback={<SkeletonExplain />}>

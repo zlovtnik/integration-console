@@ -118,6 +118,101 @@ export interface ExplainResponse {
   source_kind?: string;
 }
 
+export interface EntityChoice {
+  kind: 'ap' | 'device';
+  id: string;
+  label: string;
+  pinned: boolean;
+  role?: 'router' | 'server';
+  authorized?: boolean;
+  last_seen?: string;
+}
+
+export interface EntitiesResponse {
+  entities: EntityChoice[];
+  next_page_cursor?: string;
+}
+
+export interface AssetAnnotation {
+  kind: 'ap' | 'device';
+  id: string;
+  role?: 'router' | 'server';
+  label?: string;
+  pinned: boolean;
+  revision: number;
+  updated_by?: string;
+  updated_at: string;
+}
+
+export interface AssetAnnotationUpdate {
+  role?: 'router' | 'server' | '';
+  label?: string;
+  pinned?: boolean;
+  expected_revision: number;
+}
+
+export interface InvestigationRequest {
+  anchor?: { kind: 'ap' | 'device'; id: string };
+  ap_bssid?: string;
+  device_mac?: string;
+  location_ids?: string[];
+  sensor_ids?: string[];
+  ssid?: string;
+  observed_after?: Rfc3339Timestamp;
+  observed_before?: Rfc3339Timestamp;
+  node_limit?: number;
+  edge_limit?: number;
+  evidence_page?: number;
+  evidence_page_size?: number;
+}
+
+export interface InvestigationEvidence {
+  reference: string;
+  window_start: string;
+  sensor_id: string;
+  location_id?: string;
+  bssid: string;
+  device_mac: string;
+  frame_count: number;
+  rssi_avg_dbm?: number;
+  rssi_min_dbm?: number;
+  rssi_max_dbm?: number;
+  rssi_sample_count: number;
+  first_observed_at: string;
+  last_observed_at: string;
+}
+
+export interface InvestigationLink {
+  id: string;
+  source: string;
+  target: string;
+  type: 'observed_ap_context' | 'confirmed_identity' | 'inferred_rf_similarity';
+  evidence_references?: string[];
+  confidence: string;
+  fresh: boolean;
+}
+
+export interface InvestigationResponse {
+  anchor: { kind: string; id: string };
+  nodes: GraphNode[];
+  links: InvestigationLink[];
+  roster: { mac: string; name: string; first_observed: string; last_observed: string; record_count: number }[];
+  evidence: InvestigationEvidence[];
+  evidence_page: number;
+  evidence_page_size: number;
+  evidence_total: number;
+  signal_quality: string;
+  confidence: string;
+  freshness: {
+    source_watermark?: string;
+    projection_watermark?: string;
+    coverage_status: 'complete' | 'partial' | 'stalled' | 'unknown';
+    coverage_reason?: string;
+  };
+  focus_reason?: string;
+  generated_at: string;
+}
+
 export interface SuggestFiltersResponse {
   ssids: string[];
   location_ids: string[];

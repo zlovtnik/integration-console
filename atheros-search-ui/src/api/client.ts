@@ -15,6 +15,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchResult,
+  SearchFilters,
   SuggestFiltersResponse,
 } from './types';
 
@@ -688,6 +689,45 @@ export const api = {
       { method: 'POST', body: JSON.stringify(filters) },
       signal,
     ),
+  entities: (
+    kind: 'ap' | 'device',
+    q = '',
+    pageCursor?: string,
+    signal?: AbortSignal,
+  ) =>
+    request<import('./types').EntitiesResponse>(
+      buildUrl('/v1/entities', { kind, q, page_cursor: pageCursor, page_size: '12' }),
+      {},
+      signal,
+    ),
+  investigation: (
+    body: import('./types').InvestigationRequest,
+    signal?: AbortSignal,
+  ) => request<import('./types').InvestigationResponse>(
+    '/v1/investigation',
+    { method: 'POST', body: JSON.stringify(body) },
+    signal,
+  ),
+  evidence: (
+    body: import('./types').InvestigationRequest,
+    signal?: AbortSignal,
+  ) => request<import('./types').InvestigationResponse>(
+    '/v1/evidence',
+    { method: 'POST', body: JSON.stringify(body) },
+    signal,
+  ),
+  assetAnnotation: (kind: 'ap' | 'device', id: string, signal?: AbortSignal) =>
+    request<import('./types').AssetAnnotation>(
+      `/v1/asset-annotations/${kind}/${encodeURIComponent(id)}`,
+      {}, signal,
+    ),
+  updateAssetAnnotation: (
+    kind: 'ap' | 'device', id: string, body: import('./types').AssetAnnotationUpdate,
+    signal?: AbortSignal,
+  ) => request<import('./types').AssetAnnotation>(
+    `/v1/asset-annotations/${kind}/${encodeURIComponent(id)}`,
+    { method: 'PUT', body: JSON.stringify(body) }, signal,
+  ),
   pairDetail: (candidateId: string, signal?: AbortSignal) =>
     request<import('./types').PairDetail>(
       `/v1/inventory/merge-candidates/${encodeURIComponent(candidateId)}`,
@@ -718,6 +758,17 @@ export const api = {
       ),
     );
   },
+
+  explainScoped: async (
+    body: { source_key: string; query: string; kind: string; filters?: SearchFilters },
+    signal?: AbortSignal,
+  ) => normalizeExplainResponse(
+    await request<RawExplainResponse>(
+      '/v1/explain/scoped',
+      { method: 'POST', body: JSON.stringify(body) },
+      signal,
+    ),
+  ),
 
   suggestFilters: (prefix: string, signal?: AbortSignal) =>
     request<SuggestFiltersResponse>(

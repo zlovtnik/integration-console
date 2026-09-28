@@ -33,6 +33,9 @@ func httpStatusFromError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
+	if errors.Is(err, search.ErrAnnotationConflict) {
+		return http.StatusConflict
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "context canceled") {
 		return http.StatusGatewayTimeout
@@ -40,7 +43,7 @@ func httpStatusFromError(err error) int {
 	if strings.Contains(msg, "request body too large") {
 		return http.StatusRequestEntityTooLarge
 	}
-	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported inventory sort") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") {
+	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported inventory sort") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "invalid entity") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "must not be negative") || strings.Contains(msg, "must be a MAC") || strings.Contains(msg, "must be ap or device") || strings.Contains(msg, "must be router or server") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") || strings.Contains(msg, "invalid AP BSSID") || strings.Contains(msg, "invalid device MAC") {
 		return http.StatusBadRequest
 	}
 	if strings.Contains(msg, "merge candidate not found") {
@@ -278,6 +281,82 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Msg("suggest filters completed")
 		writeProtoJSON(w, http.StatusOK, resp, log)
 	})
+	registerJSON(mux, "GET", "/v1/entities", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		pageSize := 0
+		if raw := strings.TrimSpace(r.URL.Query().Get("page_size")); raw != "" {
+			if _, err := fmt.Sscanf(raw, "%d", &pageSize); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid entity page_size")
+				return
+			}
+		}
+		resp, err := svc.Entities(r.Context(), r.URL.Query().Get("kind"), r.URL.Query().Get("q"), r.URL.Query().Get("page_cursor"), pageSize)
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSON(mux, "GET", "/v1/asset-annotations/{kind}/{id}", tokenAuth, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
+		resp, err := svc.AssetAnnotation(r.Context(), params["kind"], params["id"])
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		if resp == nil {
+			writeError(w, http.StatusNotFound, "asset annotation not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSONRoles(mux, "PUT", "/v1/asset-annotations/{kind}/{id}", tokenAuth, []string{auth.RoleOperator, auth.RoleAdmin}, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			return
+		}
+		var update search.AssetAnnotationUpdate
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&update); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		resp, err := svc.UpdateAssetAnnotation(r.Context(), params["kind"], params["id"], update, auth.SubjectFromContext(r.Context()))
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSON(mux, "POST", "/v1/explain/scoped", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			return
+		}
+		var payload struct {
+			SourceKey string          `json:"source_key"`
+			Query     string          `json:"query"`
+			Kind      string          `json:"kind"`
+			Filters   json.RawMessage `json:"filters"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		var filters *searchv1.SearchFilters
+		if len(payload.Filters) > 0 && string(payload.Filters) != "null" {
+			filters = &searchv1.SearchFilters{}
+			if err := protojson.Unmarshal(payload.Filters, filters); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid scoped explain filters")
+				return
+			}
+		}
+		resp, err := svc.ExplainScoped(r.Context(), search.ScopedExplainRequest{SourceKey: payload.SourceKey, Query: payload.Query, Kind: parseKind(payload.Kind), Filters: filters})
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
 	registerJSON(mux, "GET", "/v1/inventory/merge-candidates/{candidate_id}", tokenAuth, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
 		resp, err := svc.PairDetail(r.Context(), params["candidate_id"])
 		if err != nil {
@@ -354,6 +433,44 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			return
 		}
 		resp, err := svc.Network(r.Context(), filters)
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSON(mux, "POST", "/v1/investigation", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			return
+		}
+		var request search.InvestigationRequest
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid investigation scope")
+			return
+		}
+		resp, err := svc.Investigation(r.Context(), request)
+		if err != nil {
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+	registerJSON(mux, "POST", "/v1/evidence", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		body, ok := readRequestBody(w, r)
+		if !ok {
+			return
+		}
+		var request search.InvestigationRequest
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid evidence scope")
+			return
+		}
+		resp, err := svc.Evidence(r.Context(), request)
 		if err != nil {
 			writeError(w, httpStatusFromError(err), err.Error())
 			return
