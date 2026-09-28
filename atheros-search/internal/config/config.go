@@ -79,44 +79,9 @@ type Config struct {
 func Load() (Config, error) {
 	env := viper.New()
 	env.AutomaticEnv()
-	postgresDSN := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_DSN"))
-	postgresTLSCAFile := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CA_FILE"))
-	if postgresDSN == "" {
-		postgresHost := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_HOST"))
-		postgresPort := envInt("ATHSEARCH_POSTGRES_PORT", 5432)
-		postgresDatabase := envString("ATHSEARCH_POSTGRES_DATABASE", "sync")
-		postgresUser := envString("ATHSEARCH_POSTGRES_USER", "atheros_search_runtime")
-		postgresPassword, err := secretValue(
-			"ATHSEARCH_POSTGRES_PASSWORD",
-			"ATHSEARCH_POSTGRES_PASSWORD_FILE",
-			os.ReadFile,
-		)
-		if err != nil {
-			return Config{}, err
-		}
-		if postgresHost == "" {
-			return Config{}, errors.New("ATHSEARCH_POSTGRES_HOST is required when ATHSEARCH_POSTGRES_DSN is not set")
-		}
-		if postgresPort < 1 || postgresPort > 65535 {
-			return Config{}, errors.New("ATHSEARCH_POSTGRES_PORT must be between 1 and 65535")
-		}
-		if strings.TrimSpace(postgresPassword) == "" {
-			return Config{}, errors.New("ATHSEARCH_POSTGRES_PASSWORD is required when ATHSEARCH_POSTGRES_DSN is not set")
-		}
-		connectionURL := &url.URL{
-			Scheme: "postgresql",
-			User:   url.UserPassword(postgresUser, postgresPassword),
-			Host:   net.JoinHostPort(strings.Trim(postgresHost, "[]"), strconv.Itoa(postgresPort)),
-			Path:   "/" + postgresDatabase,
-		}
-		query := connectionURL.Query()
-		if postgresTLSCAFile != "" {
-			query.Set("sslmode", "verify-full")
-		} else {
-			query.Set("sslmode", "disable")
-		}
-		connectionURL.RawQuery = query.Encode()
-		postgresDSN = connectionURL.String()
+	postgresDSN, postgresTLSCAFile, err := loadPostgresConnection()
+	if err != nil {
+		return Config{}, err
 	}
 	cfg := Config{
 		PostgresDSN:                   postgresDSN,
@@ -161,82 +126,185 @@ func Load() (Config, error) {
 		WSEnabled:                     envBool("ATHSEARCH_WS_ENABLED", false),
 	}
 
-	if cfg.WorkerEnabled {
-		if cfg.EmbeddingBackend == "" {
-			return cfg, errors.New("ATHSEARCH_EMBEDDING_BACKEND is required when workers are enabled")
-		}
-		if cfg.WorkerCount <= 0 {
-			return cfg, errors.New("ATHSEARCH_WORKER_COUNT must be positive when workers are enabled")
-		}
-		if cfg.EmbeddingBatchSize <= 0 {
-			return cfg, errors.New("ATHSEARCH_EMBEDDING_BATCH_SIZE must be positive when workers are enabled")
-		}
-		if cfg.LeaseSeconds <= 0 {
-			return cfg, errors.New("ATHSEARCH_LEASE_SECONDS must be positive when workers are enabled")
-		}
-		if cfg.WorkerPollInterval <= 0 {
-			return cfg, errors.New("ATHSEARCH_POLL_INTERVAL_MS must be positive when workers are enabled")
+	if err := validate(cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+func loadPostgresConnection() (string, string, error) {
+	dsn := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_DSN"))
+	tlsCAFile := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CA_FILE"))
+	if dsn != "" {
+		return dsn, tlsCAFile, nil
+	}
+	builtDSN, err := buildPostgresDSN(tlsCAFile)
+	if err != nil {
+		return "", "", err
+	}
+	return builtDSN, tlsCAFile, nil
+}
+
+func buildPostgresDSN(tlsCAFile string) (string, error) {
+	host := strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_HOST"))
+	port := envInt("ATHSEARCH_POSTGRES_PORT", 5432)
+	database := envString("ATHSEARCH_POSTGRES_DATABASE", "sync")
+	user := envString("ATHSEARCH_POSTGRES_USER", "atheros_search_runtime")
+	password, err := secretValue(
+		"ATHSEARCH_POSTGRES_PASSWORD",
+		"ATHSEARCH_POSTGRES_PASSWORD_FILE",
+		os.ReadFile,
+	)
+	if err != nil {
+		return "", err
+	}
+	if host == "" {
+		return "", errors.New("ATHSEARCH_POSTGRES_HOST is required when ATHSEARCH_POSTGRES_DSN is not set")
+	}
+	if port < 1 || port > 65535 {
+		return "", errors.New("ATHSEARCH_POSTGRES_PORT must be between 1 and 65535")
+	}
+	if strings.TrimSpace(password) == "" {
+		return "", errors.New("ATHSEARCH_POSTGRES_PASSWORD is required when ATHSEARCH_POSTGRES_DSN is not set")
+	}
+	connectionURL := &url.URL{
+		Scheme: "postgresql",
+		User:   url.UserPassword(user, password),
+		Host:   net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)),
+		Path:   "/" + database,
+	}
+	query := connectionURL.Query()
+	if tlsCAFile != "" {
+		query.Set("sslmode", "verify-full")
+	} else {
+		query.Set("sslmode", "disable")
+	}
+	connectionURL.RawQuery = query.Encode()
+	return connectionURL.String(), nil
+}
+
+func validate(cfg Config) error {
+	checks := []func(Config) error{
+		validateWorkerConfig,
+		validatePostgresTLS,
+		validatePostgresPool,
+		validateEmbedding,
+		validateAPIKey,
+		validateJWT,
+		validateTimeouts,
+	}
+	for _, check := range checks {
+		if err := check(cfg); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func validateWorkerConfig(cfg Config) error {
+	if !cfg.WorkerEnabled {
+		return nil
+	}
+	if cfg.EmbeddingBackend == "" {
+		return errors.New("ATHSEARCH_EMBEDDING_BACKEND is required when workers are enabled")
+	}
+	if cfg.WorkerCount <= 0 {
+		return errors.New("ATHSEARCH_WORKER_COUNT must be positive when workers are enabled")
+	}
+	if cfg.EmbeddingBatchSize <= 0 {
+		return errors.New("ATHSEARCH_EMBEDDING_BATCH_SIZE must be positive when workers are enabled")
+	}
+	if cfg.LeaseSeconds <= 0 {
+		return errors.New("ATHSEARCH_LEASE_SECONDS must be positive when workers are enabled")
+	}
+	if cfg.WorkerPollInterval <= 0 {
+		return errors.New("ATHSEARCH_POLL_INTERVAL_MS must be positive when workers are enabled")
+	}
+	return nil
+}
+
+func validatePostgresTLS(cfg Config) error {
 	if !strings.HasPrefix(cfg.PostgresDSN, "postgres://") && !strings.HasPrefix(cfg.PostgresDSN, "postgresql://") {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_DSN must be a PostgreSQL connection URL")
+		return errors.New("ATHSEARCH_POSTGRES_DSN must be a PostgreSQL connection URL")
 	}
 	if (cfg.PostgresTLSCertFile == "") != (cfg.PostgresTLSKeyFile == "") {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_TLS_CERT_FILE and ATHSEARCH_POSTGRES_TLS_KEY_FILE must be configured together")
+		return errors.New("ATHSEARCH_POSTGRES_TLS_CERT_FILE and ATHSEARCH_POSTGRES_TLS_KEY_FILE must be configured together")
 	}
 	if cfg.PostgresTLSCAFile == "" && (cfg.PostgresTLSCertFile != "" || cfg.PostgresTLSKeyFile != "" || cfg.PostgresTLSServerName != "") {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_TLS_CA_FILE is required when any Postgres TLS setting is configured")
+		return errors.New("ATHSEARCH_POSTGRES_TLS_CA_FILE is required when any Postgres TLS setting is configured")
 	}
 	if cfg.PostgresTLSCAFile != "" && cfg.PostgresTLSServerName == "" {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_TLS_SERVER_NAME is required")
+		return errors.New("ATHSEARCH_POSTGRES_TLS_SERVER_NAME is required")
 	}
 	if cfg.PostgresTLSCAFile != "" {
 		parsedDSN, err := url.Parse(cfg.PostgresDSN)
 		if err != nil || parsedDSN.Query().Get("sslmode") != "verify-full" {
-			return cfg, errors.New("ATHSEARCH_POSTGRES_DSN must set sslmode=verify-full when Postgres TLS is configured")
+			return errors.New("ATHSEARCH_POSTGRES_DSN must set sslmode=verify-full when Postgres TLS is configured")
 		}
 	}
+	return nil
+}
+
+func validatePostgresPool(cfg Config) error {
 	if len(cfg.PostgresSchemaManifestSHA256) != sha256.Size*2 {
-		return cfg, errors.New("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
+		return errors.New("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
 	}
 	if _, err := hex.DecodeString(cfg.PostgresSchemaManifestSHA256); err != nil {
-		return cfg, errors.New("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
+		return errors.New("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
 	}
 	if cfg.PostgresMaxOpenConns < 1 || cfg.PostgresMaxOpenConns > 512 {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_MAX_OPEN_CONNS must be between 1 and 512")
+		return errors.New("ATHSEARCH_POSTGRES_MAX_OPEN_CONNS must be between 1 and 512")
 	}
 	if cfg.PostgresMaxIdleConns < 0 || cfg.PostgresMaxIdleConns > cfg.PostgresMaxOpenConns {
-		return cfg, errors.New("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS must be between 0 and ATHSEARCH_POSTGRES_MAX_OPEN_CONNS")
+		return errors.New("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS must be between 0 and ATHSEARCH_POSTGRES_MAX_OPEN_CONNS")
 	}
 	if cfg.PostgresConnMaxLifetime <= 0 || cfg.PostgresConnMaxIdleTime <= 0 {
-		return cfg, errors.New("Postgres connection lifetime and idle time must be positive")
+		return errors.New("Postgres connection lifetime and idle time must be positive")
 	}
+	return nil
+}
+
+func validateEmbedding(cfg Config) error {
 	if cfg.EmbeddingModel != DefaultEmbeddingModel {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_MODEL must be %s, got %q", DefaultEmbeddingModel, cfg.EmbeddingModel)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_MODEL must be %s, got %q", DefaultEmbeddingModel, cfg.EmbeddingModel)
 	}
 	if cfg.EmbeddingDimensions != DefaultEmbeddingDimensions {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_DIMENSIONS must be %d, got %d", DefaultEmbeddingDimensions, cfg.EmbeddingDimensions)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_DIMENSIONS must be %d, got %d", DefaultEmbeddingDimensions, cfg.EmbeddingDimensions)
 	}
 	if cfg.EmbeddingMaxTokens < 64 {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_TOKENS must be at least 64, got %d", cfg.EmbeddingMaxTokens)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_TOKENS must be at least 64, got %d", cfg.EmbeddingMaxTokens)
 	}
 	if cfg.EmbeddingRequestConcurrency < 1 {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY must be positive, got %d", cfg.EmbeddingRequestConcurrency)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY must be positive, got %d", cfg.EmbeddingRequestConcurrency)
 	}
 	if cfg.EmbeddingTokenizerConcurrency < 1 {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY must be positive, got %d", cfg.EmbeddingTokenizerConcurrency)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY must be positive, got %d", cfg.EmbeddingTokenizerConcurrency)
 	}
 	if cfg.EmbeddingMaxChunksPerInput < 0 {
-		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT must not be negative, got %d", cfg.EmbeddingMaxChunksPerInput)
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT must not be negative, got %d", cfg.EmbeddingMaxChunksPerInput)
 	}
 	if cfg.HybridAlpha < 0 || cfg.HybridAlpha > 1 {
-		return cfg, fmt.Errorf("ATHSEARCH_HYBRID_ALPHA must be between 0 and 1, got %f", cfg.HybridAlpha)
+		return fmt.Errorf("ATHSEARCH_HYBRID_ALPHA must be between 0 and 1, got %f", cfg.HybridAlpha)
 	}
-	if cfg.APIKeySHA256 != "" {
-		if _, err := hex.DecodeString(cfg.APIKeySHA256); err != nil || len(cfg.APIKeySHA256) != sha256.Size*2 {
-			return cfg, errors.New("ATHSEARCH_API_TOKEN_SHA256 must be a 64-character hex SHA-256 digest")
+	if cfg.EmbeddingBackend != "" {
+		if _, err := url.ParseRequestURI(cfg.EmbeddingBackend); err != nil {
+			return fmt.Errorf("ATHSEARCH_EMBEDDING_BACKEND must be a valid URL: %w", err)
 		}
 	}
+	return nil
+}
+
+func validateAPIKey(cfg Config) error {
+	if cfg.APIKeySHA256 == "" {
+		return nil
+	}
+	if _, err := hex.DecodeString(cfg.APIKeySHA256); err != nil || len(cfg.APIKeySHA256) != sha256.Size*2 {
+		return errors.New("ATHSEARCH_API_TOKEN_SHA256 must be a 64-character hex SHA-256 digest")
+	}
+	return nil
+}
+
+func validateJWT(cfg Config) error {
 	jwtSettings := []string{cfg.JWTIssuer, cfg.JWTJWKSURI, cfg.JWTAudience, cfg.JWTClientID}
 	jwtConfigured := 0
 	for _, value := range jwtSettings {
@@ -245,37 +313,44 @@ func Load() (Config, error) {
 		}
 	}
 	if jwtConfigured != 0 && jwtConfigured != len(jwtSettings) {
-		return cfg, errors.New("ATHSEARCH_JWT_ISSUER, ATHSEARCH_JWT_JWKS_URI, ATHSEARCH_JWT_AUDIENCE and ATHSEARCH_JWT_CLIENT_ID must be configured together")
+		return errors.New("ATHSEARCH_JWT_ISSUER, ATHSEARCH_JWT_JWKS_URI, ATHSEARCH_JWT_AUDIENCE and ATHSEARCH_JWT_CLIENT_ID must be configured together")
 	}
 	if cfg.APIKeySHA256 != "" && jwtConfigured != 0 {
-		return cfg, errors.New("ATHSEARCH_API_TOKEN_SHA256 cannot be combined with JWT authentication")
+		return errors.New("ATHSEARCH_API_TOKEN_SHA256 cannot be combined with JWT authentication")
 	}
 	for name, value := range map[string]string{"ATHSEARCH_JWT_ISSUER": cfg.JWTIssuer, "ATHSEARCH_JWT_JWKS_URI": cfg.JWTJWKSURI} {
-		if value != "" {
-			parsed, err := url.ParseRequestURI(value)
-			if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Host))) {
-				return cfg, fmt.Errorf("%s must be an absolute HTTPS URL (HTTP allowed for loopback only)", name)
-			}
+		if err := validateJWTURL(name, value); err != nil {
+			return err
 		}
 	}
-	if cfg.EmbeddingBackend != "" {
-		if _, err := url.ParseRequestURI(cfg.EmbeddingBackend); err != nil {
-			return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_BACKEND must be a valid URL: %w", err)
-		}
+	return nil
+}
+
+func validateJWTURL(name, value string) error {
+	if value == "" {
+		return nil
 	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Host))) {
+		return fmt.Errorf("%s must be an absolute HTTPS URL (HTTP allowed for loopback only)", name)
+	}
+	return nil
+}
+
+func validateTimeouts(cfg Config) error {
 	if cfg.SearchTimeout <= 0 {
-		return cfg, errors.New("ATHSEARCH_SEARCH_TIMEOUT_MS must be positive")
+		return errors.New("ATHSEARCH_SEARCH_TIMEOUT_MS must be positive")
 	}
 	if cfg.SchemaReadyTimeout <= 0 {
-		return cfg, errors.New("ATHSEARCH_SCHEMA_READY_TIMEOUT_MS must be positive")
+		return errors.New("ATHSEARCH_SCHEMA_READY_TIMEOUT_MS must be positive")
 	}
 	if cfg.SchemaReadyPollInterval <= 0 {
-		return cfg, errors.New("ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS must be positive")
+		return errors.New("ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS must be positive")
 	}
 	if cfg.DenseOverfetchFactor < 1 || cfg.DenseOverfetchFactor > 100 {
-		return cfg, errors.New("ATHSEARCH_DENSE_OVERFETCH_FACTOR must be between 1 and 100")
+		return errors.New("ATHSEARCH_DENSE_OVERFETCH_FACTOR must be between 1 and 100")
 	}
-	return cfg, nil
+	return nil
 }
 
 func secretValue(name, fileName string, readFile func(string) ([]byte, error)) (string, error) {
