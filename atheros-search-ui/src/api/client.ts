@@ -673,10 +673,14 @@ export const api = {
   etlHealth: (signal?: AbortSignal) =>
     request<{
       measured_at: string;
+      wireless_events_24h: number;
+      wireless_last_observed_at?: string | null;
       ingest_pending: number;
+      ingest_processing: number;
       ingest_failed: number;
       embedding_pending: number;
       embedding_failed: number;
+      embedding_dependency: string;
     }>('/v1/etl/health', {}, signal, 3000),
   network: (filters: import('./types').NetworkFilters, signal?: AbortSignal) =>
     request<import('./types').NetworkResponse>(

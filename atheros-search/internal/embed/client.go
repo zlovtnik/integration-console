@@ -45,7 +45,23 @@ type HTTPClient struct {
 	Dimensions int
 	MaxTokens  int // retained for configuration compatibility; chunks are always 480 content tokens.
 	Client     *http.Client
-	tokenizer  Tokenizer
+	// PackTokenLimit is the content budget for one /v1/embeddings request. It
+	// defaults to RequestPackTokenLimit so requests fan out across backend
+	// slots instead of stacking tokens onto one slot.
+	PackTokenLimit int
+	// RequestConcurrency is how many /v1/embeddings requests may be in flight
+	// at once. It defaults to DefaultRequestConcurrency.
+	RequestConcurrency int
+	// TokenizerConcurrency bounds in-flight /tokenize and /detokenize calls.
+	// It defaults to DefaultTokenizerConcurrency.
+	TokenizerConcurrency int
+	// MaxChunksPerInput bounds chunks for a single input before any
+	// /detokenize work is spent. Zero disables the bound.
+	MaxChunksPerInput int
+
+	tokenizer Tokenizer
+	gateOnce  sync.Once
+	tokenGate chan struct{}
 }
 
 type embeddingsRequest struct {
@@ -74,19 +90,63 @@ type detokenizeResponse struct {
 
 func NewHTTPClient(baseURL, model string, dimensions, maxTokens int) *HTTPClient {
 	c := &HTTPClient{
-		BaseURL:    strings.TrimRight(baseURL, "/"),
-		Model:      model,
-		Dimensions: dimensions,
-		MaxTokens:  maxTokens,
-		Client:     &http.Client{Timeout: 30 * time.Second},
+		BaseURL:              strings.TrimRight(baseURL, "/"),
+		Model:                model,
+		Dimensions:           dimensions,
+		MaxTokens:            maxTokens,
+		Client:               &http.Client{Timeout: 30 * time.Second},
+		PackTokenLimit:       RequestPackTokenLimit,
+		RequestConcurrency:   DefaultRequestConcurrency,
+		TokenizerConcurrency: DefaultTokenizerConcurrency,
 	}
 	c.tokenizer = c
 	return c
 }
 
+func (c *HTTPClient) packTokenLimit() int {
+	if c.PackTokenLimit > 0 {
+		return c.PackTokenLimit
+	}
+	return RequestPackTokenLimit
+}
+
+func (c *HTTPClient) requestConcurrency() int {
+	if c.RequestConcurrency > 0 {
+		return c.RequestConcurrency
+	}
+	return DefaultRequestConcurrency
+}
+
+func (c *HTTPClient) tokenizerConcurrency() int {
+	if c.TokenizerConcurrency > 0 {
+		return c.TokenizerConcurrency
+	}
+	return DefaultTokenizerConcurrency
+}
+
 func (c *HTTPClient) endpoint(path string) string { return strings.TrimRight(c.BaseURL, "/") + path }
 
+// enterTokenizer admits one tokenizer round trip. Chunk fan-out runs many
+// texts and many chunks at once, so the backend process needs a single shared
+// bound instead of one bound per call site.
+func (c *HTTPClient) enterTokenizer(ctx context.Context) (func(), error) {
+	c.gateOnce.Do(func() {
+		c.tokenGate = make(chan struct{}, c.tokenizerConcurrency())
+	})
+	select {
+	case c.tokenGate <- struct{}{}:
+		return func() { <-c.tokenGate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (c *HTTPClient) Tokenize(ctx context.Context, text string) ([]int, error) {
+	release, err := c.enterTokenizer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	body, err := json.Marshal(tokenizeRequest{Content: text})
 	if err != nil {
 		return nil, err
@@ -99,6 +159,11 @@ func (c *HTTPClient) Tokenize(ctx context.Context, text string) ([]int, error) {
 }
 
 func (c *HTTPClient) Detokenize(ctx context.Context, tokens []int) (string, error) {
+	release, err := c.enterTokenizer(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	body, err := json.Marshal(detokenizeRequest{Tokens: tokens})
 	if err != nil {
 		return "", err
@@ -143,11 +208,11 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]flo
 	}
 	offsets := make([]int, len(texts)+1)
 	inputs := make([]TokenChunk, 0, len(texts))
-	for i, text := range texts {
-		chunks, err := ChunkText(ctx, c.tokenizer, text)
-		if err != nil {
-			return nil, err
-		}
+	chunked, err := ChunkTexts(ctx, c.tokenizer, texts, c.tokenizerConcurrency(), c.MaxChunksPerInput)
+	if err != nil {
+		return nil, err
+	}
+	for i, chunks := range chunked {
 		offsets[i+1] = offsets[i] + len(chunks)
 		inputs = append(inputs, chunks...)
 	}
@@ -166,6 +231,7 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 	if len(inputs) == 0 {
 		return nil, nil
 	}
+	packLimit := c.packTokenLimit()
 	var batches [][]TokenChunk
 	for start := 0; start < len(inputs); {
 		count, end := 0, start
@@ -173,7 +239,7 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 			if inputs[end].TokenCount > RequestTokenLimit {
 				return nil, fmt.Errorf("embedding chunk has %d content tokens, limit is %d", inputs[end].TokenCount, RequestTokenLimit)
 			}
-			if end > start && count+inputs[end].TokenCount > RequestTokenLimit {
+			if end > start && count+inputs[end].TokenCount > packLimit {
 				break
 			}
 			count += inputs[end].TokenCount
@@ -188,7 +254,7 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
-	for worker := 0; worker < 2; worker++ {
+	for worker := 0; worker < c.requestConcurrency(); worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

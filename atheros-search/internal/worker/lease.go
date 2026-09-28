@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,14 +50,46 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate claimed jobs: %w", err)
 	}
+	if len(jobs) == 0 {
+		return jobs, nil
+	}
 
-	for i := range jobs {
-		err := tx.QueryRowContext(ctx, `
-SELECT normalized_text FROM atheros_search.search_documents WHERE document_id = $1
-`, jobs[i].DocumentID).Scan(&jobs[i].NormalizedText)
-		if err != nil {
-			return nil, fmt.Errorf("fetch document text for %s: %w", jobs[i].DocumentID, err)
+	placeholders := make([]string, 0, len(jobs))
+	seen := make(map[string]struct{}, len(jobs))
+	args := make([]any, 0, len(jobs))
+	for _, job := range jobs {
+		if _, duplicate := seen[job.DocumentID]; duplicate {
+			continue
 		}
+		seen[job.DocumentID] = struct{}{}
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
+		args = append(args, job.DocumentID)
+	}
+	textRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+SELECT document_id, normalized_text FROM atheros_search.search_documents
+WHERE document_id IN (%s)
+`, strings.Join(placeholders, ", ")), args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch document text: %w", err)
+	}
+	defer textRows.Close()
+	textByDocument := make(map[string]string, len(seen))
+	for textRows.Next() {
+		var documentID, normalizedText string
+		if err := textRows.Scan(&documentID, &normalizedText); err != nil {
+			return nil, fmt.Errorf("scan document text: %w", err)
+		}
+		textByDocument[documentID] = normalizedText
+	}
+	if err := textRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate document text: %w", err)
+	}
+	for i := range jobs {
+		text, ok := textByDocument[jobs[i].DocumentID]
+		if !ok {
+			return nil, fmt.Errorf("fetch document text for %s: no matching document", jobs[i].DocumentID)
+		}
+		jobs[i].NormalizedText = text
 	}
 
 	return jobs, nil
@@ -110,6 +143,39 @@ WHERE job_id = $3
   AND lease_fence = $5
   AND lease_expires_at > CURRENT_TIMESTAMP
 `, errMsg, int(maxBackoff.Seconds()), jobID, leaseToken, leaseFence)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("lease lost for job %s: no matching lease token or lease expired", jobID)
+	}
+	return nil
+}
+
+// failJobPermanently ends a job regardless of remaining attempts. It is for
+// durable outcomes the backend will never succeed on, such as a source above
+// the chunk budget: retrying would only burn attempts on an input that cannot
+// change until an operator raises the budget and runs the repair tool.
+func failJobPermanently(ctx context.Context, tx *sql.Tx, jobID, leaseToken string, leaseFence int64, errMsg string) error {
+	result, err := tx.ExecContext(ctx, `
+UPDATE atheros_search.embedding_jobs
+SET status = 'failed',
+    last_error = $1,
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE job_id = $2
+  AND status = 'leased'
+  AND lease_token = $3
+  AND lease_fence = $4
+  AND lease_expires_at > CURRENT_TIMESTAMP
+`, errMsg, jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
 	}

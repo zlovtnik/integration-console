@@ -10,6 +10,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 )
 
 type checkingEmbedder struct {
@@ -42,9 +44,9 @@ func TestProcessBatchCommitsClaimBeforeEmbeddingAndCompletesAtomically(t *testin
 			job.JobID, job.DocumentID, job.EmbeddingKind, job.EmbeddingModel,
 			job.ContentSHA256, job.Priority, job.LeaseToken, job.LeaseFence,
 		))
-	mock.ExpectQuery("SELECT normalized_text FROM atheros_search\\.search_documents").
+	mock.ExpectQuery("SELECT document_id, normalized_text FROM atheros_search\\.search_documents").
 		WithArgs(job.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"normalized_text"}).AddRow("normalized wireless event"))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text"}).AddRow(job.DocumentID, "normalized wireless event"))
 	mock.ExpectCommit()
 	mock.ExpectPing()
 	mock.ExpectBegin()
@@ -64,6 +66,114 @@ func TestProcessBatchCommitsClaimBeforeEmbeddingAndCompletesAtomically(t *testin
 		dbPing:  db.PingContext,
 		vectors: [][]float32{{0.25, 0.5}},
 	}, PoolConfig{WorkerCount: 1, LeaseSeconds: 60, BatchSize: 1}, zerolog.Nop())
+	pool.processBatch(context.Background(), "worker-1", zerolog.Nop())
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+type oversizedEmbedder struct {
+	calls int
+}
+
+func (e *oversizedEmbedder) Embed(_ context.Context, texts []string, _ string) ([][]float32, error) {
+	e.calls++
+	if e.calls == 1 {
+		return nil, &embed.OversizedInputError{Index: 0, Cause: errors.New("source tokenizes to 900 chunks, budget is 128")}
+	}
+	vectors := make([][]float32, len(texts))
+	for i := range texts {
+		vectors[i] = []float32{1}
+	}
+	return vectors, nil
+}
+
+func TestStoreCompletionsWritesGroupInOneTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	first := testJob()
+	second := testJob()
+	second.JobID = "job-2"
+	second.DocumentID = "document-2"
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
+		WithArgs(first.DocumentID, first.EmbeddingKind, first.EmbeddingModel, first.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
+		WithArgs(first.DocumentID, first.EmbeddingModel, first.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
+		WithArgs(first.JobID, first.LeaseToken, first.LeaseFence).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
+		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
+		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
+		WithArgs(second.JobID, second.LeaseToken, second.LeaseFence).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	pool := NewPool(db, checkingEmbedder{}, PoolConfig{}, zerolog.Nop())
+	require.NoError(t, pool.storeCompletions(
+		context.Background(),
+		[]Job{first, second},
+		[][]float32{{1}, {1}},
+	))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestProcessBatchFailsOversizedJobAndCompletesTheRest(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	first := testJob()
+	second := testJob()
+	second.JobID = "job-2"
+	second.DocumentID = "document-2"
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
+		WithArgs("worker-1", sqlmock.AnyArg(), 2).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"job_id", "document_id", "embedding_kind", "embedding_model",
+			"content_sha256", "priority", "lease_token", "lease_fence",
+		}).
+			AddRow(first.JobID, first.DocumentID, first.EmbeddingKind, first.EmbeddingModel,
+				first.ContentSHA256, first.Priority, first.LeaseToken, first.LeaseFence).
+			AddRow(second.JobID, second.DocumentID, second.EmbeddingKind, second.EmbeddingModel,
+				second.ContentSHA256, second.Priority, second.LeaseToken, second.LeaseFence))
+	mock.ExpectQuery("SELECT document_id, normalized_text FROM atheros_search\\.search_documents").
+		WithArgs(first.DocumentID, second.DocumentID).
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text"}).
+			AddRow(first.DocumentID, "first document").
+			AddRow(second.DocumentID, "second document"))
+	mock.ExpectCommit()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
+		WithArgs(sqlmock.AnyArg(), first.JobID, first.LeaseToken, first.LeaseFence).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
+		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
+		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
+		WithArgs(second.JobID, second.LeaseToken, second.LeaseFence).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	pool := NewPool(db, &oversizedEmbedder{}, PoolConfig{WorkerCount: 1, LeaseSeconds: 60, BatchSize: 2}, zerolog.Nop())
 	pool.processBatch(context.Background(), "worker-1", zerolog.Nop())
 
 	require.NoError(t, mock.ExpectationsWereMet())

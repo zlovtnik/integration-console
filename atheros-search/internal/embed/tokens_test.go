@@ -2,15 +2,19 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // vocabTokenizer is a deterministic tokenizer/detokenizer mock. Every word
 // maps to one stable token id, so detokenizing an exact token range rebuilds
-// exactly the words in that range.
+// exactly the words in that range. Chunking fans tokenizer calls out across
+// goroutines, so the mock is guarded like a real client would be.
 type vocabTokenizer struct {
+	mu    sync.Mutex
 	ids   map[string]int
 	words map[int]string
 	next  int
@@ -26,6 +30,8 @@ func newVocabTokenizer() *vocabTokenizer {
 }
 
 func (t *vocabTokenizer) Tokenize(_ context.Context, text string) ([]int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	tokens := make([]int, 0, len(text)/4)
 	for _, word := range strings.Fields(text) {
 		id, ok := t.ids[word]
@@ -41,6 +47,8 @@ func (t *vocabTokenizer) Tokenize(_ context.Context, text string) ([]int, error)
 }
 
 func (t *vocabTokenizer) Detokenize(_ context.Context, tokens []int) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	words := make([]string, len(tokens))
 	for i, id := range tokens {
 		word, ok := t.words[id]
@@ -105,6 +113,61 @@ func TestChunkTextRejectsTokenlessNonEmptyText(t *testing.T) {
 	}
 	if len(chunks) != 1 || chunks[0].Text != " \t\n" {
 		t.Fatalf("unexpected empty fallback chunks: %#v", chunks)
+	}
+}
+
+func TestChunkTextsPreservesOrderUnderConcurrency(t *testing.T) {
+	tokenizer := newVocabTokenizer()
+	texts := []string{
+		syntheticSequenceText(10),
+		syntheticSequenceText(1000),
+		syntheticSequenceText(600),
+		"",
+		syntheticSequenceText(481),
+	}
+	chunked, err := ChunkTexts(context.Background(), tokenizer, texts, 8, 0)
+	if err != nil {
+		t.Fatalf("ChunkTexts returned error: %v", err)
+	}
+	if len(chunked) != len(texts) {
+		t.Fatalf("got %d results, want %d", len(chunked), len(texts))
+	}
+	for i, text := range texts {
+		rebuilt := make([]string, 0, len(text))
+		for _, chunk := range chunked[i] {
+			rebuilt = append(rebuilt, strings.Fields(chunk.Text)...)
+		}
+		want := strings.Fields(text)
+		if len(rebuilt) != len(want) {
+			t.Fatalf("input %d rebuilt %d tokens, want %d", i, len(rebuilt), len(want))
+		}
+		for j := range want {
+			if rebuilt[j] != want[j] {
+				t.Fatalf("input %d token %d = %q, want %q", i, j, rebuilt[j], want[j])
+			}
+		}
+	}
+}
+
+func TestChunkTextsReportsOversizedInputIndex(t *testing.T) {
+	tokenizer := newVocabTokenizer()
+	texts := []string{syntheticSequenceText(480), syntheticSequenceText(1500)}
+	_, err := ChunkTexts(context.Background(), tokenizer, texts, 4, 2)
+	if err == nil {
+		t.Fatal("ChunkTexts accepted a source above the chunk budget")
+	}
+	var oversized *OversizedInputError
+	if !errors.As(err, &oversized) {
+		t.Fatalf("ChunkTexts error = %v, want *OversizedInputError", err)
+	}
+	if oversized.Index != 1 {
+		t.Fatalf("oversized index = %d, want 1", oversized.Index)
+	}
+	if !errors.Is(err, ErrOversizedInput) {
+		t.Fatalf("ChunkTexts error %v does not match ErrOversizedInput", err)
+	}
+	if errors.Is(err, ErrBackendUnavailable) {
+		t.Fatalf("oversized input must not classify as backend unavailable: %v", err)
 	}
 }
 

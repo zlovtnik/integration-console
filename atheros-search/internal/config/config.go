@@ -25,47 +25,55 @@ const (
 	// context (n_ctx=512). Longer texts are split into chunks and
 	// mean-pooled by the embed client.
 	DefaultEmbeddingMaxTokens = embed.DefaultMaxTokens
-	DefaultCORSAllowedOrigin  = "http://127.0.0.1:5173"
+	// DefaultEmbeddingMaxChunksPerInput bounds one document's chunk count.
+	// Real sources sit well below this (the largest observed source is about
+	// 580 chunks); it exists so a pathological source fails durably instead
+	// of holding a worker for minutes. Zero disables the bound.
+	DefaultEmbeddingMaxChunksPerInput = 1024
+	DefaultCORSAllowedOrigin          = "http://127.0.0.1:5173"
 )
 
 type Config struct {
-	PostgresDSN                  string
-	PostgresTLSCAFile            string
-	PostgresTLSCertFile          string
-	PostgresTLSKeyFile           string
-	PostgresTLSServerName        string
-	PostgresSchemaManifestSHA256 string
-	PostgresMaxOpenConns         int
-	PostgresMaxIdleConns         int
-	PostgresConnMaxLifetime      time.Duration
-	PostgresConnMaxIdleTime      time.Duration
-	EmbeddingModel               string
-	EmbeddingDimensions          int
-	EmbeddingBackend             string
-	EmbeddingMaxTokens           int
-	GRPCPort                     int
-	HTTPPort                     int
-	MetricsPort                  int
-	LogLevel                     string
-	SearchTimeout                time.Duration
-	HybridAlpha                  float64
-	DenseOverfetchFactor         int
-	APIKeySHA256                 string
-	JWTIssuer                    string
-	JWTJWKSURI                   string
-	JWTAudience                  string
-	JWTClientID                  string
-	SchemaReadyRequired          bool
-	SchemaReadyTimeout           time.Duration
-	SchemaReadyPollInterval      time.Duration
-	CORSAllowedOrigins           []string
-	WorkerEnabled                bool
-	WorkerCount                  int
-	EmbeddingBatchSize           int
-	LeaseSeconds                 int
-	WorkerPollInterval           time.Duration
-	WorkerID                     string
-	WSEnabled                    bool
+	PostgresDSN                   string
+	PostgresTLSCAFile             string
+	PostgresTLSCertFile           string
+	PostgresTLSKeyFile            string
+	PostgresTLSServerName         string
+	PostgresSchemaManifestSHA256  string
+	PostgresMaxOpenConns          int
+	PostgresMaxIdleConns          int
+	PostgresConnMaxLifetime       time.Duration
+	PostgresConnMaxIdleTime       time.Duration
+	EmbeddingModel                string
+	EmbeddingDimensions           int
+	EmbeddingBackend              string
+	EmbeddingMaxTokens            int
+	EmbeddingRequestConcurrency   int
+	EmbeddingTokenizerConcurrency int
+	EmbeddingMaxChunksPerInput    int
+	GRPCPort                      int
+	HTTPPort                      int
+	MetricsPort                   int
+	LogLevel                      string
+	SearchTimeout                 time.Duration
+	HybridAlpha                   float64
+	DenseOverfetchFactor          int
+	APIKeySHA256                  string
+	JWTIssuer                     string
+	JWTJWKSURI                    string
+	JWTAudience                   string
+	JWTClientID                   string
+	SchemaReadyRequired           bool
+	SchemaReadyTimeout            time.Duration
+	SchemaReadyPollInterval       time.Duration
+	CORSAllowedOrigins            []string
+	WorkerEnabled                 bool
+	WorkerCount                   int
+	EmbeddingBatchSize            int
+	LeaseSeconds                  int
+	WorkerPollInterval            time.Duration
+	WorkerID                      string
+	WSEnabled                     bool
 }
 
 func Load() (Config, error) {
@@ -111,43 +119,46 @@ func Load() (Config, error) {
 		postgresDSN = connectionURL.String()
 	}
 	cfg := Config{
-		PostgresDSN:                  postgresDSN,
-		PostgresTLSCAFile:            postgresTLSCAFile,
-		PostgresTLSCertFile:          strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CERT_FILE")),
-		PostgresTLSKeyFile:           strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_KEY_FILE")),
-		PostgresTLSServerName:        strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_SERVER_NAME")),
-		PostgresSchemaManifestSHA256: strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_SCHEMA_MANIFEST_SHA256"))),
-		PostgresMaxOpenConns:         envInt("ATHSEARCH_POSTGRES_MAX_OPEN_CONNS", 32),
-		PostgresMaxIdleConns:         envInt("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS", 8),
-		PostgresConnMaxLifetime:      time.Duration(envInt("ATHSEARCH_POSTGRES_CONN_MAX_LIFETIME_MS", 300000)) * time.Millisecond,
-		PostgresConnMaxIdleTime:      time.Duration(envInt("ATHSEARCH_POSTGRES_CONN_MAX_IDLE_TIME_MS", 60000)) * time.Millisecond,
-		EmbeddingModel:               envString("ATHSEARCH_EMBEDDING_MODEL", envString("VECTOR_EMBEDDING_MODEL", DefaultEmbeddingModel)),
-		EmbeddingDimensions:          envInt("ATHSEARCH_EMBEDDING_DIMENSIONS", envInt("VECTOR_EMBEDDING_DIMENSIONS", DefaultEmbeddingDimensions)),
-		EmbeddingBackend:             firstEnv("ATHSEARCH_EMBEDDING_BACKEND", "VECTOR_EMBEDDING_URL"),
-		EmbeddingMaxTokens:           envInt("ATHSEARCH_EMBEDDING_MAX_TOKENS", DefaultEmbeddingMaxTokens),
-		GRPCPort:                     envInt("ATHSEARCH_GRPC_PORT", 50051),
-		HTTPPort:                     envInt("ATHSEARCH_HTTP_PORT", 8080),
-		MetricsPort:                  envInt("ATHSEARCH_METRICS_PORT", 9090),
-		LogLevel:                     envStringViper(env, "ATHSEARCH_LOG_LEVEL", "info"),
-		SearchTimeout:                time.Duration(envInt("ATHSEARCH_SEARCH_TIMEOUT_MS", 10000)) * time.Millisecond,
-		HybridAlpha:                  envFloat("ATHSEARCH_HYBRID_ALPHA", 0.5),
-		DenseOverfetchFactor:         envInt("ATHSEARCH_DENSE_OVERFETCH_FACTOR", 8),
-		APIKeySHA256:                 strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_API_TOKEN_SHA256"))),
-		JWTIssuer:                    strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_ISSUER")),
-		JWTJWKSURI:                   strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_JWKS_URI")),
-		JWTAudience:                  strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_AUDIENCE")),
-		JWTClientID:                  strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_CLIENT_ID")),
-		SchemaReadyRequired:          envBool("ATHSEARCH_SCHEMA_READY_REQUIRED", true),
-		SchemaReadyTimeout:           time.Duration(envInt("ATHSEARCH_SCHEMA_READY_TIMEOUT_MS", 60000)) * time.Millisecond,
-		SchemaReadyPollInterval:      time.Duration(envInt("ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS", 1000)) * time.Millisecond,
-		CORSAllowedOrigins:           envCSV("ATHSEARCH_CORS_ALLOWED_ORIGINS", []string{DefaultCORSAllowedOrigin}),
-		WorkerEnabled:                envBool("ATHSEARCH_WORKER_ENABLED", false),
-		WorkerCount:                  envInt("ATHSEARCH_WORKER_COUNT", 4),
-		EmbeddingBatchSize:           envInt("ATHSEARCH_EMBEDDING_BATCH_SIZE", 64),
-		LeaseSeconds:                 envInt("ATHSEARCH_LEASE_SECONDS", 1800),
-		WorkerPollInterval:           time.Duration(envInt("ATHSEARCH_POLL_INTERVAL_MS", 1000)) * time.Millisecond,
-		WorkerID:                     envString("ATHSEARCH_WORKER_ID", "worker-1"),
-		WSEnabled:                    envBool("ATHSEARCH_WS_ENABLED", false),
+		PostgresDSN:                   postgresDSN,
+		PostgresTLSCAFile:             postgresTLSCAFile,
+		PostgresTLSCertFile:           strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CERT_FILE")),
+		PostgresTLSKeyFile:            strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_KEY_FILE")),
+		PostgresTLSServerName:         strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_SERVER_NAME")),
+		PostgresSchemaManifestSHA256:  strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_SCHEMA_MANIFEST_SHA256"))),
+		PostgresMaxOpenConns:          envInt("ATHSEARCH_POSTGRES_MAX_OPEN_CONNS", 32),
+		PostgresMaxIdleConns:          envInt("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS", 8),
+		PostgresConnMaxLifetime:       time.Duration(envInt("ATHSEARCH_POSTGRES_CONN_MAX_LIFETIME_MS", 300000)) * time.Millisecond,
+		PostgresConnMaxIdleTime:       time.Duration(envInt("ATHSEARCH_POSTGRES_CONN_MAX_IDLE_TIME_MS", 60000)) * time.Millisecond,
+		EmbeddingModel:                envString("ATHSEARCH_EMBEDDING_MODEL", envString("VECTOR_EMBEDDING_MODEL", DefaultEmbeddingModel)),
+		EmbeddingDimensions:           envInt("ATHSEARCH_EMBEDDING_DIMENSIONS", envInt("VECTOR_EMBEDDING_DIMENSIONS", DefaultEmbeddingDimensions)),
+		EmbeddingBackend:              firstEnv("ATHSEARCH_EMBEDDING_BACKEND", "VECTOR_EMBEDDING_URL"),
+		EmbeddingMaxTokens:            envInt("ATHSEARCH_EMBEDDING_MAX_TOKENS", DefaultEmbeddingMaxTokens),
+		EmbeddingRequestConcurrency:   envInt("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY", embed.DefaultRequestConcurrency),
+		EmbeddingTokenizerConcurrency: envInt("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY", embed.DefaultTokenizerConcurrency),
+		EmbeddingMaxChunksPerInput:    envInt("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT", DefaultEmbeddingMaxChunksPerInput),
+		GRPCPort:                      envInt("ATHSEARCH_GRPC_PORT", 50051),
+		HTTPPort:                      envInt("ATHSEARCH_HTTP_PORT", 8080),
+		MetricsPort:                   envInt("ATHSEARCH_METRICS_PORT", 9090),
+		LogLevel:                      envStringViper(env, "ATHSEARCH_LOG_LEVEL", "info"),
+		SearchTimeout:                 time.Duration(envInt("ATHSEARCH_SEARCH_TIMEOUT_MS", 10000)) * time.Millisecond,
+		HybridAlpha:                   envFloat("ATHSEARCH_HYBRID_ALPHA", 0.5),
+		DenseOverfetchFactor:          envInt("ATHSEARCH_DENSE_OVERFETCH_FACTOR", 8),
+		APIKeySHA256:                  strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_API_TOKEN_SHA256"))),
+		JWTIssuer:                     strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_ISSUER")),
+		JWTJWKSURI:                    strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_JWKS_URI")),
+		JWTAudience:                   strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_AUDIENCE")),
+		JWTClientID:                   strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_CLIENT_ID")),
+		SchemaReadyRequired:           envBool("ATHSEARCH_SCHEMA_READY_REQUIRED", true),
+		SchemaReadyTimeout:            time.Duration(envInt("ATHSEARCH_SCHEMA_READY_TIMEOUT_MS", 60000)) * time.Millisecond,
+		SchemaReadyPollInterval:       time.Duration(envInt("ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS", 1000)) * time.Millisecond,
+		CORSAllowedOrigins:            envCSV("ATHSEARCH_CORS_ALLOWED_ORIGINS", []string{DefaultCORSAllowedOrigin}),
+		WorkerEnabled:                 envBool("ATHSEARCH_WORKER_ENABLED", false),
+		WorkerCount:                   envInt("ATHSEARCH_WORKER_COUNT", 4),
+		EmbeddingBatchSize:            envInt("ATHSEARCH_EMBEDDING_BATCH_SIZE", 64),
+		LeaseSeconds:                  envInt("ATHSEARCH_LEASE_SECONDS", 1800),
+		WorkerPollInterval:            time.Duration(envInt("ATHSEARCH_POLL_INTERVAL_MS", 1000)) * time.Millisecond,
+		WorkerID:                      envString("ATHSEARCH_WORKER_ID", "worker-1"),
+		WSEnabled:                     envBool("ATHSEARCH_WS_ENABLED", false),
 	}
 
 	if cfg.WorkerEnabled {
@@ -208,6 +219,15 @@ func Load() (Config, error) {
 	}
 	if cfg.EmbeddingMaxTokens < 64 {
 		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_TOKENS must be at least 64, got %d", cfg.EmbeddingMaxTokens)
+	}
+	if cfg.EmbeddingRequestConcurrency < 1 {
+		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY must be positive, got %d", cfg.EmbeddingRequestConcurrency)
+	}
+	if cfg.EmbeddingTokenizerConcurrency < 1 {
+		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY must be positive, got %d", cfg.EmbeddingTokenizerConcurrency)
+	}
+	if cfg.EmbeddingMaxChunksPerInput < 0 {
+		return cfg, fmt.Errorf("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT must not be negative, got %d", cfg.EmbeddingMaxChunksPerInput)
 	}
 	if cfg.HybridAlpha < 0 || cfg.HybridAlpha > 1 {
 		return cfg, fmt.Errorf("ATHSEARCH_HYBRID_ALPHA must be between 0 and 1, got %f", cfg.HybridAlpha)

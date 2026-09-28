@@ -82,20 +82,22 @@ Workers are disabled by default in the binary:
 Embedding settings use these shared fallbacks only when their corresponding
 `ATHSEARCH_*` value is empty:
 
-| Variable | Default | Shared fallback |
-|---|---:|---|
-| `ATHSEARCH_EMBEDDING_BACKEND` | empty | `VECTOR_EMBEDDING_URL` |
-| `ATHSEARCH_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe` | `VECTOR_EMBEDDING_MODEL`; other model values fail startup validation |
-| `ATHSEARCH_EMBEDDING_DIMENSIONS` | `768` | `VECTOR_EMBEDDING_DIMENSIONS` |
-| `ATHSEARCH_EMBEDDING_MAX_TOKENS` | `512` | None | Per-input token budget; longer texts are split and chunk vectors mean-pooled |
+| Variable | Default | Shared fallback | Purpose |
+|---|---:|---|---|
+| `ATHSEARCH_EMBEDDING_BACKEND` | empty | `VECTOR_EMBEDDING_URL` | Base URL of the llama.cpp embedding backend |
+| `ATHSEARCH_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe` | `VECTOR_EMBEDDING_MODEL`; other model values fail startup validation | Model name sent with each request |
+| `ATHSEARCH_EMBEDDING_DIMENSIONS` | `768` | `VECTOR_EMBEDDING_DIMENSIONS` | Expected vector width |
+| `ATHSEARCH_EMBEDDING_MAX_TOKENS` | `512` | None | Model context; chunks are capped at 480 content tokens |
+| `ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY` | `4` | None | In-flight `/v1/embeddings` requests; match it to backend slots |
+| `ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY` | `8` | None | In-flight `/tokenize` and `/detokenize` requests |
+| `ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT` | `1024` | None | Chunk bound for one source; a source above it fails durably (`0` disables) |
 
-The embedding backend rejects any single input larger than its model context
-(512 tokens for the llama.cpp deployment). Before a request is sent, the
-client estimates the token count of every text — counting punctuation and
-special characters as individual tokens, since MAC addresses, JSON tags and
-`key: value` separators are token-heavy — and splits texts that exceed the
-budget at line, then word boundaries. Chunk embeddings are mean-pooled, so
-each input still produces one 768-dimension vector.
+Embedding requests are packed to 512 content tokens, not the full model
+context, because llama.cpp serves one request from one slot: packing a full
+context keeps one slot busy while the others idle. Chunks come from the
+backend tokenizer (`/tokenize`, then `/detokenize` per 480-token range), so
+every source token is preserved regardless of character count. Chunk vectors
+are mean-pooled, so each input still produces one 768-dimension vector.
 
 Embedding dimensions must resolve to `768`. The client accepts supported
 OpenAI-compatible and Ollama response shapes. Enabling workers requires a

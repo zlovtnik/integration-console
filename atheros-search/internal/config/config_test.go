@@ -220,6 +220,30 @@ func TestLoadValidatesPoolAndOverfetchBounds(t *testing.T) {
 	require.ErrorContains(t, err, "ATHSEARCH_DENSE_OVERFETCH_FACTOR")
 }
 
+func TestLoadValidatesEmbeddingCallPatternSettings(t *testing.T) {
+	setRequiredPostgresEnv(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 4, cfg.EmbeddingRequestConcurrency)
+	require.Equal(t, 8, cfg.EmbeddingTokenizerConcurrency)
+	require.Equal(t, 1024, cfg.EmbeddingMaxChunksPerInput)
+
+	for _, tc := range []struct{ key, value string }{
+		{"ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY", "0"},
+		{"ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY", "0"},
+		{"ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT", "-1"},
+	} {
+		setRequiredPostgresEnv(t)
+		t.Setenv("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY", "")
+		t.Setenv("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY", "")
+		t.Setenv("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT", "")
+		t.Setenv(tc.key, tc.value)
+		_, err := Load()
+		require.ErrorContains(t, err, tc.key)
+	}
+}
+
 func TestLoadRequiresEmbeddingBackendWhenWorkersAreEnabled(t *testing.T) {
 	setRequiredPostgresEnv(t)
 	t.Setenv("ATHSEARCH_WORKER_ENABLED", "true")

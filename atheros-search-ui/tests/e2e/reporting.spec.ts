@@ -53,6 +53,15 @@ test('inventory uses bounded server presets, pages, and independent row detail',
       name: 'Observed MAC identifiers; one row per MAC',
     }),
   ).toBeVisible();
+  const pipelineHealth = page
+    .getByRole('status')
+    .filter({ hasText: 'Pipeline health' });
+  await expect(pipelineHealth).toContainText(
+    '1 ingestion pending, 0 failed; 2 embeddings pending, 0 failed (healthy).',
+  );
+  await expect(pipelineHealth).toContainText(
+    '12 wireless events indexed in the last 24h, newest',
+  );
   expect(requests[0]).toMatchObject({
     scope: 'page',
     page_size: 50,

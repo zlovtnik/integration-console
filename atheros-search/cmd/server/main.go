@@ -107,6 +107,9 @@ func main() {
 		logger.Warn().Msg("embedding backend not configured; using zero-vector embedder")
 	} else {
 		httpEmbedder := embed.NewHTTPClient(cfg.EmbeddingBackend, cfg.EmbeddingModel, cfg.EmbeddingDimensions, cfg.EmbeddingMaxTokens)
+		httpEmbedder.RequestConcurrency = cfg.EmbeddingRequestConcurrency
+		httpEmbedder.TokenizerConcurrency = cfg.EmbeddingTokenizerConcurrency
+		httpEmbedder.MaxChunksPerInput = cfg.EmbeddingMaxChunksPerInput
 		if cfg.WorkerEnabled {
 			validationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			err := httpEmbedder.ValidateTokenizer(validationCtx)
@@ -126,6 +129,9 @@ func main() {
 	}
 
 	healthMon := worker.NewHealthMonitor(pool.DB)
+	// Prime the snapshot cache so the first /v1/etl/* caller is not the one
+	// that pays for a full refresh of the multi-million row queue gauges.
+	go healthMon.Warm(ctx)
 
 	var workerPool *worker.Pool
 	if cfg.WorkerEnabled {
@@ -191,6 +197,9 @@ func logStartupConfig(logger zerolog.Logger, cfg config.Config) {
 		Int("dense_overfetch_factor", cfg.DenseOverfetchFactor).
 		Bool("worker_enabled", cfg.WorkerEnabled).
 		Int("worker_count", cfg.WorkerCount).
+		Int("embedding_request_concurrency", cfg.EmbeddingRequestConcurrency).
+		Int("embedding_tokenizer_concurrency", cfg.EmbeddingTokenizerConcurrency).
+		Int("embedding_max_chunks_per_input", cfg.EmbeddingMaxChunksPerInput).
 		Msg("atheros-search Postgres query facade configured")
 }
 

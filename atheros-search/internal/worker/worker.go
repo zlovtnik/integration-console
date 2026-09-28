@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -154,17 +155,13 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 	groups := orderedJobGroups(jobs)
 	for index, group := range groups {
 		kind, kindJobs := group.kind, group.jobs
-		texts := make([]string, len(kindJobs))
-		for i := range kindJobs {
-			texts[i] = kindJobs[i].NormalizedText
-		}
-		vectors, embedErr := p.embedder.Embed(ctx, texts, kind)
+		kindJobs, vectors, embedErr := p.embedGroup(ctx, kind, kindJobs, logger)
 		if embedErr != nil {
 			if retryAt, unavailable := embed.RetryTime(embedErr); unavailable {
 				if retryAt.IsZero() {
 					retryAt = time.Now().Add(p.cfg.PollInterval)
 				}
-				remaining := remainingJobs(groups[index:])
+				remaining := append(remainingJobs(groups[index+1:]), kindJobs...)
 				logger.Warn().Err(embedErr).Time("retry_at", retryAt).Int("job_count", len(remaining)).Msg("embedding backend unavailable; deferring claimed jobs without consuming attempts")
 				p.deferClaimedJobs(ctx, remaining, retryAt, logger)
 				return
@@ -175,6 +172,9 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 			}
 			continue
 		}
+		if len(kindJobs) == 0 {
+			continue
+		}
 		if len(vectors) != len(kindJobs) {
 			mismatch := fmt.Errorf("embedding count mismatch: expected %d, got %d", len(kindJobs), len(vectors))
 			for _, job := range kindJobs {
@@ -182,17 +182,51 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 			}
 			continue
 		}
-		for i, job := range kindJobs {
-			if err := p.storeCompletion(ctx, job, vectors[i]); err != nil {
-				logger.Error().Err(err).Str("job_id", job.JobID).Msg("embedding completion failed")
-				p.failClaimedJob(ctx, job, err, logger)
-				continue
+		if err := p.storeCompletions(ctx, kindJobs, vectors); err != nil {
+			logger.Warn().Err(err).Int("job_count", len(kindJobs)).Str("kind", kind).Msg("batched completion failed; falling back to per-job writes")
+			for i, job := range kindJobs {
+				if err := p.storeCompletion(ctx, job, vectors[i]); err != nil {
+					logger.Error().Err(err).Str("job_id", job.JobID).Msg("embedding completion failed")
+					p.failClaimedJob(ctx, job, err, logger)
+					continue
+				}
+				completed++
 			}
-			completed++
+			continue
 		}
+		completed += len(kindJobs)
 	}
 
 	logger.Info().Int("completed", completed).Int("claimed", len(jobs)).Msg("embedding batch completed")
+}
+
+// embedGroup embeds one kind group. A source above the chunk budget fails its
+// own job permanently and is removed, so a single oversized document cannot
+// stall the rest of the batch.
+func (p *Pool) embedGroup(ctx context.Context, kind string, kindJobs []Job, logger zerolog.Logger) ([]Job, [][]float32, error) {
+	surviving := append([]Job(nil), kindJobs...)
+	texts := make([]string, len(surviving))
+	for i := range surviving {
+		texts[i] = surviving[i].NormalizedText
+	}
+	for {
+		vectors, err := p.embedder.Embed(ctx, texts, kind)
+		if err == nil {
+			return surviving, vectors, nil
+		}
+		var oversized *embed.OversizedInputError
+		if !errors.As(err, &oversized) || oversized.Index < 0 || oversized.Index >= len(surviving) {
+			return surviving, nil, err
+		}
+		job := surviving[oversized.Index]
+		logger.Error().Err(err).Str("job_id", job.JobID).Str("document_id", job.DocumentID).Str("kind", kind).Msg("embedding source exceeds chunk budget; failing job")
+		p.failOversizedJob(ctx, job, err, logger)
+		surviving = append(surviving[:oversized.Index], surviving[oversized.Index+1:]...)
+		texts = append(texts[:oversized.Index], texts[oversized.Index+1:]...)
+		if len(surviving) == 0 {
+			return nil, nil, nil
+		}
+	}
 }
 
 func remainingJobs(groups []jobGroup) []Job {
@@ -253,6 +287,53 @@ func (p *Pool) storeCompletion(ctx context.Context, job Job, vector []float32) e
 		return err
 	}
 	return tx.Commit()
+}
+
+// storeCompletions writes one kind group in a single transaction so a batch
+// pays one commit instead of one per job. Any failure rolls the whole group
+// back, and the caller falls back to per-job writes so one lost lease does not
+// discard the jobs that are still valid.
+func (p *Pool) storeCompletions(ctx context.Context, jobs []Job, vectors [][]float32) error {
+	if len(jobs) != len(vectors) {
+		return fmt.Errorf("embedding count mismatch: expected %d, got %d", len(jobs), len(vectors))
+	}
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for i, job := range jobs {
+		kind, err := normalizeEmbeddingKind(job.EmbeddingKind)
+		if err != nil {
+			return err
+		}
+		if err := insertVector(ctx, tx, job.DocumentID, kind, job.EmbeddingModel, job.ContentSHA256, vectors[i]); err != nil {
+			return err
+		}
+		if err := completeJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// failOversizedJob records a durable job outcome rather than a retry: the
+// source itself has to change, so consuming attempts would only move the job
+// through its backoff before failing anyway.
+func (p *Pool) failOversizedJob(ctx context.Context, job Job, cause error, logger zerolog.Logger) {
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		logger.Error().Err(err).Str("job_id", job.JobID).Msg("failed to begin oversized job transaction")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := failJobPermanently(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence, cause.Error()); err != nil {
+		logger.Error().Err(err).Str("job_id", job.JobID).Msg("failed to persist oversized embedding job")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		logger.Error().Err(err).Str("job_id", job.JobID).Msg("failed to commit oversized embedding job")
+	}
 }
 
 func (p *Pool) failClaimedJob(ctx context.Context, job Job, cause error, logger zerolog.Logger) {

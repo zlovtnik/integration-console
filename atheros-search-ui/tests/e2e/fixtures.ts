@@ -294,10 +294,14 @@ export async function mockApi(page: Page, options: MockApiOptions = {}) {
   await page.route('**/v1/etl/health', (route) =>
     json(route, {
       measured_at: '2026-09-27T12:00:00Z',
+      wireless_events_24h: 12,
+      wireless_last_observed_at: '2026-09-27T11:59:00Z',
       ingest_pending: 1,
+      ingest_processing: 0,
       ingest_failed: 0,
       embedding_pending: 2,
       embedding_failed: 0,
+      embedding_dependency: 'healthy',
     }),
   );
   await page.route('**/v1/inventory', (route) => {

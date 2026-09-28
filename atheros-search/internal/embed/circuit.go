@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -71,6 +72,9 @@ func (c *CircuitClient) openRetryAt() (time.Time, bool) {
 }
 
 func (c *CircuitClient) record(err error) {
+	if errors.Is(err, ErrOversizedInput) {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err == nil {

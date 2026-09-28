@@ -45,16 +45,24 @@ export function ReportStatus(props: {
           </Show>
         }
       >
-        {(status) => (
-          <p>
-            Pipeline health (global, measured{' '}
-            {formatDateTime(status().measured_at)}): {status().ingest_pending}{' '}
-            ingestion pending, {status().ingest_failed} failed;{' '}
-            {status().embedding_pending} embeddings pending,{' '}
-            {status().embedding_failed} failed. These are operational counts,
-            outside this report's scope.
-          </p>
-        )}
+        {(status) => {
+          const observedAt = status().wireless_last_observed_at;
+          return (
+            <p>
+              Pipeline health (global, measured{' '}
+              {formatDateTime(status().measured_at)}): {status().ingest_pending}{' '}
+              ingestion pending, {status().ingest_failed} failed;{' '}
+              {status().embedding_pending} embeddings pending,{' '}
+              {status().embedding_failed} failed (
+              {status().embedding_dependency}). {status().wireless_events_24h}{' '}
+              wireless events indexed in the last 24h
+              {observedAt
+                ? `, newest ${formatDateTime(observedAt)}`
+                : ', newest observation unknown'}
+              . These are operational counts, outside this report's scope.
+            </p>
+          );
+        }}
       </Show>
       <Show
         when={props.report}

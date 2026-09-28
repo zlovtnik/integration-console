@@ -216,6 +216,9 @@ func TestEmbedRequestPackingStaysWithinTokenBudget(t *testing.T) {
 			batchTokens += tokens
 			totalChunks++
 		}
+		if batchTokens > RequestPackTokenLimit {
+			t.Fatalf("request carried %d content tokens, pack budget is %d", batchTokens, RequestPackTokenLimit)
+		}
 		if batchTokens > RequestTokenLimit {
 			t.Fatalf("request carried %d content tokens, limit is %d", batchTokens, RequestTokenLimit)
 		}
@@ -223,30 +226,53 @@ func TestEmbedRequestPackingStaysWithinTokenBudget(t *testing.T) {
 	if totalChunks != 24 {
 		t.Fatalf("expected 24 chunked inputs, got %d", totalChunks)
 	}
-	if len(requests) < 2 {
-		t.Fatalf("expected packing across requests, got %d", len(requests))
+	if len(requests) < 24 {
+		t.Fatalf("expected one packed request per chunk so slots stay busy, got %d requests", len(requests))
 	}
 }
 
-func TestEmbedKeepsTwoRequestsInFlight(t *testing.T) {
+func TestEmbedSplitsPackedRequestsAcrossBackendSlots(t *testing.T) {
+	fake := &llamaFake{}
+	server := fake.server()
+	defer server.Close()
+	client := newTestClient(server)
+	client.PackTokenLimit = 4096
+	texts := make([]string, 4)
+	for i := range texts {
+		texts[i] = syntheticSequenceText(400)
+	}
+	if _, err := client.Embed(context.Background(), texts, KindSequence); err != nil {
+		t.Fatalf("Embed returned error: %v", err)
+	}
+	packed := len(fake.requests())
+	if packed != 1 {
+		t.Fatalf("expected the wide pack budget to collapse into one request, got %d", packed)
+	}
+}
+
+func TestEmbedKeepsConfiguredRequestsInFlight(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
 	defer server.Close()
 	var mu sync.Mutex
 	inFlight := 0
-	twoInFlight := make(chan struct{})
+	peak := 0
+	reached := make(chan struct{})
 	var once sync.Once
 	inner := server.Config.Handler
 	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/embeddings" {
 			mu.Lock()
 			inFlight++
-			if inFlight >= 2 {
-				once.Do(func() { close(twoInFlight) })
+			if inFlight > peak {
+				peak = inFlight
+			}
+			if inFlight >= 4 {
+				once.Do(func() { close(reached) })
 			}
 			mu.Unlock()
 			select {
-			case <-twoInFlight:
+			case <-reached:
 			case <-time.After(5 * time.Second):
 			}
 			mu.Lock()
@@ -265,9 +291,80 @@ func TestEmbedKeepsTwoRequestsInFlight(t *testing.T) {
 		t.Fatalf("Embed returned error: %v", err)
 	}
 	select {
-	case <-twoInFlight:
+	case <-reached:
 	case <-time.After(time.Second):
-		t.Fatal("embedding requests were not executed concurrently")
+		t.Fatal("embedding requests were not executed at the configured concurrency")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if peak > client.RequestConcurrency {
+		t.Fatalf("peak in-flight requests %d exceeds configured concurrency %d", peak, client.RequestConcurrency)
+	}
+}
+
+func TestEmbedRejectsOversizedInputBeforeEmbedding(t *testing.T) {
+	fake := &llamaFake{}
+	server := fake.server()
+	defer server.Close()
+	client := newTestClient(server)
+	client.MaxChunksPerInput = 1
+
+	texts := []string{"kind: event query", syntheticSequenceText(1000)}
+	_, err := client.Embed(context.Background(), texts, KindEvent)
+	if !errors.Is(err, ErrOversizedInput) {
+		t.Fatalf("Embed error = %v, want ErrOversizedInput", err)
+	}
+	var oversized *OversizedInputError
+	if !errors.As(err, &oversized) {
+		t.Fatalf("Embed error %v does not expose the oversized input index", err)
+	}
+	if oversized.Index != 1 {
+		t.Fatalf("oversized input index = %d, want 1", oversized.Index)
+	}
+	if requests := fake.requests(); len(requests) != 0 {
+		t.Fatalf("expected no embedding requests before rejecting an oversized input, got %d", len(requests))
+	}
+}
+
+func TestEmbedTokenizerConcurrencyIsBounded(t *testing.T) {
+	fake := &llamaFake{}
+	server := fake.server()
+	defer server.Close()
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	inner := server.Config.Handler
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tokenize" || r.URL.Path == "/detokenize" {
+			mu.Lock()
+			inFlight++
+			if inFlight > peak {
+				peak = inFlight
+			}
+			mu.Unlock()
+			time.Sleep(5 * time.Millisecond)
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+		}
+		inner.ServeHTTP(w, r)
+	})
+
+	client := newTestClient(server)
+	client.TokenizerConcurrency = 3
+	texts := make([]string, 8)
+	for i := range texts {
+		texts[i] = syntheticSequenceText(1000)
+	}
+	if _, err := client.Embed(context.Background(), texts, KindSequence); err != nil {
+		t.Fatalf("Embed returned error: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if peak == 0 {
+		t.Fatal("expected tokenizer round trips to be recorded")
+	}
+	if peak > 3 {
+		t.Fatalf("peak tokenizer round trips %d exceeds configured concurrency 3", peak)
 	}
 }
 
