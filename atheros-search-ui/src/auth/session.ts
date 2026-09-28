@@ -31,6 +31,10 @@ export function callbackUri(): string {
   return `${window.location.origin}/callback`;
 }
 
+export function logoutUri(): string {
+  return `${window.location.origin}/`;
+}
+
 export function currentReturnPath(): string {
   return window.location.pathname + window.location.search;
 }
@@ -93,7 +97,7 @@ export async function login(): Promise<void> {
 
 export async function logout(): Promise<void> {
   if (!keycloak) return;
-  await keycloak.logout({ redirectUri: window.location.origin });
+  await keycloak.logout({ redirectUri: logoutUri() });
 }
 
 export { consumeReturnPath };
