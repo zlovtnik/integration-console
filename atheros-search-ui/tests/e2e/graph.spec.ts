@@ -74,6 +74,37 @@ test('SSID filter scopes visible graph topology', async ({ page }) => {
   ).toHaveCount(0);
 });
 
+test('projection cluster panel lists its derived identifiers with the same join', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/graph');
+  await page.getByText('Advanced projection explorer', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open projection explorer' }).click();
+  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+
+  const panel = page.getByRole('complementary');
+  await expect(panel).toBeVisible();
+  // Derived identifiers are rolled up, then listed behind one disclosure.
+  await expect(
+    panel.getByRole('heading', { name: 'Derived identifiers' }),
+  ).toBeVisible();
+  await expect(panel.getByText('Earliest first seen')).toBeVisible();
+  await expect(panel.getByText('Show 2 derived identifiers')).toBeVisible();
+  await panel.locator('.graph-derived-devices > summary').first().click();
+  await panel
+    .locator('.graph-derived-device-list details > summary')
+    .first()
+    .click();
+  // Each derived identifier carries the projection join.
+  await expect(panel.getByText('OS hint').first()).toBeVisible();
+  await expect(panel.getByText('BSSID').first()).toBeVisible();
+  // The projection carries no owner or registration, and the panel does not
+  // invent them.
+  await expect(panel.getByText('Registration', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('Owner', { exact: true })).toHaveCount(0);
+});
+
 test('cluster search events action requests a sparse 200-event entity timeline', async ({
   page,
 }) => {

@@ -699,10 +699,69 @@
   font-size: 11px;
 }
 
+.graph-edge-detail {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .graph-panel-links {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-2);
+}
+
+.graph-derived-devices {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.graph-derived-devices > summary {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.graph-derived-device-list {
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.graph-derived-device-list .graph-derived-note {
+  display: block;
+  color: var(--graph-edge-color);
+  font-size: var(--font-size-xs);
+  margin-bottom: 2px;
+}
+.graph-derived-device-list li {
+  display: block;
+}
+
+.graph-derived-device-list details > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  cursor: pointer;
+}
+
+.graph-derived-device-list details[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+.graph-derived-device-list details > .graph-detail-list {
+  padding-bottom: var(--space-3);
+}
+
+.graph-derived-device-list small {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1279px) {

@@ -9,6 +9,23 @@ import {
 import type { InventoryFilters } from '~/api/types';
 import { formatDateTime } from '~/utils/formatDateTime';
 import { ReportStatus } from '~/components/ReportStatus';
+import {
+  DeviceSummaryLine,
+  registrationLabel,
+} from '~/components/graph/NodeDetailSections';
+import { deviceAliasMacs } from '~/utils/inventoryRelations';
+
+/**
+ * This report loads one bounded page of identifiers with no graph
+ * relationships, so the joined columns below are the fields each registry row
+ * carries on its own. Cluster, merge, and ownership derivations are not
+ * available here; the graph view resolves them.
+ */
+function aliasLabel(node: { known_macs?: string[]; mac?: string }): string {
+  const macs = deviceAliasMacs(node as never);
+  if (macs.length <= 1) return 'No aliases recorded';
+  return `${macs.length} identifiers: ${macs.join(', ')}`;
+}
 
 export function InventoryTable() {
   const [params, setParams] = useSearchParams();
@@ -159,6 +176,8 @@ export function InventoryTable() {
                     <th scope="col">Registration</th>
                     <th scope="col">Owner</th>
                     <th scope="col">Location</th>
+                    <th scope="col">Known MACs</th>
+                    <th scope="col">First observed</th>
                     <th
                       scope="col"
                       aria-sort={
@@ -195,16 +214,17 @@ export function InventoryTable() {
                           <Show when={node.display_name}>
                             <small>{node.mac}</small>
                           </Show>
+                          <DeviceSummaryLine node={node} />
                         </th>
-                        <td>
-                          {node.registered === undefined
-                            ? 'Unknown'
-                            : node.registered
-                              ? 'Registered'
-                              : 'Unregistered'}
-                        </td>
+                        <td>{registrationLabel(node)}</td>
                         <td>{node.owner_id || 'Unassigned'}</td>
                         <td>{node.location_id || 'Unknown'}</td>
+                        <td>{aliasLabel(node)}</td>
+                        <td>
+                          {node.first_seen
+                            ? formatDateTime(node.first_seen)
+                            : 'Unknown'}
+                        </td>
                         <td>
                           {node.last_seen
                             ? formatDateTime(node.last_seen)

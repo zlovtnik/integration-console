@@ -1,54 +1,72 @@
 import { A } from '@solidjs/router';
-import { For, Show } from 'solid-js';
+import { createMemo, For, Show } from 'solid-js';
 import { Pin, PinOff, X } from 'lucide-solid';
 import type { InventoryNode } from '~/api/types';
-import { DetailRow } from '~/components/graph/graphPanelUtils';
+import {
+  DeviceAliasSection,
+  DeviceDetailRows,
+  DeviceSummaryRows,
+  DerivedDeviceList,
+  KindIdentityRows,
+  TagSection,
+  derivedMacs,
+} from '~/components/graph/NodeDetailSections';
 import { inventoryNodeKindLabel } from '~/hooks/useInventoryGraph';
 import { reportLink } from '~/utils/reportNavigation';
 import {
+  buildInventoryRelationIndex,
+  derivedDevicesTitle,
+  deviceAliasMacs,
+  relatedDevices,
+} from '~/utils/inventoryRelations';
+import {
+  inventoryEdges,
+  inventoryNodes,
   pinnedInventoryNodeIds,
+  setInventoryFilters,
+  setInventoryViewMode,
   toggleInventoryPin,
 } from '~/stores/inventoryStore';
 
-function compact(values: (string | undefined)[]): string[] {
-  return Array.from(
-    new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]),
+/**
+ * A URL cannot carry thousands of MAC filters. Derived lists are capped here
+ * and the panel states the truncation so a partial search is never mistaken for
+ * a complete one.
+ */
+const MAX_EVENT_MAC_PARAMETERS = 50;
+
+function sharedScopeParams(): URLSearchParams {
+  return new URLSearchParams(
+    reportLink('/', window.location.pathname, window.location.search).split(
+      '?',
+    )[1],
   );
 }
 
-function deviceMacs(node: InventoryNode): string[] {
-  const known = compact(node.known_macs ?? []);
-  if (known.length > 0) return known;
-  return compact([node.mac]);
-}
-
-function eventSearchHref(node: InventoryNode): string {
+function eventSearchHref(macs: string[]): string {
   const params = new URLSearchParams({
     q: '*',
     kind: 'SEARCH_KIND_EVENT',
     mode: 'SEARCH_MODE_SPARSE',
     k: '200',
   });
-  for (const mac of deviceMacs(node)) params.append('mac', mac);
-  const shared = new URLSearchParams(
-    reportLink('/', window.location.pathname, window.location.search).split(
-      '?',
-    )[1],
-  );
-  for (const key of ['loc', 'sensor', 'after', 'before', 'scope_change'])
+  for (const mac of macs.slice(0, MAX_EVENT_MAC_PARAMETERS)) {
+    params.append('mac', mac);
+  }
+  const shared = sharedScopeParams();
+  for (const key of ['loc', 'sensor', 'after', 'before', 'scope_change']) {
     for (const value of shared.getAll(key)) params.append(key, value);
+  }
   return `/?${params.toString()}`;
 }
 
 function networkGraphHref(node: InventoryNode): string {
   const params = new URLSearchParams(
-    reportLink(
-      '/graph',
-      window.location.pathname,
-      window.location.search,
-    ).split('?')[1],
+    reportLink('/graph', window.location.pathname, window.location.search).split(
+      '?',
+    )[1],
   );
-  const mac = deviceMacs(node)[0];
+  const mac = deviceAliasMacs(node)[0];
   if (mac) params.set('mac', mac);
   return params.toString() ? `/graph?${params.toString()}` : '/graph';
 }
@@ -58,6 +76,22 @@ export function InventoryNodePanel(props: {
   onClose: () => void;
 }) {
   const pinned = () => pinnedInventoryNodeIds().has(props.node.id);
+  const index = createMemo(() =>
+    buildInventoryRelationIndex(inventoryNodes(), inventoryEdges()),
+  );
+  const derived = createMemo(() => relatedDevices(index(), props.node.id));
+  const isDevice = () => props.node.kind === 'device';
+  const scopedMacs = createMemo(() =>
+    isDevice() ? deviceAliasMacs(props.node) : derivedMacs(derived()),
+  );
+  const truncatedSearch = createMemo(
+    () => scopedMacs().length > MAX_EVENT_MAC_PARAMETERS,
+  );
+
+  function filterTo(field: 'owner_ids' | 'location_ids', value: string) {
+    setInventoryFilters(field, [value]);
+    setInventoryViewMode('table');
+  }
 
   return (
     <aside
@@ -98,86 +132,100 @@ export function InventoryNodePanel(props: {
         </div>
       </div>
 
-      <section class="graph-panel-section">
-        <Show when={props.node.no_ap_link_in_projection === true}>
-          <p title="The latest graph projection may omit retained observations from the selected interval or sensor/site scope.">
-            No AP link in this projection. This does not establish that the
-            identifier never connected or indicate risk.
-          </p>
-        </Show>
-        <dl class="graph-detail-list">
-          <DetailRow label="Display name" value={props.node.display_name} />
-          <DetailRow label="MAC" value={props.node.mac} />
-          <DetailRow label="Owner" value={props.node.owner_id} />
-          <DetailRow label="Location" value={props.node.location_id} />
-          <DetailRow
-            label="Registry active (not online status)"
-            value={props.node.active}
-          />
-          <DetailRow
-            label="Registration"
-            value={
-              props.node.registered === undefined
-                ? 'Unknown'
-                : props.node.registered
-                  ? 'Registered'
-                  : 'Unregistered'
-            }
-          />
-          <DetailRow
-            label="Registered"
-            value={props.node.first_registered}
-            date
-          />
-          <DetailRow
-            label="First observed"
-            value={props.node.first_seen}
-            date
-          />
-          <DetailRow
-            label="Last observed (registry lifetime)"
-            value={props.node.last_seen}
-            date
-          />
-        </dl>
-      </section>
-
-      <Show when={deviceMacs(props.node).length > 0}>
+      <Show when={isDevice()}>
         <section class="graph-panel-section">
-          <h3>Known MACs</h3>
-          <ul class="graph-node-mini-list">
-            <For each={deviceMacs(props.node)}>
-              {(mac) => (
-                <li>
-                  <span>{mac}</span>
-                  <span>identity</span>
-                </li>
-              )}
-            </For>
-          </ul>
+          <Show when={props.node.no_ap_link_in_projection === true}>
+            <p title="The latest graph projection may omit retained observations from the selected interval or sensor/site scope.">
+              No AP link in this projection. This does not establish that the
+              identifier never connected or indicate risk.
+            </p>
+          </Show>
+          <DeviceDetailRows node={props.node} />
         </section>
       </Show>
 
-      <Show when={(props.node.tags?.length ?? 0) > 0}>
+      <Show when={!isDevice()}>
         <section class="graph-panel-section">
-          <h3>Tags</h3>
-          <ul class="inventory-tag-list">
-            <For each={props.node.tags}>{(tag) => <li>{tag}</li>}</For>
-          </ul>
+          <KindIdentityRows node={props.node} />
         </section>
+        <section class="graph-panel-section">
+          <h3>Derived devices</h3>
+          <DeviceSummaryRows devices={derived()} />
+        </section>
+        <DerivedDeviceList
+          kind={props.node.kind}
+          title={derivedDevicesTitle(props.node.kind, derived().length)}
+          devices={derived()}
+          edgesLoaded={index().edgesLoaded}
+          provenance="Derived from the identifiers and relationships loaded for the current filters. This is not the whole inventory."
+        />
       </Show>
 
-      <Show when={props.node.kind === 'device'}>
+      <Show when={isDevice()}>
+        <DeviceAliasSection node={props.node} />
+      </Show>
+
+      <TagSection node={props.node} />
+
+      <Show when={scopedMacs().length > 0}>
         <section class="graph-panel-section">
           <h3>Actions</h3>
           <div class="graph-panel-links">
-            <A class="btn btn-secondary" href={networkGraphHref(props.node)}>
-              View in network graph
-            </A>
-            <A class="btn btn-secondary" href={eventSearchHref(props.node)}>
+            <Show when={isDevice()}>
+              <A class="btn btn-secondary" href={networkGraphHref(props.node)}>
+                View in network graph
+              </A>
+            </Show>
+            <A class="btn btn-secondary" href={eventSearchHref(scopedMacs())}>
               Search events
             </A>
+            <Show when={props.node.kind === 'owner' && props.node.owner_id}>
+              {(ownerId) => (
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onClick={() => filterTo('owner_ids', ownerId())}
+                >
+                  Filter inventory to this owner
+                </button>
+              )}
+            </Show>
+            <Show when={props.node.kind === 'location_asset' && props.node.location_id}>
+              {(locationId) => (
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onClick={() => filterTo('location_ids', locationId())}
+                >
+                  Filter inventory to this location
+                </button>
+              )}
+            </Show>
+            <Show
+              when={
+                props.node.kind === 'cluster' ||
+                props.node.kind === 'merge_candidate'
+              }
+            >
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onClick={() => {
+                  setInventoryFilters('needs_identity_review', true);
+                  setInventoryViewMode('dedup_queue');
+                }}
+              >
+                Review the identity queue
+              </button>
+            </Show>
           </div>
+          <Show when={truncatedSearch()}>
+            <p class="graph-panel-empty">
+              Searching the first {MAX_EVENT_MAC_PARAMETERS} of{' '}
+              {scopedMacs().length} derived identifiers. Narrow the filters to
+              search the remainder.
+            </p>
+          </Show>
         </section>
       </Show>
     </aside>

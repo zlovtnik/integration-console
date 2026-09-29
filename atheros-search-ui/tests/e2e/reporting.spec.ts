@@ -99,6 +99,208 @@ test('inventory uses bounded server presets, pages, and independent row detail',
   ).toBeVisible();
 });
 
+test('inventory owner node carries the same join plus its derived devices', async ({
+  page,
+}) => {
+  const graphs: unknown[] = [];
+  await mockApi(page, { onGraphRequest: (body) => graphs.push(body) });
+  await page.goto('/inventory?view=graph&grouping=cmdb&limit=100');
+
+  const owner = page.locator('.inventory-node[data-node-id="owner:security"]');
+  await expect(owner).toBeVisible();
+  await owner.focus();
+  await page.keyboard.press('Enter');
+
+  const panel = page.getByRole('complementary');
+  await expect(panel).toBeVisible();
+  // The owner is labelled by owner. One row for the node itself plus one per
+  // derived device, so the same join is present for every member.
+  await expect(panel.getByText('Owner', { exact: true })).toHaveCount(3);
+  // The same join the device panel shows, rolled up across the members.
+  await expect(
+    panel.getByRole('heading', { name: 'Derived devices' }),
+  ).toBeVisible();
+  await expect(panel.getByText('1 registered, 1 unregistered')).toBeVisible();
+  await expect(panel.getByText('security (2)')).toBeVisible();
+  await expect(panel.getByText('lab (2)')).toBeVisible();
+  // Derived devices are listed, and each carries the full device join.
+  await expect(panel.getByText('Show 2 derived devices')).toBeVisible();
+  await expect(panel.getByText('Owned devices (2 devices)')).toBeVisible();
+  // The compact join is visible as soon as the list is opened.
+  await panel.locator('.graph-derived-devices > summary').first().click();
+  // Playwright matches text case-insensitively and by substring, so the
+  // unregistered sibling is asserted separately.
+  await expect(
+    panel.getByText('Registered · security · lab', { exact: false }).first(),
+  ).toBeVisible();
+  await expect(
+    panel.getByText('Unregistered · security · lab').first(),
+  ).toBeVisible();
+  // The full join sits behind the per-member disclosure. The summary itself
+  // shows the joined alias list, not the bare identifier.
+  await panel
+    .locator('.graph-derived-device-list details > summary')
+    .first()
+    .click();
+  await expect(
+    panel.getByText('Last observed (registry lifetime)').first(),
+  ).toBeVisible();
+  await expect(panel.getByText('Lab identifier').first()).toBeVisible();
+  // Non-device nodes still get a scoped action.
+  await expect(
+    panel.getByRole('button', { name: 'Filter inventory to this owner' }),
+  ).toBeVisible();
+  await expect(graphs).toHaveLength(0);
+});
+
+test('inventory location node derives its devices from located_at edges', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/inventory?view=graph&grouping=cmdb&limit=100');
+  const location = page.locator(
+    '.inventory-node[data-node-id="location:lab"]',
+  );
+  await expect(location).toBeVisible();
+  await location.focus();
+  await page.keyboard.press('Enter');
+  const panel = page.getByRole('complementary');
+  await expect(
+    panel.getByText('Devices at this location (2 devices)'),
+  ).toBeVisible();
+  await expect(panel.getByText('Show 2 derived devices')).toBeVisible();
+  await expect(
+    panel.getByRole('button', { name: 'Filter inventory to this location' }),
+  ).toBeVisible();
+});
+
+test('inventory cluster selection survives reload and stays pending similarity', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/inventory?view=graph&grouping=similarity&limit=100');
+  const cluster = page.locator(
+    '.inventory-node[data-node-id="cluster:pair-1"]',
+  );
+  await expect(cluster).toBeVisible();
+  await cluster.focus();
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('node'))
+    .toBe('cluster:pair-1');
+
+  const panel = page.getByRole('complementary');
+  await expect(
+    panel.getByText('Pending similarity members (2 devices)'),
+  ).toBeVisible();
+  // A pending similarity group is never presented as a confirmed identity.
+  await expect(panel.getByText('Pending similarity id')).toBeVisible();
+  await expect(panel.locator('h2')).toHaveText('Similarity pair1');
+
+  await page.reload();
+  await expect(
+    page.getByText('Pending similarity members (2 devices)'),
+  ).toBeVisible();
+});
+
+test('inventory merge candidate panel keeps the pair join and adds derived devices', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.route('**/v1/inventory/merge-candidates/pair-1', (route) =>
+    route.fulfill({
+      json: {
+        candidate_id: 'pair-1',
+        mac_a: 'aa:bb:cc:dd:ee:ff',
+        mac_b: '11:22:33:44:55:66',
+        confidence: 0.91,
+        computed_at: stamp,
+        status: 'pending',
+        evidence: { method: 'fingerprint' },
+        projection_run_id: 'run',
+        devices: [
+          {
+            id: 'device:aa:bb:cc:dd:ee:ff',
+            kind: 'device',
+            label: 'Lab identifier',
+            mac: 'aa:bb:cc:dd:ee:ff',
+            known_macs: ['aa:bb:cc:dd:ee:ff'],
+            display_name: 'Lab identifier',
+            owner_id: 'security',
+            location_id: 'lab',
+            active: true,
+            registered: true,
+            first_seen: '2026-09-01T00:00:00Z',
+            last_seen: '2026-09-27T11:00:00Z',
+          },
+          {
+            id: 'device:11:22:33:44:55:66',
+            kind: 'device',
+            label: '11:22:33:44:55:66',
+            mac: '11:22:33:44:55:66',
+            known_macs: ['11:22:33:44:55:66'],
+            owner_id: 'security',
+            location_id: 'lab',
+            active: true,
+            registered: false,
+            first_seen: '2026-09-20T00:00:00Z',
+            last_seen: '2026-09-26T11:00:00Z',
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto('/inventory?view=graph&grouping=similarity&limit=100');
+  const candidate = page.locator(
+    '.inventory-node[data-node-id="merge:pair-1"]',
+  );
+  await expect(candidate).toBeVisible();
+  await candidate.focus();
+  await page.keyboard.press('Enter');
+
+  const panel = page.getByRole('complementary');
+  // Each identity renders the same joined rows as any other device.
+  await expect(
+    panel.getByRole('heading', { name: 'Lab identifier' }),
+  ).toBeVisible();
+  // Two fetched pair identities plus two graph-derived devices each carry the
+  // full joined row set.
+  await expect(
+    panel.getByText('Registry active (not online status)'),
+  ).toHaveCount(4);
+  // The graph-derived devices are surfaced alongside the fetched pair.
+  await expect(
+    panel.getByText('Candidate devices in the loaded projection (2)'),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole('link', { name: 'Search events' }),
+  ).toBeVisible();
+});
+
+test('inventory table shows joined row detail and still issues no graph request', async ({
+  page,
+}) => {
+  const graphs: unknown[] = [];
+  await mockApi(page, { onGraphRequest: (body) => graphs.push(body) });
+  await page.goto('/inventory');
+  const row = page
+    .getByRole('button', { name: 'Lab identifier', exact: true })
+    .first();
+  await expect(row).toBeVisible();
+  // Joined columns come from the row's own registry record.
+  await expect(page.getByRole('columnheader', { name: 'Known MACs' })).toBeVisible();
+  await expect(
+    page.getByRole('columnheader', { name: 'First observed' }),
+  ).toBeVisible();
+  await expect(page.getByText('Unregistered').first()).toBeVisible();
+  await expect(page.getByText('Unregistered · security · lab')).toBeVisible();
+  // Selecting a row resolves its detail independently of the graph.
+  await row.click();
+  await expect(page.getByRole('complementary')).toContainText('Registry active');
+  // The bounded preset is unchanged: no graph projection request is issued.
+  expect(graphs).toHaveLength(0);
+});
+
 test('inventory graph selection survives direct URL reload and clears on close', async ({
   page,
 }) => {

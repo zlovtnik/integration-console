@@ -1,7 +1,7 @@
 import { A } from '@solidjs/router';
 import { createMemo, For, Show } from 'solid-js';
 import { Pin, PinOff, X } from 'lucide-solid';
-import type { GraphEdge, GraphNode } from '~/api/types';
+import type { GraphNode } from '~/api/types';
 import {
   graphEdges,
   graphFilters,
@@ -11,6 +11,20 @@ import {
 } from '~/stores/graphStore';
 import { nodeKindLabel, edgeKindLabel } from '~/hooks/useForceGraph';
 import { DetailRow } from './graphPanelUtils';
+import {
+  CollapsibleNodeList,
+  type DerivedListItem,
+} from './NodeDetailSections';
+import {
+  buildGraphRelationIndex,
+  isDeviceLike,
+  relatedDevices,
+  relatedNodes,
+  relatedOfKind,
+  summarizeGraphNodes,
+  type GraphDeviceSummary,
+  type GraphRelation,
+} from '~/utils/graphRelations';
 
 function weightBasisLabel(basis: string | undefined): string | undefined {
   switch (basis) {
@@ -35,17 +49,19 @@ function weightBasisLabel(basis: string | undefined): string | undefined {
   }
 }
 
-function edgeDetail(
-  edge: GraphEdge,
-  other: GraphNode | undefined,
-): string | undefined {
+/**
+ * Edge weight and basis now live on the relation entry rather than the edge
+ * object, because the shared index keeps only the far endpoint.
+ */
+function edgeWeightDetail(relation: GraphRelation): string | undefined {
   const parts: string[] = [];
-  if (edge.weight !== undefined && edge.weight > 0) {
-    parts.push(String(Math.round(edge.weight * 100) / 100));
+  const weight = relation.weight;
+  if (weight !== undefined && weight > 0) {
+    parts.push(String(Math.round(weight * 100) / 100));
   }
-  const basis = weightBasisLabel(edge.weight_basis);
+  const basis = weightBasisLabel(relation.weight_basis);
   if (basis) parts.push(basis);
-  else if (edge.label) parts.push(edge.label);
+  else if (relation.label) parts.push(relation.label);
   return parts.length > 0 ? parts.join(' ') : undefined;
 }
 
@@ -115,6 +131,112 @@ function explainHref(node: GraphNode): string | null {
   return `/explain/${encodeURIComponent(node.explain_source_key)}?${params.toString()}`;
 }
 
+/**
+ * The joined detail the network projection can actually support. `GraphNode`
+ * carries no owner, registration, or alias MAC data, so those rows are omitted
+ * rather than reported as unknown; the registry join lives in the inventory
+ * projection.
+ */
+function GraphNodeDetailRows(props: { node: GraphNode }) {
+  return (
+    <dl class="graph-detail-list">
+      <DetailRow label="Display name" value={props.node.display_name} />
+      <DetailRow label="MAC" value={props.node.mac} />
+      <DetailRow label="Username" value={props.node.username} />
+      <DetailRow label="Hostname" value={props.node.hostname} />
+      <DetailRow label="OS hint" value={props.node.os_hint} />
+      <DetailRow label="SSID" value={props.node.ssid} />
+      <DetailRow label="BSSID" value={props.node.bssid} />
+      <DetailRow label="Location" value={props.node.location_id} />
+      <DetailRow label="Sensor" value={props.node.sensor_id} />
+      <DetailRow label="First seen" value={props.node.first_seen} date />
+      <DetailRow label="Last seen" value={props.node.last_seen} date />
+    </dl>
+  );
+}
+
+function derivedItems(
+  nodes: GraphNode[],
+  secondary: (node: GraphNode) => string,
+): DerivedListItem[] {
+  return nodes.map((node) => ({
+    key: node.id,
+    primary: node.mac ?? node.label,
+    secondary: secondary(node),
+    body: <GraphNodeDetailRows node={node} />,
+  }));
+}
+
+function GraphSummaryRows(props: { summary: GraphDeviceSummary }) {
+  return (
+    <dl class="graph-detail-list">
+      <DetailRow label="Derived identifiers" value={props.summary.total} />
+      <DetailRow label="Locations" value={props.summary.locations} />
+      <DetailRow label="Sensors" value={props.summary.sensors} />
+      <DetailRow label="SSIDs" value={props.summary.ssids} />
+      <DetailRow label="Tags" value={props.summary.tags} />
+      <DetailRow
+        label="Earliest first seen"
+        value={props.summary.earliestFirstSeen}
+        date
+      />
+      <DetailRow
+        label="Latest last seen"
+        value={props.summary.latestLastSeen}
+        date
+      />
+    </dl>
+  );
+}
+
+/**
+ * The shared derived-identifier surface. Rolls the members up into summary rows
+ * and keeps the per-identifier join behind one disclosure, matching the
+ * inventory panels.
+ */
+function RelatedIdentifiersSection(props: {
+  title: string;
+  devices: GraphNode[];
+  summary: GraphDeviceSummary;
+  edgesLoaded: boolean;
+  label?: string;
+}) {
+  return (
+    <section class="graph-panel-section">
+      <h3>{props.title}</h3>
+      <Show
+        when={props.edgesLoaded}
+        fallback={
+          <p class="graph-panel-empty">
+            Derived identifiers are unavailable here. This response carried no
+            graph relationships, so memberships are unknown rather than empty.
+          </p>
+        }
+      >
+        <Show
+          when={props.devices.length > 0}
+          fallback={
+            <p class="graph-panel-empty">
+              No related identifiers in the loaded projection. This does not
+              establish that the node is unassociated.
+            </p>
+          }
+        >
+          <GraphSummaryRows summary={props.summary} />
+          <CollapsibleNodeList
+            label={props.label}
+            items={derivedItems(props.devices, (node) =>
+              nodeKindLabel(node.kind),
+            )}
+            derivedLabel={props.devices.length === 1 ? 'identifier' : 'identifiers'}
+            provenance="Derived from the projection loaded for the current filters. This is not the whole graph."
+          />
+        </Show>
+      </Show>
+    </section>
+  );
+}
+
 function NodeLinkList(props: { title: string; nodes: GraphNode[] }) {
   return (
     <Show when={props.nodes.length > 0}>
@@ -139,66 +261,32 @@ export function GraphNodePanel(props: {
   node: GraphNode;
   onClose: () => void;
 }) {
-  const nodesById = createMemo(() => {
-    const next = new Map<string, GraphNode>();
-    for (const node of graphNodes()) next.set(node.id, node);
-    return next;
-  });
+  const index = createMemo(() =>
+    buildGraphRelationIndex(graphNodes(), graphEdges()),
+  );
 
   const clusterMembers = createMemo(() =>
-    graphEdges()
-      .filter(
-        (edge) =>
-          edge.kind === 'cluster_member' && edge.target === props.node.id,
-      )
-      .map((edge) => nodesById().get(edge.source))
-      .filter((node): node is GraphNode => Boolean(node)),
+    relatedOfKind(index(), props.node.id, 'cluster_member'),
   );
-
   const deviceClusters = createMemo(() =>
-    graphEdges()
-      .filter(
-        (edge) =>
-          edge.kind === 'cluster_member' && edge.source === props.node.id,
-      )
-      .map((edge) => nodesById().get(edge.target))
-      .filter((node): node is GraphNode => Boolean(node)),
+    clusterMembers().filter((node) => node.kind === 'cluster'),
   );
-
-  const associatedAPs = createMemo(() => {
-    const edges = graphEdges().filter(
-      (item) => item.kind === 'association' && item.source === props.node.id,
-    );
-    return edges
-      .map((edge) => nodesById().get(edge.target))
-      .filter((node): node is GraphNode => !!node);
-  });
-
-  const connectedClients = createMemo(() =>
-    graphEdges()
-      .filter(
-        (edge) => edge.kind === 'association' && edge.target === props.node.id,
-      )
-      .map((edge) => nodesById().get(edge.source))
-      .filter((node): node is GraphNode => Boolean(node)),
+  const associatedNodes = createMemo(() =>
+    relatedOfKind(index(), props.node.id, 'association'),
   );
-
-  const relatedLinks = createMemo(() =>
-    graphEdges()
-      .filter(
-        (edge) =>
-          edge.source === props.node.id || edge.target === props.node.id,
-      )
-      .map((edge) => {
-        const otherID =
-          edge.source === props.node.id ? edge.target : edge.source;
-        const other = nodesById().get(otherID);
-        return { edge, other };
-      })
-      .filter((item): item is { edge: GraphEdge; other: GraphNode } =>
-        Boolean(item.other),
-      ),
+  const associatedAPs = createMemo(() =>
+    associatedNodes().filter((node) => node.kind === 'ap'),
   );
+  const connectedIdentifiers = createMemo(() =>
+    associatedNodes().filter((node) => isDeviceLike(node)),
+  );
+  const derivedIdentifiers = createMemo(() =>
+    relatedDevices(index(), props.node.id).map((item) => item.node),
+  );
+  const derivedSummary = createMemo(() =>
+    summarizeGraphNodes(derivedIdentifiers()),
+  );
+  const relatedLinks = createMemo(() => relatedNodes(index(), props.node.id));
 
   const pinned = () => pinnedNodeIds().has(props.node.id);
   const explanation = createMemo(() => explainHref(props.node));
@@ -274,6 +362,12 @@ export function GraphNodePanel(props: {
           title="Observed AP context in this projection"
           nodes={associatedAPs()}
         />
+        <RelatedIdentifiersSection
+          title="Derived identifiers"
+          devices={derivedIdentifiers()}
+          summary={derivedSummary()}
+          edgesLoaded={index().edgesLoaded}
+        />
       </Show>
 
       <Show when={props.node.kind === 'cluster'}>
@@ -293,6 +387,12 @@ export function GraphNodePanel(props: {
           </dl>
         </section>
         <NodeLinkList title="Member MACs" nodes={clusterMembers()} />
+        <RelatedIdentifiersSection
+          title="Derived identifiers"
+          devices={derivedIdentifiers()}
+          summary={derivedSummary()}
+          edgesLoaded={index().edgesLoaded}
+        />
       </Show>
 
       <Show when={props.node.kind === 'ap'}>
@@ -302,14 +402,21 @@ export function GraphNodePanel(props: {
             <DetailRow label="Enabled" value={props.node.enabled} />
             <DetailRow
               label="Observed identifiers in loaded projection"
-              value={connectedClients().length}
+              value={connectedIdentifiers().length}
             />
             <DetailRow label="Risk score" value={props.node.risk_score} />
             <DetailRow label="Alert" value={props.node.alert_type} />
             <DetailRow label="Severity" value={props.node.alert_severity} />
           </dl>
         </section>
-        <NodeLinkList title="Observed identifiers" nodes={connectedClients()} />
+        <NodeLinkList title="Observed identifiers" nodes={connectedIdentifiers()} />
+        <RelatedIdentifiersSection
+          title="Derived identifiers"
+          devices={connectedIdentifiers()}
+          summary={summarizeGraphNodes(connectedIdentifiers())}
+          edgesLoaded={index().edgesLoaded}
+          label="identifiers"
+        />
       </Show>
 
       <Show when={props.node.kind === 'client'}>
@@ -322,6 +429,12 @@ export function GraphNodePanel(props: {
         <NodeLinkList
           title="Observed AP context in this projection"
           nodes={associatedAPs()}
+        />
+        <RelatedIdentifiersSection
+          title="Derived identifiers"
+          devices={derivedIdentifiers()}
+          summary={derivedSummary()}
+          edgesLoaded={index().edgesLoaded}
         />
       </Show>
 
@@ -388,10 +501,10 @@ export function GraphNodePanel(props: {
             <For each={relatedLinks()}>
               {(item) => (
                 <li>
-                  <span>{item.other.label}</span>
+                  <span>{item.node.label}</span>
                   <span>
-                    {edgeKindLabel(item.edge.kind)}
-                    <Show when={edgeDetail(item.edge, item.other)}>
+                    {edgeKindLabel(item.kind)}
+                    <Show when={edgeWeightDetail(item)}>
                       {(detail) => (
                         <small class="graph-edge-detail">{detail()}</small>
                       )}

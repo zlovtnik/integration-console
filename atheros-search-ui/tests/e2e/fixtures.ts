@@ -269,6 +269,184 @@ export function graphForFilters(body: unknown): GraphResponse {
   return mockMultiSsidGraph;
 }
 
+/**
+ * A cmdb-grouped inventory: owner and location nodes plus the devices they own
+ * and sit at, with the `owns` / `located_at` edges the detail panels derive
+ * their members from.
+ */
+export const mockInventoryCmdb: InventoryResponse = {
+  generated_at: '2026-09-27T12:00:00Z',
+  node_count: 5,
+  edge_count: 4,
+  total_device_count: 3,
+  total_registered_count: 2,
+  nodes: [
+    {
+      id: 'owner:security',
+      kind: 'owner',
+      label: 'security',
+      owner_id: 'security',
+      active: true,
+    },
+    {
+      id: 'owner:unassigned',
+      kind: 'owner',
+      label: 'unassigned',
+      owner_id: 'unassigned',
+      active: true,
+    },
+    {
+      id: 'location:lab',
+      kind: 'location_asset',
+      label: 'lab',
+      location_id: 'lab',
+      active: true,
+    },
+    {
+      id: 'device:aa:bb:cc:dd:ee:ff',
+      kind: 'device',
+      label: 'Lab identifier',
+      mac: 'aa:bb:cc:dd:ee:ff',
+      known_macs: ['aa:bb:cc:dd:ee:ff', 'aa:bb:cc:dd:ee:fe'],
+      display_name: 'Lab identifier',
+      owner_id: 'security',
+      location_id: 'lab',
+      active: true,
+      registered: true,
+      first_registered: '2026-09-01T00:00:00Z',
+      first_seen: '2026-09-01T00:00:00Z',
+      last_seen: '2026-09-27T11:00:00Z',
+      tags: ['registered', 'active', 'owner:security', 'location:lab'],
+    },
+    {
+      id: 'device:11:22:33:44:55:66',
+      kind: 'device',
+      label: '11:22:33:44:55:66',
+      mac: '11:22:33:44:55:66',
+      known_macs: ['11:22:33:44:55:66'],
+      owner_id: 'security',
+      location_id: 'lab',
+      active: true,
+      registered: false,
+      first_seen: '2026-09-20T00:00:00Z',
+      last_seen: '2026-09-26T11:00:00Z',
+      tags: ['device', 'owner:security', 'location:lab'],
+    },
+  ],
+  edges: [
+    {
+      id: 'owns:owner:security:device:aa:bb:cc:dd:ee:ff',
+      source: 'owner:security',
+      target: 'device:aa:bb:cc:dd:ee:ff',
+      kind: 'owns',
+    },
+    {
+      id: 'owns:owner:security:device:11:22:33:44:55:66',
+      source: 'owner:security',
+      target: 'device:11:22:33:44:55:66',
+      kind: 'owns',
+    },
+    {
+      id: 'located_at:device:aa:bb:cc:dd:ee:ff:location:lab',
+      source: 'device:aa:bb:cc:dd:ee:ff',
+      target: 'location:lab',
+      kind: 'located_at',
+    },
+    {
+      id: 'located_at:device:11:22:33:44:55:66:location:lab',
+      source: 'device:11:22:33:44:55:66',
+      target: 'location:lab',
+      kind: 'located_at',
+    },
+  ],
+};
+
+/**
+ * A similarity-grouped inventory. `similarity_cluster_id` is a pending merge
+ * candidate id, not a confirmed identity cluster.
+ */
+export const mockInventorySimilarity: InventoryResponse = {
+  generated_at: '2026-09-27T12:00:00Z',
+  node_count: 4,
+  edge_count: 4,
+  total_device_count: 2,
+  total_registered_count: 1,
+  nodes: [
+    {
+      id: 'cluster:pair-1',
+      kind: 'cluster',
+      label: 'Similarity pair1',
+      similarity_cluster_id: 'pair-1',
+      active: true,
+      tags: ['similarity:pending'],
+    },
+    {
+      id: 'merge:pair-1',
+      kind: 'merge_candidate',
+      label: 'aa:bb:cc:dd:ee:ff / 11:22:33:44:55:66',
+      similarity_cluster_id: 'pair-1',
+      dedup_confidence: 0.91,
+      active: true,
+      tags: ['merge-review'],
+    },
+    {
+      id: 'device:aa:bb:cc:dd:ee:ff',
+      kind: 'device',
+      label: 'Lab identifier',
+      mac: 'aa:bb:cc:dd:ee:ff',
+      known_macs: ['aa:bb:cc:dd:ee:ff'],
+      display_name: 'Lab identifier',
+      owner_id: 'security',
+      location_id: 'lab',
+      active: true,
+      registered: true,
+      first_seen: '2026-09-01T00:00:00Z',
+      last_seen: '2026-09-27T11:00:00Z',
+      tags: ['registered'],
+    },
+    {
+      id: 'device:11:22:33:44:55:66',
+      kind: 'device',
+      label: '11:22:33:44:55:66',
+      mac: '11:22:33:44:55:66',
+      known_macs: ['11:22:33:44:55:66'],
+      owner_id: 'security',
+      location_id: 'lab',
+      active: true,
+      registered: false,
+      first_seen: '2026-09-20T00:00:00Z',
+      last_seen: '2026-09-26T11:00:00Z',
+      tags: ['device'],
+    },
+  ],
+  edges: [
+    {
+      id: 'cluster_member:device:aa:bb:cc:dd:ee:ff:cluster:pair-1',
+      source: 'device:aa:bb:cc:dd:ee:ff',
+      target: 'cluster:pair-1',
+      kind: 'cluster_member',
+    },
+    {
+      id: 'cluster_member:device:11:22:33:44:55:66:cluster:pair-1',
+      source: 'device:11:22:33:44:55:66',
+      target: 'cluster:pair-1',
+      kind: 'cluster_member',
+    },
+    {
+      id: 'merge_candidate:merge:pair-1:device:aa:bb:cc:dd:ee:ff',
+      source: 'merge:pair-1',
+      target: 'device:aa:bb:cc:dd:ee:ff',
+      kind: 'merge_candidate',
+    },
+    {
+      id: 'merge_candidate:merge:pair-1:device:11:22:33:44:55:66',
+      source: 'merge:pair-1',
+      target: 'device:11:22:33:44:55:66',
+      kind: 'merge_candidate',
+    },
+  ],
+};
+
 interface MockApiOptions {
   inventory?: (body: InventoryFilters) => InventoryResponse;
   network?: (body: NetworkFilters) => NetworkResponse;
@@ -307,29 +485,41 @@ export async function mockApi(page: Page, options: MockApiOptions = {}) {
   await page.route('**/v1/inventory', (route) => {
     const body = route.request().postDataJSON() as InventoryFilters;
     options.onInventoryRequest?.(body);
-    return json(
-      route,
-      options.inventory?.(body) ?? {
-        generated_at: '2026-09-27T12:00:00Z',
-        node_count: 1,
-        edge_count: 0,
-        total_device_count: 1,
-        total_registered_count: 0,
-        nodes: [
-          {
-            id: 'device:aa:bb:cc:dd:ee:ff',
-            mac: 'aa:bb:cc:dd:ee:ff',
-            kind: 'device',
-            label: 'Lab identifier',
-            active: true,
-            registered: false,
-            pending_review_count: 0,
-            last_seen: '2026-09-27T11:00:00Z',
-          },
-        ],
-        edges: [],
-      },
-    );
+    // Grouping decides which non-device nodes the projection carries, so the
+    // default mock mirrors the API rather than always returning one device.
+    const grouped =
+      body.grouping === 'cmdb'
+        ? mockInventoryCmdb
+        : body.grouping === 'similarity'
+          ? mockInventorySimilarity
+          : {
+              generated_at: '2026-09-27T12:00:00Z',
+              node_count: 1,
+              edge_count: 0,
+              total_device_count: 1,
+              total_registered_count: 0,
+              nodes: [
+                {
+                  id: 'device:aa:bb:cc:dd:ee:ff',
+                  mac: 'aa:bb:cc:dd:ee:ff',
+                  kind: 'device' as const,
+                  label: 'Lab identifier',
+                  display_name: 'Lab identifier',
+                  owner_id: 'security',
+                  location_id: 'lab',
+                  known_macs: ['aa:bb:cc:dd:ee:ff'],
+                  active: true,
+                  registered: false,
+                  pending_review_count: 0,
+                  first_seen: '2026-09-01T00:00:00Z',
+                  first_registered: '2026-09-02T00:00:00Z',
+                  last_seen: '2026-09-27T11:00:00Z',
+                  tags: ['device', 'owner:security', 'location:lab'],
+                },
+              ],
+              edges: [],
+            };
+    return json(route, options.inventory?.(body) ?? grouped);
   });
   await page.route('**/v1/network-map', (route) => {
     const body = route.request().postDataJSON() as NetworkFilters;

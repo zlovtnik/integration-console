@@ -1,11 +1,28 @@
-import { createResource, createSignal, For, Show, onCleanup } from 'solid-js';
+import { createMemo, createResource, createSignal, For, Show, onCleanup } from 'solid-js';
+import { A } from '@solidjs/router';
 import { Check, Clock3, Split, X } from 'lucide-solid';
 import type { InventoryNode, MergeDecision } from '~/api/types';
 import { ScoreBar } from '~/components/ScoreBar';
-import { DetailRow } from '~/components/graph/graphPanelUtils';
+import {
+  DeviceAliasSection,
+  DeviceDetailRows,
+  DeviceSummaryLine,
+  DerivedDeviceList,
+} from '~/components/graph/NodeDetailSections';
 import { api } from '~/api/client';
 import { stripMergeNodePrefix } from '~/hooks/useInventory';
 import { JsonViewer } from '~/components/JsonViewer';
+import {
+  buildInventoryRelationIndex,
+  deviceAliasMacs,
+  relatedDevices,
+} from '~/utils/inventoryRelations';
+import {
+  inventoryDedupDevices,
+  inventoryDedupEdges,
+  inventoryNodes,
+  inventoryEdges,
+} from '~/stores/inventoryStore';
 
 function confidenceResult(confidence: number) {
   return {
@@ -16,25 +33,17 @@ function confidenceResult(confidence: number) {
   };
 }
 
-function macs(node: InventoryNode): string[] {
-  return node.known_macs?.length ? node.known_macs : node.mac ? [node.mac] : [];
-}
-
+/**
+ * Renders one side of the pair through the shared joined detail so a merge
+ * candidate reads identically to any other device in the report.
+ */
 function CandidateIdentity(props: { node: InventoryNode }) {
   return (
     <article class="inventory-candidate-card">
       <h3>{props.node.label}</h3>
-      <dl class="graph-detail-list">
-        <DetailRow label="Display name" value={props.node.display_name} />
-        <DetailRow label="Owner" value={props.node.owner_id} />
-        <DetailRow label="Location" value={props.node.location_id} />
-        <DetailRow label="Last seen" value={props.node.last_seen} date />
-      </dl>
-      <Show when={macs(props.node).length > 0}>
-        <ul class="inventory-mac-list">
-          <For each={macs(props.node)}>{(mac) => <li>{mac}</li>}</For>
-        </ul>
-      </Show>
+      <DeviceSummaryLine node={props.node} />
+      <DeviceDetailRows node={props.node} />
+      <DeviceAliasSection node={props.node} />
     </article>
   );
 }
@@ -68,6 +77,56 @@ export function MergeCandidatePanel(props: {
   const candidates = () => (detail.loading ? [] : (detail()?.devices ?? []));
   const confidence = () =>
     detail()?.confidence ?? props.node.dedup_confidence ?? 0;
+
+  /**
+   * The pair's own devices come from the evidence endpoint so the panel is
+   * correct with an empty graph. Any further devices the loaded projection
+   * relates to this candidate are added from the edges, and the dedupe queue
+   * store is folded in because it is loaded independently of the graph.
+   */
+  const index = createMemo(() => {
+    const graph = buildInventoryRelationIndex(inventoryNodes(), inventoryEdges());
+    const queue = buildInventoryRelationIndex(
+      inventoryDedupDevices(),
+      inventoryDedupEdges(),
+    );
+    return {
+      edgesLoaded: graph.edgesLoaded || queue.edgesLoaded,
+      devices: Array.from(
+        new Map(
+          [
+            ...relatedDevices(queue, props.node.id),
+            ...relatedDevices(graph, props.node.id),
+          ].map((device) => [device.id, device]),
+        ).values(),
+      ),
+    };
+  });
+  const candidateMacs = () => {
+    const fromPair = candidates().flatMap((device) => deviceAliasMacs(device));
+    const fromGraph = index().devices.flatMap((device) =>
+      deviceAliasMacs(device),
+    );
+    return Array.from(new Set([...fromPair, ...fromGraph]));
+  };
+
+  const eventSearchHref = (macs: string[]): string => {
+    const params = new URLSearchParams({
+      q: '*',
+      kind: 'SEARCH_KIND_EVENT',
+      mode: 'SEARCH_MODE_SPARSE',
+      k: '200',
+    });
+    for (const mac of macs.slice(0, 50)) params.append('mac', mac);
+    for (const key of ['loc', 'sensor', 'after', 'before']) {
+      for (const value of new URLSearchParams(
+        window.location.search,
+      ).getAll(key)) {
+        params.append(key, value);
+      }
+    }
+    return `/?${params.toString()}`;
+  };
 
   async function decide(decision: MergeDecision) {
     setBusyDecision(decision);
@@ -129,6 +188,25 @@ export function MergeCandidatePanel(props: {
           <For each={candidates()}>
             {(node) => <CandidateIdentity node={node} />}
           </For>
+        </div>
+      </section>
+
+      <DerivedDeviceList
+        kind="merge_candidate"
+        title={`Candidate devices in the loaded projection (${index().devices.length})`}
+        devices={index().devices}
+        edgesLoaded={index().edgesLoaded}
+        provenance="Derived from the identifiers and relationships loaded for the current filters. Pending similarity is not a confirmed identity match."
+      />
+
+      <section class="graph-panel-section">
+        <h3>Actions</h3>
+        <div class="graph-panel-links">
+          <Show when={candidateMacs().length > 0}>
+            <A class="btn btn-secondary" href={eventSearchHref(candidateMacs())}>
+              Search events
+            </A>
+          </Show>
         </div>
       </section>
 

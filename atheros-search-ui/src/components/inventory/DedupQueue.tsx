@@ -12,6 +12,16 @@ import {
   inventoryDedupMeta,
   inventoryFilters,
 } from '~/stores/inventoryStore';
+import {
+  DeviceSummaryLine,
+  registrationLabel,
+} from '~/components/graph/NodeDetailSections';
+import {
+  buildInventoryRelationIndex,
+  derivedDevicesTitle,
+  deviceAliasMacs,
+  relatedDevices,
+} from '~/utils/inventoryRelations';
 
 interface QueueItem {
   candidate: InventoryNode;
@@ -27,28 +37,16 @@ function confidenceResult(confidence: number) {
   };
 }
 
-function candidateDevices(
-  candidate: InventoryNode,
-  nodes: Map<string, InventoryNode>,
-) {
-  return inventoryDedupEdges()
-    .filter(
-      (edge) =>
-        edge.kind === 'merge_candidate' &&
-        (edge.source === candidate.id || edge.target === candidate.id),
-    )
-    .map((edge) =>
-      nodes.get(edge.source === candidate.id ? edge.target : edge.source),
-    )
-    .filter((node): node is InventoryNode => Boolean(node));
-}
-
-function deviceLabels(devices: InventoryNode[]): string {
-  if (devices.length > 0)
-    return devices.map((device) => device.label).join(' / ');
-  return inventoryDedupLoading()
-    ? 'Loading identities...'
-    : 'Unresolved identities';
+/**
+ * The queue loads candidates, their edges, and the referenced devices into
+ * their own store so graph sampling cannot hide an identity. It is indexed
+ * with the same derivation the panels use.
+ */
+function dedupRelationIndex() {
+  return buildInventoryRelationIndex(
+    inventoryDedupDevices(),
+    inventoryDedupEdges(),
+  );
 }
 
 export function DedupQueue(props: {
@@ -62,15 +60,13 @@ export function DedupQueue(props: {
     new Set(),
   );
   const queueItems = createMemo<QueueItem[]>(() => {
-    const nodes = new Map(
-      inventoryDedupDevices().map((node) => [node.id, node]),
-    );
+    const index = dedupRelationIndex();
     const minConfidence = inventoryFilters.min_dedup_confidence ?? 0;
     return inventoryDedupCandidates()
       .filter((node) => (node.dedup_confidence ?? 0) >= minConfidence)
       .map((candidate) => ({
         candidate,
-        devices: candidateDevices(candidate, nodes),
+        devices: relatedDevices(index, candidate.id),
       }))
       .sort(
         (left, right) =>
@@ -151,7 +147,7 @@ export function DedupQueue(props: {
         >
           <div class="dedup-queue-row dedup-queue-row--head" role="row">
             <span role="columnheader">Candidate</span>
-            <span role="columnheader">Identities</span>
+            <span role="columnheader">Candidate devices</span>
             <span role="columnheader">Confidence</span>
             <span role="columnheader">Actions</span>
           </div>
@@ -168,7 +164,29 @@ export function DedupQueue(props: {
                   </button>
                 </div>
                 <span class="dedup-identity-list" role="cell">
-                  {deviceLabels(item.devices)}
+                  <Show
+                    when={item.devices.length > 0}
+                    fallback={
+                      inventoryDedupLoading()
+                        ? 'Loading identities...'
+                        : 'Unresolved identities'
+                    }
+                  >
+                    <span class="dedup-identity-join">
+                      {derivedDevicesTitle('merge_candidate', item.devices.length)}
+                    </span>
+                    <For each={item.devices}>
+                      {(device) => (
+                        <span class="dedup-identity-entry">
+                          <span>
+                            {deviceAliasMacs(device).join(', ') || device.label}
+                          </span>
+                          <span>{registrationLabel(device)}</span>
+                          <DeviceSummaryLine node={device} />
+                        </span>
+                      )}
+                    </For>
+                  </Show>
                 </span>
                 <div role="cell">
                   <ScoreBar
