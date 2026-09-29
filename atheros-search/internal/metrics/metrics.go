@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,6 +37,11 @@ type Metrics struct {
 	SearchableWirelessEvents  prometheus.Gauge
 	WirelessNewestObservation prometheus.Gauge
 }
+
+const (
+	maxCPUProfileSeconds   = 30
+	maxTraceProfileSeconds = 5
+)
 
 func New() *Metrics {
 	return NewForRegisterer(prometheus.DefaultRegisterer)
@@ -268,14 +275,23 @@ func (m *Metrics) ObserveSearch(kind, mode, status string, started time.Time, re
 	m.ResultsReturned.WithLabelValues(kind).Add(float64(results))
 }
 
-func StartServer(ctx context.Context, port int) (*http.Server, error) {
+func StartServer(ctx context.Context, port int, profilingEnabled bool) (*http.Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("bind metrics server: %w", err)
 	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	if profilingEnabled {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", boundedProfile(pprof.Profile, maxCPUProfileSeconds))
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", boundedProfile(pprof.Trace, maxTraceProfileSeconds))
+	}
 	server := &http.Server{
 		Addr:              listener.Addr().String(),
-		Handler:           promhttp.Handler(),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 	}
@@ -291,4 +307,21 @@ func StartServer(ctx context.Context, port int) (*http.Server, error) {
 		}
 	}()
 	return server, nil
+}
+
+func boundedProfile(handler http.HandlerFunc, maxSeconds int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rawSeconds := r.URL.Query().Get("seconds"); rawSeconds != "" {
+			seconds, err := strconv.Atoi(rawSeconds)
+			if err != nil || seconds < 1 || seconds > maxSeconds {
+				http.Error(w, fmt.Sprintf("seconds must be between 1 and %d", maxSeconds), http.StatusBadRequest)
+				return
+			}
+		} else {
+			query := r.URL.Query()
+			query.Set("seconds", "1")
+			r.URL.RawQuery = query.Encode()
+		}
+		handler(w, r)
+	}
 }

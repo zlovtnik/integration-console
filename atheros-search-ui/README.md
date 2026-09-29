@@ -44,11 +44,14 @@ The UI uses these endpoints (snake_case JSON, RFC 3339 timestamps):
 
 | Method | Path | UI usage |
 |---|---|---|
-| `POST` | `/v1/search` | Search page |
-| `GET` | `/v1/explain/{source_key}` | Result explain panel |
+| `POST` | `/v1/search` | Search page and streaming results |
+| `POST` | `/v1/explain/scoped` | Record detail page: ranking factors in the caller's scope |
+| `GET` | `/v1/records/{source_key}/context` | Record detail page: record, activity rate, related devices, embedding work |
 | `GET` | `/v1/suggest/filters` | Filter autocomplete |
 | `POST` | `/v1/graph` | Network graph projection |
+| `POST` | `/v1/network-map` | Network map report |
 | `POST` | `/v1/inventory` | Inventory graph and dedup queue |
+| `GET` | `/v1/inventory/merge-candidates/{candidate_id}` | Merge candidate detail |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Merge, not-a-match, needs-more-data |
 
 Types live in `src/api/types.ts`. The HTTP client is `src/api/client.ts`.

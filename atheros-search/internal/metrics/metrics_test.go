@@ -2,7 +2,10 @@ package metrics
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,7 +33,46 @@ func TestStartServerReturnsBindFailure(t *testing.T) {
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 
-	server, err := StartServer(context.Background(), port)
+	server, err := StartServer(context.Background(), port, false)
 	require.Nil(t, server)
 	require.Error(t, err)
+}
+
+func TestProfilingRoutesAreOptIn(t *testing.T) {
+	for _, profilingEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled_%t", profilingEnabled), func(t *testing.T) {
+			server, err := StartServer(context.Background(), 0, profilingEnabled)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = server.Close() })
+
+			response, err := http.Get("http://" + server.Addr + "/debug/pprof/")
+			require.NoError(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			if profilingEnabled {
+				require.Equal(t, http.StatusOK, response.StatusCode)
+				require.Contains(t, string(body), "goroutine")
+			} else {
+				require.Equal(t, http.StatusNotFound, response.StatusCode)
+			}
+		})
+	}
+}
+
+func TestProfilingCaptureDurationsAreBounded(t *testing.T) {
+	server, err := StartServer(context.Background(), 0, true)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = server.Close() })
+
+	for _, path := range []string{
+		"/debug/pprof/profile?seconds=31",
+		"/debug/pprof/trace?seconds=6",
+		"/debug/pprof/profile?seconds=invalid",
+	} {
+		response, err := http.Get("http://" + server.Addr + path)
+		require.NoError(t, err)
+		_ = response.Body.Close()
+		require.Equal(t, http.StatusBadRequest, response.StatusCode, path)
+	}
 }

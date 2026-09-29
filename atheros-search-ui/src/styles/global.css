@@ -1494,3 +1494,113 @@ body.filter-drawer-open {
     left: var(--space-4);
   }
 }
+
+/* Record investigation sections. The activity chart is decorative by default;
+   ActivityTimeline also renders a table carrying the same numbers. */
+.explain-activity {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.explain-activity-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.explain-activity-totals strong {
+  color: var(--color-text-primary);
+}
+
+.explain-activity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 96px;
+  padding: var(--space-2);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.explain-activity-bar {
+  flex: 1 1 auto;
+  min-width: 2px;
+  background: var(--color-accent);
+  border-radius: 1px 1px 0 0;
+}
+
+.explain-activity-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+.explain-activity-table th,
+.explain-activity-table td {
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.explain-status {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.explain-status--ok {
+  color: var(--color-ok);
+  background: var(--color-ok-bg);
+}
+
+.explain-status--danger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.explain-status--warn {
+  color: var(--color-warn);
+  background: var(--color-warn-bg);
+}
+
+.explain-status--info {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 18%, transparent);
+}
+
+.explain-corroborated {
+  color: var(--color-ok);
+}
+
+.explain-uncorroborated {
+  color: var(--color-text-tertiary);
+}
+
+.explain-error-text {
+  color: var(--color-danger);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.explain-section > summary {
+  cursor: pointer;
+}
+
+.explain-section-body {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.graph-detail-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}

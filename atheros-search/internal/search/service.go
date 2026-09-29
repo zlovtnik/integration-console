@@ -221,18 +221,24 @@ func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*s
 	}, nil
 }
 
+// ExplainDetails carries the ranking envelope plus the record it describes. The
+// record fields are what make the response useful on its own: a detail view
+// reached by direct link has no search result to fall back on.
 type ExplainDetails struct {
-	RankingMethod   string   `json:"ranking_method,omitempty"`
-	SourceKey       string   `json:"sourceKey"`
-	DenseScore      float32  `json:"denseScore,omitempty"`
-	SparseScore     float32  `json:"sparseScore,omitempty"`
-	FusedScore      float32  `json:"fusedScore,omitempty"`
-	ThreatBoost     float32  `json:"threatBoost,omitempty"`
-	BoostReasons    []string `json:"boostReasons,omitempty"`
-	SequenceLogProb float64  `json:"sequenceLogProb,omitempty"`
-	Found           bool     `json:"found"`
-	ScoresAvailable bool     `json:"scores_available"`
-	SourceKind      string   `json:"source_kind,omitempty"`
+	RankingMethod   string        `json:"ranking_method,omitempty"`
+	SourceKey       string        `json:"sourceKey"`
+	DenseScore      float32       `json:"denseScore,omitempty"`
+	SparseScore     float32       `json:"sparseScore,omitempty"`
+	FusedScore      float32       `json:"fusedScore,omitempty"`
+	ThreatBoost     float32       `json:"threatBoost,omitempty"`
+	BoostReasons    []string      `json:"boostReasons,omitempty"`
+	SequenceLogProb float64       `json:"sequenceLogProb,omitempty"`
+	Found           bool          `json:"found"`
+	ScoresAvailable bool          `json:"scores_available"`
+	SourceKind      string        `json:"source_kind,omitempty"`
+	DetailJSON      string        `json:"detail_json,omitempty"`
+	SequenceTokens  []string      `json:"sequence_tokens,omitempty"`
+	Record          *RecordFields `json:"record,omitempty"`
 }
 
 func (s *Service) ExplainDetails(ctx context.Context, req *searchv1.ExplainRequest) (*ExplainDetails, error) {
@@ -243,31 +249,23 @@ func (s *Service) ExplainDetails(ctx context.Context, req *searchv1.ExplainReque
 	if err != nil {
 		return nil, err
 	}
-	placeholders := pgPlaceholders(2, len(kinds))
-	args := make([]any, 0, len(kinds)+1)
-	args = append(args, req.SourceKey)
-	for _, kind := range kinds {
-		args = append(args, kind)
-	}
-	var sourceKind string
-	err = s.Pool.QueryRowContext(ctx, `
-SELECT source_kind
-FROM atheros_search.search_documents
-WHERE source_id = $1 AND source_kind IN (`+placeholders+`) AND status = 'active'
-ORDER BY source_kind
-LIMIT 1`, args...).Scan(&sourceKind)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &ExplainDetails{SourceKey: req.SourceKey, BoostReasons: []string{}}, nil
-	}
+	document, err := s.resolveDocument(ctx, strings.TrimSpace(req.SourceKey), kinds, nil)
 	if err != nil {
 		return nil, err
 	}
 	details := &ExplainDetails{
-		SourceKey:    req.SourceKey,
-		SourceKind:   sourceKind,
-		Found:        true,
+		SourceKey:    strings.TrimSpace(req.SourceKey),
 		BoostReasons: []string{},
 	}
+	if document == nil {
+		return details, nil
+	}
+	record := document.Fields
+	details.Found = true
+	details.SourceKind = record.SourceKind
+	details.DetailJSON = record.DetailJSON
+	details.SequenceTokens = record.SequenceTokens
+	details.Record = &record
 	if !hasMeaningfulSearchTerms(req.Query) {
 		return details, nil
 	}
@@ -295,6 +293,8 @@ LIMIT 1`, args...).Scan(&sourceKind)
 				Found:           true,
 				ScoresAvailable: true,
 				SourceKind:      result.SourceKind,
+				DetailJSON:      result.DetailJson,
+				Record:          details.Record,
 			}, nil
 		}
 	}

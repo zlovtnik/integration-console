@@ -179,7 +179,7 @@ func main() {
 	svc := search.NewService(pool.DB, embedder, cfg, m, logger)
 	readiness := &health.Readiness{DB: pool, Metrics: m, SchemaReadyRequired: cfg.SchemaReadyRequired}
 
-	metricsServer, err := metrics.StartServer(ctx, cfg.MetricsPort)
+	metricsServer, err := metrics.StartServer(ctx, cfg.MetricsPort, cfg.ProfilingEnabled)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("start metrics server")
 	}

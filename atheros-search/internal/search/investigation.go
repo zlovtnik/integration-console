@@ -79,13 +79,18 @@ type InvestigationResponse struct {
 }
 
 type InvestigationLink struct {
-	ID         string   `json:"id"`
-	Source     string   `json:"source"`
-	Target     string   `json:"target"`
-	Type       string   `json:"type"`
-	Evidence   []string `json:"evidence_references,omitempty"`
-	Confidence string   `json:"confidence"`
-	Fresh      bool     `json:"fresh"`
+	ID string `json:"id"`
+	// Weight is the numeric strength of the link in whatever unit WeightBasis
+	// names, never a probability. Links that carry no numeric evidence leave
+	// both empty rather than implying a score.
+	Weight      float64  `json:"weight,omitempty"`
+	WeightBasis string   `json:"weight_basis,omitempty"`
+	Source      string   `json:"source"`
+	Target      string   `json:"target"`
+	Type        string   `json:"type"`
+	Evidence    []string `json:"evidence_references,omitempty"`
+	Confidence  string   `json:"confidence"`
+	Fresh       bool     `json:"fresh"`
 }
 
 type InvestigationFreshness struct {
@@ -294,7 +299,7 @@ ORDER BY COALESCE(annotation.pinned,FALSE) DESC,MAX(summary.last_observed_at) DE
 		deviceID := "device:" + mac
 		nodes[deviceID] = GraphNode{ID: deviceID, Kind: "device", Label: label, MAC: mac, FirstSeen: &first, LastSeen: &last}
 		response.Roster = append(response.Roster, RosterMember{MAC: mac, Name: label, FirstObserved: first, LastObserved: last, RecordCount: count})
-		response.Links = append(response.Links, InvestigationLink{ID: "observed:" + mac + ":" + bssid, Source: deviceID, Target: apID, Type: "observed_ap_context", Confidence: confidenceFor(count, sensors), Fresh: !last.Before(freshCutoff)})
+		response.Links = append(response.Links, InvestigationLink{ID: "observed:" + mac + ":" + bssid, Source: deviceID, Target: apID, Type: "observed_ap_context", Weight: float64(count), WeightBasis: "frame_count", Confidence: confidenceFor(count, sensors), Fresh: !last.Before(freshCutoff)})
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -378,7 +383,7 @@ WHERE edge_kind='same_device' AND observed_at >= $1 AND source_node_id IN (`+pgP
 			return err
 		}
 		if known[source] && known[target] && len(response.Links) < request.EdgeLimit {
-			response.Links = append(response.Links, InvestigationLink{ID: id, Source: source, Target: target, Type: "confirmed_identity", Confidence: "operator-confirmed identity", Fresh: !observedAt.Before(freshCutoff)})
+			response.Links = append(response.Links, InvestigationLink{ID: id, Source: source, Target: target, Type: "confirmed_identity", WeightBasis: "operator_confirmation", Confidence: "operator-confirmed identity", Fresh: !observedAt.Before(freshCutoff)})
 		}
 	}
 	return rows.Err()
@@ -453,10 +458,12 @@ LIMIT $`+fmt.Sprint(len(args)), args...)
 		}
 		seen[id] = true
 		response.Links = append(response.Links, InvestigationLink{
-			ID:     id,
-			Source: "device:" + mac,
-			Target: "ap:" + bssid,
-			Type:   "association_frame_evidence",
+			ID:          "assoc:" + mac + ":" + bssid,
+			Source:      "device:" + mac,
+			Target:      "ap:" + bssid,
+			Type:        "association_frame_evidence",
+			Weight:      float64(frames),
+			WeightBasis: "frame_count",
 			Evidence: []string{fmt.Sprintf("association-frame:%s:%s:%s",
 				mac, bssid, lastSeen.UTC().Format(time.RFC3339))},
 			Confidence: associationConfidence(frames, handshake),
@@ -487,7 +494,9 @@ type rfOverlap struct {
 // RF similarity links devices that repeatedly share the same five-minute
 // sensor window on the same AP. The gate needs two or more distinct sensors and
 // two or more distinct windows: one sensor can only report proximity it cannot
-// corroborate, so proximity stays unknown below that floor.
+// corroborate, so proximity stays unknown below that floor. The CTE is named
+// rf_sensor_windows because OVERLAPS is a reserved word in PostgreSQL and cannot
+// be used as a relation name.
 func (s *Service) investigationRFSimilarityLinks(ctx context.Context, tx *sql.Tx, request InvestigationRequest, response *InvestigationResponse, freshCutoff time.Time) error {
 	devices, _ := nodeIdentifiers(response.Nodes)
 	remaining := request.EdgeLimit - len(response.Links)
@@ -504,7 +513,7 @@ func (s *Service) investigationRFSimilarityLinks(ctx context.Context, tx *sql.Tx
 	}
 	clauses = append(clauses, "b.source_mac > a.source_mac")
 	args = append(args, remaining)
-	rows, err := tx.QueryContext(ctx, `WITH overlaps AS (
+	rows, err := tx.QueryContext(ctx, `WITH rf_sensor_windows AS (
   SELECT a.source_mac AS left_mac, b.source_mac AS right_mac,
          a.window_start, a.sensor_id, a.bssid, a.last_observed_at,
          row_number() OVER (PARTITION BY a.source_mac, b.source_mac
@@ -525,7 +534,7 @@ SELECT left_mac, right_mac,
          to_char(window_start AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') || ':' ||
          sensor_id || ':' || bssid || ':' || left_mac,
          '|' ORDER BY rn) FILTER (WHERE rn <= 3), '') AS evidence_refs
-FROM overlaps
+FROM rf_sensor_windows
 GROUP BY left_mac, right_mac
 ORDER BY sensor_count DESC, window_count DESC, left_mac, right_mac
 LIMIT $`+fmt.Sprint(len(args)), args...)
@@ -551,13 +560,15 @@ LIMIT $`+fmt.Sprint(len(args)), args...)
 		}
 		response.RFProximity = "inferred"
 		response.Links = append(response.Links, InvestigationLink{
-			ID:         "rf-sim:" + left + ":" + right,
-			Source:     "device:" + left,
-			Target:     "device:" + right,
-			Type:       "inferred_rf_similarity",
-			Evidence:   splitEvidenceRefs(refs),
-			Confidence: rfConfidence(overlap.sensors, overlap.windows),
-			Fresh:      !lastSeen.Before(freshCutoff),
+			ID:          "rf-sim:" + left + ":" + right,
+			Source:      "device:" + left,
+			Target:      "device:" + right,
+			Type:        "inferred_rf_similarity",
+			Weight:      float64(overlap.windows),
+			WeightBasis: "time_overlap_windows",
+			Evidence:    splitEvidenceRefs(refs),
+			Confidence:  rfConfidence(overlap.sensors, overlap.windows),
+			Fresh:       !lastSeen.Before(freshCutoff),
 		})
 	}
 	if err := rows.Err(); err != nil {

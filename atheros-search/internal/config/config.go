@@ -55,6 +55,7 @@ type Config struct {
 	GRPCPort                      int
 	HTTPPort                      int
 	MetricsPort                   int
+	ProfilingEnabled              bool
 	LogLevel                      string
 	SearchTimeout                 time.Duration
 	HybridAlpha                   float64
@@ -106,6 +107,7 @@ func Load() (Config, error) {
 		GRPCPort:                      envInt("ATHSEARCH_GRPC_PORT", 50051),
 		HTTPPort:                      envInt("ATHSEARCH_HTTP_PORT", 8080),
 		MetricsPort:                   envInt("ATHSEARCH_METRICS_PORT", 9090),
+		ProfilingEnabled:              envBool("ATHSEARCH_PROFILING_ENABLED", false),
 		LogLevel:                      envStringViper(env, "ATHSEARCH_LOG_LEVEL", "info"),
 		SearchTimeout:                 time.Duration(envInt("ATHSEARCH_SEARCH_TIMEOUT_MS", 10000)) * time.Millisecond,
 		HybridAlpha:                   envFloat("ATHSEARCH_HYBRID_ALPHA", 0.5),

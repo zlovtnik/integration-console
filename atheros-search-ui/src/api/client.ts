@@ -2,6 +2,9 @@ import { env } from '~/env';
 import { getAccessToken } from '~/auth/session';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
+  ActivityBucket,
+  Communication,
+  EmbeddingWork,
   ETLHealth,
   ExplainResponse,
   GraphFilters,
@@ -11,8 +14,12 @@ import type {
   InventoryNode,
   InventoryNodeKind,
   InventoryResponse,
+  InvestigationFreshness,
   MergeDecision,
   MergeDecisionResponse,
+  Neighbour,
+  RecordContextResponse,
+  RecordFields,
   SearchRequest,
   SearchResponse,
   SearchResult,
@@ -438,6 +445,233 @@ export function normalizeExplainResponse(
   const method = firstString(raw.ranking_method, raw.rankingMethod);
   if (method) normalized.ranking_method = method;
   if (sourceKind) normalized.source_kind = sourceKind;
+  const record = raw.record;
+  if (typeof record === 'object' && record !== null && !Array.isArray(record)) {
+    normalized.record = normalizeRecordFields(record as RawRecord);
+  }
+  return normalized;
+}
+
+type RawRecord = Record<string, unknown>;
+
+function normalizeRecordFields(raw: RawRecord): RecordFields {
+  return {
+    document_id: firstString(raw.document_id, raw.documentId),
+    source_key: firstString(raw.source_key, raw.sourceKey),
+    source_table: firstString(raw.source_table, raw.sourceTable),
+    source_kind: firstString(raw.source_kind, raw.sourceKind),
+    status: firstString(raw.status),
+    source_mac: firstString(raw.source_mac, raw.sourceMac),
+    bssid: firstString(raw.bssid),
+    ssid: firstString(raw.ssid),
+    location_id: firstString(raw.location_id, raw.locationId),
+    sensor_id: firstString(raw.sensor_id, raw.sensorId),
+    frame_subtype: firstString(raw.frame_subtype, raw.frameSubtype),
+    classification: firstString(raw.classification),
+    title: firstString(raw.title),
+    producer: firstString(raw.producer),
+    tags: stringArray(raw.tags),
+    security_flags: firstNumber(raw.security_flags, raw.securityFlags),
+    handshake_captured: firstBoolean(
+      false,
+      raw.handshake_captured,
+      raw.handshakeCaptured,
+    ),
+    host: firstString(raw.host),
+    blocked: optionalBoolean(raw.blocked) ?? null,
+    proxy_event_type: firstString(raw.proxy_event_type, raw.proxyEventType),
+    proxy_device_id: firstString(raw.proxy_device_id, raw.proxyDeviceId),
+    observed_at: firstString(raw.observed_at, raw.observedAt) || undefined,
+    window_start: firstString(raw.window_start, raw.windowStart) || undefined,
+    window_end: firstString(raw.window_end, raw.windowEnd) || undefined,
+    normalized_sha256: firstString(raw.normalized_sha256, raw.normalizedSha256),
+    detail_json: detailJson(raw.detail_json, raw.detailJson),
+    sequence_tokens: stringArray(
+      raw.sequence_tokens ?? raw.sequenceTokens,
+    ) as string[],
+  };
+}
+
+function normalizeActivityBucket(raw: RawRecord): ActivityBucket {
+  return {
+    window_start: firstString(raw.window_start, raw.windowStart),
+    frame_count: firstNumber(raw.frame_count, raw.frameCount),
+    frames_per_minute: firstNumber(
+      raw.frames_per_minute,
+      raw.framesPerMinute,
+    ),
+    sensor_count: firstNumber(raw.sensor_count, raw.sensorCount),
+    ap_count: firstNumber(raw.ap_count, raw.apCount),
+    rssi_avg_dbm: optionalNumber(raw.rssi_avg_dbm, raw.rssiAvgDbm),
+    first_observed_at: firstString(raw.first_observed_at, raw.firstObservedAt),
+    last_observed_at: firstString(raw.last_observed_at, raw.lastObservedAt),
+  };
+}
+
+function normalizeCommunication(raw: RawRecord): Communication {
+  const weight = optionalNumber(raw.weight);
+  const basis = firstString(raw.weight_basis, raw.weightBasis);
+  return {
+    type: firstString(raw.type),
+    from: firstString(raw.from),
+    to: firstString(raw.to),
+    weight,
+    weight_basis: basis || undefined,
+    confidence: firstString(raw.confidence) || undefined,
+    fresh: firstBoolean(false, raw.fresh),
+    evidence_references: stringArray(
+      raw.evidence_references ?? raw.evidenceReferences,
+    ),
+  };
+}
+
+function normalizeNeighbour(raw: RawRecord): Neighbour {
+  return {
+    mac: firstString(raw.mac),
+    label: firstString(raw.label),
+    ap_count: firstNumber(raw.ap_count, raw.apCount),
+    window_count: firstNumber(raw.window_count, raw.windowCount),
+    sensor_count: firstNumber(raw.sensor_count, raw.sensorCount),
+    frame_count: firstNumber(raw.frame_count, raw.frameCount),
+    rssi_avg_dbm: optionalNumber(raw.rssi_avg_dbm, raw.rssiAvgDbm),
+    first_observed_at: firstString(raw.first_observed_at, raw.firstObservedAt),
+    last_observed_at: firstString(raw.last_observed_at, raw.lastObservedAt),
+    corroborated: firstBoolean(false, raw.corroborated),
+  };
+}
+
+function normalizeEmbeddingWork(raw: RawRecord): EmbeddingWork {
+  return {
+    embedding_kind: firstString(raw.embedding_kind, raw.embeddingKind),
+    embedding_model: firstString(raw.embedding_model, raw.embeddingModel),
+    status: firstString(raw.status),
+    attempt_count: firstNumber(raw.attempt_count, raw.attemptCount),
+    max_attempts: firstNumber(raw.max_attempts, raw.maxAttempts),
+    next_attempt_at: firstString(raw.next_attempt_at, raw.nextAttemptAt),
+    last_error: firstString(raw.last_error, raw.lastError) || undefined,
+    completed_at: firstString(raw.completed_at, raw.completedAt),
+    embedded_at: firstString(raw.embedded_at, raw.embeddedAt),
+    content_sha256: firstString(raw.content_sha256, raw.contentSha256),
+    has_vector: firstBoolean(false, raw.has_vector, raw.hasVector),
+    content_current: firstBoolean(false, raw.content_current, raw.contentCurrent),
+  };
+}
+
+function normalizeFreshness(raw: unknown): InvestigationFreshness | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const value = raw as RawRecord;
+  const status = firstString(value.coverage_status, value.coverageStatus);
+  return {
+    source_watermark: firstString(
+      value.source_watermark,
+      value.sourceWatermark,
+    ),
+    projection_watermark: firstString(
+      value.projection_watermark,
+      value.projectionWatermark,
+    ),
+    coverage_status: (
+      ['complete', 'partial', 'stalled', 'unknown'] as const
+    ).includes(status as 'complete')
+      ? (status as InvestigationFreshness['coverage_status'])
+      : 'unknown',
+    coverage_reason: firstString(value.coverage_reason, value.coverageReason),
+  };
+}
+
+export function normalizeRecordContext(
+  raw: Record<string, unknown>,
+): RecordContextResponse {
+  const record = raw.record;
+  const related = raw.related;
+  const activity = Array.isArray(raw.activity) ? raw.activity : [];
+  const embedding = Array.isArray(raw.embedding) ? raw.embedding : [];
+  const totals = (raw.activity_totals ?? raw.activityTotals) as RawRecord | undefined;
+  const normalized: RecordContextResponse = {
+    source_key: firstString(raw.source_key, raw.sourceKey),
+    found: firstBoolean(false, raw.found),
+    window_start: firstString(raw.window_start, raw.windowStart),
+    window_end: firstString(raw.window_end, raw.windowEnd),
+    bucket_minutes: firstNumber(raw.bucket_minutes, raw.bucketMinutes),
+    activity: activity.map((item) => normalizeActivityBucket(item as RawRecord)),
+    activity_totals: {
+      buckets: firstNumber(totals?.buckets),
+      frame_count: firstNumber(totals?.frame_count, totals?.frameCount),
+      frames_per_minute: firstNumber(
+        totals?.frames_per_minute,
+        totals?.framesPerMinute,
+      ),
+      peak_frames_per_minute: firstNumber(
+        totals?.peak_frames_per_minute,
+        totals?.peakFramesPerMinute,
+      ),
+      peak_window: firstString(totals?.peak_window, totals?.peakWindow),
+      sensor_count: firstNumber(totals?.sensor_count, totals?.sensorCount),
+      ap_count: firstNumber(totals?.ap_count, totals?.apCount),
+      first_observed_at: firstString(
+        totals?.first_observed_at,
+        totals?.firstObservedAt,
+      ),
+      last_observed_at: firstString(
+        totals?.last_observed_at,
+        totals?.lastObservedAt,
+      ),
+    },
+    // `related` is null when the record has no MAC or BSSID to anchor on. That
+    // is distinct from an anchor with no neighbours, which is an empty array.
+    related:
+      typeof related === 'object' && related !== null && !Array.isArray(related)
+        ? {
+            anchor_kind: firstString(
+              (related as RawRecord).anchor_kind,
+              (related as RawRecord).anchorKind,
+            ),
+            anchor_id: firstString(
+              (related as RawRecord).anchor_id,
+              (related as RawRecord).anchorId,
+            ),
+            neighbours: (
+              ((related as RawRecord).neighbours as unknown[]) ?? []
+            ).map((item) => normalizeNeighbour(item as RawRecord)),
+            links: (((related as RawRecord).links as unknown[]) ?? []).map(
+              (item) => normalizeCommunication(item as RawRecord),
+            ),
+            rf_proximity: firstString(
+              (related as RawRecord).rf_proximity,
+              (related as RawRecord).rfProximity,
+            ),
+            signal_quality: firstString(
+              (related as RawRecord).signal_quality,
+              (related as RawRecord).signalQuality,
+            ),
+            confidence: firstString((related as RawRecord).confidence),
+            focus_reason: firstString(
+              (related as RawRecord).focus_reason,
+              (related as RawRecord).focusReason,
+            ),
+          }
+        : null,
+    embedding: embedding.map((item) =>
+      normalizeEmbeddingWork(item as RawRecord),
+    ),
+    generated_at: firstString(raw.generated_at, raw.generatedAt),
+  };
+  const recordFields =
+    typeof record === 'object' && record !== null && !Array.isArray(record)
+      ? normalizeRecordFields(record as RawRecord)
+      : undefined;
+  if (recordFields) normalized.record = recordFields;
+  const reason = firstString(
+    raw.related_unavailable_reason,
+    raw.relatedUnavailableReason,
+  );
+  if (reason) normalized.related_unavailable_reason = reason;
+  const note = firstString(raw.embedding_note, raw.embeddingNote);
+  if (note) normalized.embedding_note = note;
+  const freshness = normalizeFreshness(raw.freshness);
+  if (freshness) normalized.freshness = freshness;
   return normalized;
 }
 
@@ -767,6 +1001,25 @@ export const api = {
     await request<RawExplainResponse>(
       '/v1/explain/scoped',
       { method: 'POST', body: JSON.stringify(body) },
+      signal,
+    ),
+  ),
+
+  recordContext: async (
+    sourceKey: string,
+    params: { kind?: string; window?: string; bucket_minutes?: number } = {},
+    signal?: AbortSignal,
+  ) => normalizeRecordContext(
+    await request<Record<string, unknown>>(
+      buildUrl(`/v1/records/${encodeURIComponent(sourceKey)}/context`, {
+        kind: params.kind,
+        window: params.window,
+        bucket_minutes:
+          params.bucket_minutes === undefined
+            ? undefined
+            : String(params.bucket_minutes),
+      }),
+      {},
       signal,
     ),
   ),

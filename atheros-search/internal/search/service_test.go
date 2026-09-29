@@ -238,9 +238,10 @@ func TestExplainDetailsDistinguishesMissingFromUnrankedRecord(t *testing.T) {
 	defer database.Close()
 	svc := &Service{Pool: database}
 
-	mock.ExpectQuery("SELECT source_kind").
+	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
+	mock.ExpectQuery("FROM atheros_search.search_documents").
 		WithArgs("present-key", "device").
-		WillReturnRows(sqlmock.NewRows([]string{"source_kind"}).AddRow("device"))
+		WillReturnRows(resolvedRows("present-key", "device", observed))
 	present, err := svc.ExplainDetails(context.Background(), &searchv1.ExplainRequest{
 		SourceKey: "present-key", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE,
 	})
@@ -248,10 +249,15 @@ func TestExplainDetailsDistinguishesMissingFromUnrankedRecord(t *testing.T) {
 	require.True(t, present.Found)
 	require.False(t, present.ScoresAvailable)
 	require.Equal(t, "device", present.SourceKind)
+	// The record itself is carried even when no query ranks it, so a direct
+	// link has something to show.
+	require.NotNil(t, present.Record)
+	require.Equal(t, "aa:bb:cc:dd:ee:01", present.Record.SourceMAC)
+	require.Equal(t, `{"event_type":"probe"}`, present.DetailJSON)
 
-	mock.ExpectQuery("SELECT source_kind").
+	mock.ExpectQuery("FROM atheros_search.search_documents").
 		WithArgs("missing-key", "device").
-		WillReturnRows(sqlmock.NewRows([]string{"source_kind"}))
+		WillReturnRows(emptyResolvedRows())
 	missing, err := svc.ExplainDetails(context.Background(), &searchv1.ExplainRequest{
 		SourceKey: "missing-key", Kind: searchv1.SearchKind_SEARCH_KIND_DEVICE,
 	})
@@ -259,5 +265,6 @@ func TestExplainDetailsDistinguishesMissingFromUnrankedRecord(t *testing.T) {
 	require.False(t, missing.Found)
 	require.False(t, missing.ScoresAvailable)
 	require.Empty(t, missing.SourceKind)
+	require.Nil(t, missing.Record)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

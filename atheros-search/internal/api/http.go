@@ -273,6 +273,55 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 			Msg("explain completed")
 		writeJSON(w, http.StatusOK, resp)
 	})
+	registerJSON(mux, "GET", "/v1/records/{source_key}/context", tokenAuth, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
+		start := time.Now()
+		reqID := requestID()
+		log := loggerWithTrace(logger.With().Str("endpoint", "/v1/records/context").Str("method", "GET").Str("req_id", reqID).Logger(), r.Context())
+
+		sourceKey := params["source_key"]
+		query := r.URL.Query()
+		window, err := parseDurationParam(query.Get("window"), search.RecordContextDefaultWindow, search.RecordContextMaxWindow)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		bucket, err := parseIntParam(query.Get("bucket_minutes"), search.RecordContextDefaultBuckets, 1, 24*60)
+		if err != nil {
+			// A malformed query parameter is a client error. httpStatusFromError
+			// has no substring match for these messages and would report 500.
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		kind := parseKind(query.Get("kind"))
+		log = log.With().
+			Bool("has_source_key", strings.TrimSpace(sourceKey) != "").
+			Str("source_key_hash", shortHash(sourceKey)).
+			Dur("window", window).
+			Int("bucket_minutes", bucket).
+			Str("kind", kind.String()).
+			Logger()
+		log.Info().Msg("record context request started")
+
+		resp, err := svc.RecordContext(r.Context(), search.RecordContextRequest{
+			SourceKey:     sourceKey,
+			Kind:          kind,
+			Window:        window,
+			BucketMinutes: bucket,
+		})
+		if err != nil {
+			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("record context failed")
+			writeError(w, httpStatusFromError(err), err.Error())
+			return
+		}
+		log.Info().
+			Dur("latency", time.Since(start)).
+			Bool("found", resp.Found).
+			Int("activity_buckets", len(resp.Activity)).
+			Int("embedding_jobs", len(resp.Embedding)).
+			Bool("has_related", resp.Related != nil).
+			Msg("record context completed")
+		writeJSON(w, http.StatusOK, resp)
+	})
 	registerJSON(mux, "GET", "/v1/suggest/filters", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
 		reqID := requestID()
@@ -860,6 +909,41 @@ func writeSearchError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, httpStatusFromError(err), err.Error())
+}
+
+// parseDurationParam accepts a Go duration string and clamps it to a ceiling.
+// An absent value selects the default, so callers never have to branch.
+func parseDurationParam(value string, fallback, ceiling time.Duration) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, errors.New("window must be a duration such as 24h")
+	}
+	if parsed <= 0 {
+		return 0, errors.New("window must be positive")
+	}
+	if parsed > ceiling {
+		return ceiling, nil
+	}
+	return parsed, nil
+}
+
+func parseIntParam(value string, fallback, min, max int) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, errors.New("bucket_minutes must be an integer")
+	}
+	if parsed < min || parsed > max {
+		return 0, fmt.Errorf("bucket_minutes must be between %d and %d", min, max)
+	}
+	return parsed, nil
 }
 
 func parseKind(value string) searchv1.SearchKind {

@@ -3,6 +3,7 @@ import {
   createEffect,
   createMemo,
   createResource,
+  createSignal,
   For,
   on,
   onCleanup,
@@ -14,8 +15,12 @@ import { BoostBadge } from '~/components/BoostBadge';
 import { JsonViewer } from '~/components/JsonViewer';
 import { ScoreChart } from '~/components/ScoreChart';
 import { SkeletonExplain } from '~/components/SkeletonExplain';
+import { ActivityTimeline } from '~/components/explain/ActivityTimeline';
+import { EmbeddingWorkList } from '~/components/explain/EmbeddingWork';
+import { RecordSummary } from '~/components/explain/RecordSummary';
+import { RelatedDevices } from '~/components/explain/RelatedDevices';
 import { isSameOriginRelative } from '~/auth/returnPath';
-import type { SearchFilters } from '~/api/types';
+import type { RecordContextResponse, SearchFilters } from '~/api/types';
 import type { Rfc3339Timestamp } from '~/utils/timestamp';
 
 export default function ExplainPage() {
@@ -45,7 +50,7 @@ export default function ExplainPage() {
       kind: kindParam(),
     };
   };
-const scopedFilters = (): SearchFilters => {
+  const scopedFilters = (): SearchFilters => {
     const filters: SearchFilters = {};
     const list = (key: string) =>
       typeof searchParams[key] === 'string'
@@ -63,10 +68,24 @@ const scopedFilters = (): SearchFilters => {
     if (typeof searchParams.before === 'string') filters.observed_before = searchParams.before as Rfc3339Timestamp;
     return filters;
   };
+
+  const track = <T,>(signal: AbortSignal, run: () => Promise<T>) => {
+    const controller = new AbortController();
+    controllers.add(controller);
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+    return run()
+      .catch((cause) => {
+        if (!controller.signal.aborted) throw cause;
+        return undefined;
+      })
+      .finally(() => controllers.delete(controller));
+  };
+
+  // Ranking and context are independent, so a context failure degrades to the
+  // ranking view instead of blanking the page.
   const [explain] = createResource(explainRequest, async (request) => {
     const controller = new AbortController();
     controllers.add(controller);
-
     try {
       return await api.explainScoped({
         source_key: request.sourceKey,
@@ -74,6 +93,34 @@ const scopedFilters = (): SearchFilters => {
         kind: request.kind,
         filters: scopedFilters(),
       }, controller.signal);
+    } finally {
+      controllers.delete(controller);
+    }
+  });
+
+  // Ranking and context are independent. The context failure is captured here
+  // rather than left to the resource: a rejected fetcher leaves the resource in
+  // its loading state and raises an unhandled rejection, which would both hide
+  // the failure and surface a noisy rejection on every failed call.
+  const [contextFailure, setContextFailure] = createSignal('');
+  const [context] = createResource(explainRequest, async (request) => {
+    const controller = new AbortController();
+    controllers.add(controller);
+    try {
+      return await api.recordContext(
+        request.sourceKey,
+        { kind: request.kind },
+        controller.signal,
+      );
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setContextFailure(
+          cause instanceof Error && cause.message
+            ? cause.message
+            : 'Record context is unavailable.',
+        );
+      }
+      return undefined;
     } finally {
       controllers.delete(controller);
     }
@@ -95,14 +142,52 @@ const scopedFilters = (): SearchFilters => {
 
   const recordMissing = () => {
     const details = explain();
-    if (!details) return false;
-    return details.found === false;
+    if (details) return details.found === false;
+    return context()?.found === false;
   };
 
   const scoresAvailable = () => {
     const details = explain();
-    if (!details) return true;
+    if (!details) return false;
     return details.scores_available !== false;
+  };
+
+  // The record comes from the context call when it succeeded, because it carries
+  // the resolved fields for a link that was opened cold, with no search result
+  // behind it.
+  const record = () => context()?.record ?? explain()?.record;
+
+  const detailPayload = () => {
+    const fields = record();
+    if (fields?.detail_json) return fields.detail_json;
+    const details = explain();
+    if (details?.detail_json) return details.detail_json;
+    return JSON.stringify(details ?? {}, null, 2);
+  };
+
+  const sequenceTokens = () => {
+    const fromRecord = record()?.sequence_tokens;
+    if (fromRecord && fromRecord.length > 0) return fromRecord;
+    return explain()?.sequence_tokens ?? [];
+  };
+
+  const graphHref = (mac: string) => {
+    const scope = new URLSearchParams();
+    scope.set('mac', mac);
+    const kind = kindParam();
+    if (kind) scope.set('kind', kind);
+    return `/graph?${scope.toString()}`;
+  };
+
+  const contextError = () => contextFailure();
+
+  const reportFreshness = (data: RecordContextResponse) => {
+    const status = data.freshness?.coverage_status;
+    if (status && status !== 'complete') {
+      const reason = data.freshness?.coverage_reason;
+      return `Projection coverage is ${status}${reason ? `: ${reason}` : ''}. Absent evidence below is not proof of absence.`;
+    }
+    return '';
   };
 
   createEffect(
@@ -132,8 +217,8 @@ const scopedFilters = (): SearchFilters => {
 
       <h1 class="display">Explain: {sourceKey()}</h1>
       <p>
-        Ranking is calculated directly for this record in the current location,
-        sensor, AP, identifier, and time scope. Back restores the investigation.
+        The stored record, when it was observed and how fast, which devices
+        shared its sensor windows, and the embedding work behind it.
       </p>
 
       <Show when={!explain.loading} fallback={<SkeletonExplain />}>
@@ -146,109 +231,190 @@ const scopedFilters = (): SearchFilters => {
           }
         >
           <Show
-            when={explain()}
+            when={!recordMissing()}
             fallback={
-              <div class="state-banner" role="status">
-                No explanation is available for this record.
-              </div>
+              <section class="explain-section explain-section--wide">
+                <h2 class="heading-1">Record not found</h2>
+                <p class="caption" role="status">
+                  No record with this source key exists in the current data set.
+                  It may have been removed or the link may be outdated.
+                </p>
+              </section>
             }
           >
-            {(details) => (
-              <div class="explain-grid">
+            <div class="explain-grid">
+              <section
+                aria-labelledby="record-title"
+                class="explain-section"
+              >
+                <h2 id="record-title" class="heading-1">
+                  Record
+                </h2>
                 <Show
-                  when={recordMissing()}
+                  when={record()}
                   fallback={
-                    <section
-                      aria-labelledby="score-breakdown-title"
-                      class="explain-section"
-                    >
-                      <h2 id="score-breakdown-title" class="heading-1">
-                        Raw ranking factors
-                      </h2>
-                      <Show
-                        when={scoresAvailable()}
-                        fallback={
-                          <p class="caption" role="status">
-                            Ranking scores are unavailable for this record. Open
-                            an explanation from a search result or graph node to
-                            compare it against a query.
-                          </p>
-                        }
-                      >
-                        <ScoreChart explain={details()} />
-                      </Show>
-                    </section>
+                    <p class="caption" role="status">
+                      {contextError() ||
+                        'The record fields are unavailable. Open this link from a search result to see them.'}
+                    </p>
                   }
                 >
-                  <section
-                    aria-labelledby="missing-record-title"
-                    class="explain-section"
-                  >
-                    <h2 id="missing-record-title" class="heading-1">
-                      Record not found
-                    </h2>
+                  {(fields) => <RecordSummary record={fields()} />}
+                </Show>
+              </section>
+
+              <section
+                aria-labelledby="activity-title"
+                class="explain-section"
+              >
+                <h2 id="activity-title" class="heading-1">
+                  Activity
+                </h2>
+                <Show
+                  when={context()}
+                  fallback={
                     <p class="caption" role="status">
-                      No record with this source key exists in the current data
-                      set. It may have been removed or the link may be outdated.
+                      {contextError() || 'Activity is loading.'}
                     </p>
-                  </section>
+                  }
+                >
+                  {(data) => (
+                    <>
+                      <ActivityTimeline
+                        activity={data().activity}
+                        totals={data().activity_totals}
+                        bucketMinutes={data().bucket_minutes}
+                      />
+                      <Show when={reportFreshness(data())}>
+                        <p class="caption" role="status">
+                          {reportFreshness(data())}
+                        </p>
+                      </Show>
+                    </>
+                  )}
                 </Show>
+              </section>
 
-                <section aria-labelledby="boost-title" class="explain-section">
-                  <h2 id="boost-title" class="heading-1">
-                    Boost reasons
+              <section
+                aria-labelledby="related-title"
+                class="explain-section"
+              >
+                <h2 id="related-title" class="heading-1">
+                  Related devices
+                </h2>
+                <RelatedDevices
+                  related={context()?.related ?? null}
+                  unavailableReason={
+                    // contextError() is an empty string when nothing has
+                    // failed, and `??` would pass that through as a reason,
+                    // rendering a blank message instead of the default.
+                    context()?.related_unavailable_reason ||
+                    contextError() ||
+                    (context.loading
+                      ? 'Related devices are loading.'
+                      : undefined)
+                  }
+                  graphHref={graphHref}
+                />
+              </section>
+
+              <section
+                aria-labelledby="embedding-title"
+                class="explain-section"
+              >
+                <h2 id="embedding-title" class="heading-1">
+                  Embedding work
+                </h2>
+                <Show
+                  when={context()}
+                  fallback={
+                    <p class="caption" role="status">
+                      {contextError() || 'Embedding state is loading.'}
+                    </p>
+                  }
+                >
+                  {(data) => (
+                    <EmbeddingWorkList
+                      work={data().embedding}
+                      note={data().embedding_note}
+                    />
+                  )}
+                </Show>
+              </section>
+
+              <Show when={sequenceTokens().length > 0}>
+                <section
+                  aria-labelledby="sequence-title"
+                  class="explain-section"
+                >
+                  <h2 id="sequence-title" class="heading-1">
+                    Frame sequence
                   </h2>
-                  <Show
-                    when={(details().boost_reasons ?? []).length > 0}
-                    fallback={<p class="caption">No boost reasons.</p>}
-                  >
-                    <div class="badge-row">
-                      <For each={details().boost_reasons}>
-                        {(reason) => <BoostBadge reason={reason} />}
-                      </For>
-                    </div>
-                  </Show>
+                  <p class="caption">
+                    Log-probability of this event sequence under the trained
+                    model. Lower scores indicate more unusual ordering.
+                  </p>
+                  <div class="sequence-row">
+                    <For each={sequenceTokens()}>
+                      {(token) => <span class="sequence-token">{token}</span>}
+                    </For>
+                    <span class="mono">
+                      {(explain()?.sequence_log_prob ?? 0).toFixed(3)}
+                    </span>
+                  </div>
                 </section>
+              </Show>
 
-                <Show when={(details().sequence_tokens ?? []).length > 0}>
+              <Show
+                when={scoresAvailable()}
+                fallback={
                   <section
-                    aria-labelledby="sequence-title"
+                    aria-labelledby="boost-title"
                     class="explain-section"
                   >
-                    <h2 id="sequence-title" class="heading-1">
-                      Frame sequence
+                    <h2 id="boost-title" class="heading-1">
+                      Boost reasons
                     </h2>
-                    <p class="caption">
-                      Log-probability of this event sequence under the trained
-                      model. Lower scores indicate more unusual ordering.
-                    </p>
-                    <div class="sequence-row">
-                      <For each={details().sequence_tokens}>
-                        {(token) => <span class="sequence-token">{token}</span>}
-                      </For>
-                      <span class="mono">
-                        {(details().sequence_log_prob ?? 0).toFixed(3)}
-                      </span>
-                    </div>
+                    <Show
+                      when={(explain()?.boost_reasons ?? []).length > 0}
+                      fallback={
+                        <p class="caption">No boost reasons.</p>
+                      }
+                    >
+                      <div class="badge-row">
+                        <For each={explain()?.boost_reasons ?? []}>
+                          {(reason) => <BoostBadge reason={reason} />}
+                        </For>
+                      </div>
+                    </Show>
                   </section>
-                </Show>
+                }
+              >
+                <details class="explain-section">
+                  <summary class="heading-1">Ranking factors</summary>
+                  <div class="explain-section-body">
+                    <ScoreChart explain={explain()!} />
+                    <Show when={(explain()?.boost_reasons ?? []).length > 0}>
+                      <div class="badge-row">
+                        <For each={explain()?.boost_reasons ?? []}>
+                          {(reason) => <BoostBadge reason={reason} />}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </details>
+              </Show>
 
-                <section
-                  aria-labelledby="payload-title"
-                  class="explain-section explain-section--wide"
-                >
-                  <h2 id="payload-title" class="heading-1">
-                    Detail payload
-                  </h2>
-                  <JsonViewer
-                    json={
-                      details().detail_json ??
-                      JSON.stringify(details(), null, 2)
-                    }
-                  />
-                </section>
-              </div>
-            )}
+              <section
+                aria-labelledby="payload-title"
+                class="explain-section explain-section--wide"
+              >
+                <h2 id="payload-title" class="heading-1">
+                  Detail payload
+                </h2>
+                <JsonViewer json={detailPayload()} />
+              </section>
+            </div>
           </Show>
         </Show>
       </Show>

@@ -159,6 +159,139 @@ export interface ExplainResponse {
   /** False only when the record itself is absent. */
   found?: boolean;
   source_kind?: string;
+  /** The stored document, present whenever the record was resolved. */
+  record?: RecordFields;
+}
+
+/** One indexed search document: identity, place, time and kind. */
+export interface RecordFields {
+  document_id: string;
+  source_key: string;
+  source_table: string;
+  source_kind: string;
+  status: string;
+  source_mac: string;
+  bssid: string;
+  ssid: string;
+  location_id: string;
+  sensor_id: string;
+  frame_subtype: string;
+  classification: string;
+  title: string;
+  producer: string;
+  tags: string[];
+  security_flags: number;
+  handshake_captured: boolean;
+  host: string;
+  blocked?: boolean | null;
+  proxy_event_type: string;
+  proxy_device_id: string;
+  observed_at?: string | undefined;
+  window_start?: string | undefined;
+  window_end?: string | undefined;
+  normalized_sha256: string;
+  detail_json: string;
+  sequence_tokens?: string[] | undefined;
+}
+
+/** One time slice of observed traffic for the anchored identifier. */
+export interface ActivityBucket {
+  window_start: string;
+  frame_count: number;
+  frames_per_minute: number;
+  sensor_count: number;
+  ap_count: number;
+  rssi_avg_dbm?: number | undefined;
+  first_observed_at?: string | undefined;
+  last_observed_at?: string | undefined;
+}
+
+export interface ActivityTotals {
+  buckets: number;
+  frame_count: number;
+  frames_per_minute: number;
+  peak_frames_per_minute: number;
+  peak_window?: string | undefined;
+  sensor_count: number;
+  ap_count: number;
+  first_observed_at?: string | undefined;
+  last_observed_at?: string | undefined;
+}
+
+/**
+ * A relationship in the anchored identifier's neighbourhood. `weight` is an
+ * evidence count in the unit `weight_basis` names, never a probability.
+ */
+export interface Communication {
+  type: string;
+  from: string;
+  to: string;
+  weight?: number | undefined;
+  weight_basis?: string | undefined;
+  confidence?: string | undefined;
+  fresh: boolean;
+  evidence_references?: string[];
+}
+
+/** Another identifier sharing retained sensor windows with the anchor. */
+export interface Neighbour {
+  mac: string;
+  label: string;
+  ap_count: number;
+  window_count: number;
+  sensor_count: number;
+  frame_count: number;
+  rssi_avg_dbm?: number | undefined;
+  first_observed_at: string;
+  last_observed_at: string;
+  /** True when overlap is corroborated across two or more sensors. */
+  corroborated: boolean;
+}
+
+export interface RelatedContext {
+  anchor_kind: string;
+  anchor_id: string;
+  neighbours: Neighbour[];
+  links: Communication[];
+  rf_proximity: string;
+  signal_quality: string;
+  confidence: string;
+  focus_reason?: string | undefined;
+}
+
+/** Embedding state for this exact document. */
+export interface EmbeddingWork {
+  embedding_kind: string;
+  embedding_model: string;
+  status: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at?: string;
+  last_error?: string | undefined;
+  completed_at?: string | undefined;
+  embedded_at?: string | undefined;
+  content_sha256?: string | undefined;
+  has_vector: boolean;
+  /** True when a stored vector matches the live document's content hash. */
+  content_current: boolean;
+}
+
+export interface RecordContextResponse {
+  source_key: string;
+  found: boolean;
+  record?: RecordFields | undefined;
+  window_start: string;
+  window_end: string;
+  bucket_minutes: number;
+  activity: ActivityBucket[];
+  activity_totals: ActivityTotals;
+  /** Null when the record has no MAC or BSSID to anchor on. */
+  related?: RelatedContext | null;
+  related_unavailable_reason?: string | undefined;
+  embedding: EmbeddingWork[];
+  embedding_note?: string | undefined;
+  freshness?: InvestigationFreshness | undefined;
+  generated_at: string;
 }
 
 export interface EntityChoice {
@@ -225,11 +358,26 @@ export interface InvestigationEvidence {
   last_observed_at: string;
 }
 
+/** Projection coverage for the evidence tables. Not a data-quality score. */
+export interface InvestigationFreshness {
+  source_watermark?: string;
+  projection_watermark?: string;
+  coverage_status: 'complete' | 'partial' | 'stalled' | 'unknown';
+  coverage_reason?: string;
+}
+
 export interface InvestigationLink {
   id: string;
   source: string;
   target: string;
-  type: 'observed_ap_context' | 'confirmed_identity' | 'inferred_rf_similarity';
+  type:
+    | 'observed_ap_context'
+    | 'confirmed_identity'
+    | 'inferred_rf_similarity'
+    | 'association_frame_evidence';
+  /** Evidence count in the unit `weight_basis` names. Never a probability. */
+  weight?: number;
+  weight_basis?: string;
   evidence_references?: string[];
   confidence: string;
   fresh: boolean;
@@ -246,12 +394,7 @@ export interface InvestigationResponse {
   evidence_total: number;
   signal_quality: string;
   confidence: string;
-  freshness: {
-    source_watermark?: string;
-    projection_watermark?: string;
-    coverage_status: 'complete' | 'partial' | 'stalled' | 'unknown';
-    coverage_reason?: string;
-  };
+  freshness: InvestigationFreshness;
   focus_reason?: string;
   generated_at: string;
 }

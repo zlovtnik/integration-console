@@ -131,8 +131,13 @@ Key routes:
 |---|---|---|
 | `POST` | `/v1/search` | Protobuf-JSON search |
 | `POST` | `/v1/search/stream` | NDJSON results followed by `{"type":"done"}` |
-| `GET` | `/v1/explain/{source_key}` | Ranking explanation |
+| `GET` | `/v1/explain/{source_key}` | Ranking explanation plus the resolved record |
+| `POST` | `/v1/explain/scoped` | Ranking explanation scoped to the caller's filters |
+| `GET` | `/v1/records/{source_key}/context` | Record investigation: activity rate, neighbourhood, embedding work |
 | `GET` | `/v1/suggest/filters` | Filter suggestions |
+| `POST` | `/v1/investigation` | Bounded investigation anchored on a device MAC or AP BSSID |
+| `POST` | `/v1/evidence` | Bounded evidence page for the same anchor |
+| `POST` | `/v1/network-map` | Per-device and per-AP network overview |
 | `POST` | `/v1/graph` | Graph projection query |
 | `POST` | `/v1/inventory` | Inventory query |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Persist a final merge decision (operator/admin) |
@@ -265,9 +270,16 @@ Error mapping for the saved-view routes:
 ## Observability and privacy
 
 The service exposes Prometheus metrics on its dedicated metrics port. HTTP and
-gRPC tracing hooks exist, but server startup does not currently initialize an
-OTLP exporter/provider; `OTEL_EXPORTER_OTLP_ENDPOINT` alone does not export
-spans.
+gRPC tracing is initialized at startup and exports spans through the configured
+OTLP endpoint. Optional Go profiling endpoints (`/debug/pprof/`) can be enabled
+on the metrics listener with `ATHSEARCH_PROFILING_ENABLED=true`; they are
+disabled by default and are never registered on the public HTTP listener.
+Network policy currently limits the metrics listener to Prometheus, so profile
+captures must use an approved internal operational path. CPU and trace captures
+can hold a request open and consume resources; keep captures short and
+serialize them operationally. CPU captures are capped at 30 seconds and trace
+captures at 5 seconds. Heap, allocation, goroutine, block, and mutex profiles
+are available through the standard pprof index when profiling is enabled.
 
 Do not log raw queries, source keys, session IDs, tokens or full MACs. See
 [Atheros Search Privacy](../../../docs/atheros-search-privacy.md).
