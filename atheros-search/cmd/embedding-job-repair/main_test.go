@@ -33,3 +33,41 @@ func TestRetryFailedJobsDoesNotResetPendingJobs(t *testing.T) {
 	require.NoError(t, retryFailedJobs(context.Background(), database, zerolog.Nop()))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestCancelSupersededDryRunCountsWithoutWriting(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51353))
+
+	require.NoError(t, cancelSupersededJobs(context.Background(), database, zerolog.Nop(), 5000, true))
+	// No Exec expectation is registered, so any write fails the test.
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCancelSupersededClearsLeaseColumns(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	// The embedding_jobs_lease_ck CHECK rejects a non-leased row that keeps an
+	// owner, so the transition has to clear the lease columns with the status.
+	mock.ExpectExec("SET status = 'cancelled',\\s+owner_id = NULL,\\s+lease_token = NULL,\\s+lease_expires_at = NULL").
+		WithArgs(5000).
+		WillReturnResult(sqlmock.NewResult(0, 5000))
+
+	require.NoError(t, cancelSupersededJobs(context.Background(), database, zerolog.Nop(), 5000, false))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCancelSupersededOnlyTargetsNonTerminalJobsOnSupersededDocuments(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+	mock.ExpectExec("document\\.status = 'superseded'\\s+AND job\\.status IN \\('pending', 'leased'\\)").
+		WithArgs(10).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+
+	require.NoError(t, cancelSupersededJobs(context.Background(), database, zerolog.Nop(), 10, false))
+	require.NoError(t, mock.ExpectationsWereMet())
+}

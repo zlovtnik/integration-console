@@ -23,8 +23,10 @@ func main() {
 	tlsKey := flag.String("tls-key", envOr("ATHSEARCH_POSTGRES_TLS_KEY_FILE", ""), "Postgres TLS key file")
 	tlsServer := flag.String("tls-server", envOr("ATHSEARCH_POSTGRES_TLS_SERVER_NAME", ""), "Postgres TLS server name")
 	schemaManifestSHA256 := flag.String("schema-manifest-sha256", envOr("ATHSEARCH_SCHEMA_MANIFEST_SHA256", ""), "Expected schema manifest SHA-256 (required)")
-	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only)")
+	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only), cancel-superseded")
 	staleMinutes := flag.Int("stale-minutes", 60, "Minutes after which a leased job is considered stale")
+	cancelLimit := flag.Int("limit", 5000, "Maximum rows for cancel-superseded per invocation")
+	dryRun := flag.Bool("dry-run", false, "Count affected rows without writing (cancel-superseded)")
 	flag.Parse()
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
@@ -64,6 +66,12 @@ func main() {
 		}
 	case "retry-failed":
 		err = retryFailedJobs(ctx, db, logger)
+	case "cancel-superseded":
+		if *cancelLimit <= 0 {
+			err = fmt.Errorf("limit must be greater than zero")
+		} else {
+			err = cancelSupersededJobs(ctx, db, logger, *cancelLimit, *dryRun)
+		}
 	default:
 		logger.Fatal().Str("action", *action).Msg("unknown action")
 	}
@@ -252,6 +260,66 @@ WHERE status = 'failed'
 	}
 	affected, _ := result.RowsAffected()
 	logger.Info().Int64("retried", affected).Msg("retryable embedding jobs reset to pending; terminal diagnostics retained")
+	return nil
+}
+
+// cancelSupersededJobs retires pending work whose document no longer serves
+// search. Octopus cancels these as it supersedes a document
+// (SearchPreparationSql.cancelSupersededEmbeddingJobs), but jobs superseded
+// before that path shipped are still claimable: the vector would describe
+// content the index has already replaced, and the worker spends a scarce
+// backend slot on it. This mirrors that statement's status transition and
+// lease clearing, driven by a join instead of an explicit id list.
+func cancelSupersededJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, limit int, dryRun bool) error {
+	if dryRun {
+		var matched int64
+		if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM atheros_search.embedding_jobs AS job
+JOIN atheros_search.search_documents AS document USING (document_id)
+WHERE document.status = 'superseded'
+  AND job.status IN ('pending', 'leased')
+`).Scan(&matched); err != nil {
+			return fmt.Errorf("count superseded embedding jobs: %w", err)
+		}
+		logger.Info().
+			Int64("matching", matched).
+			Int("limit", limit).
+			Msg("dry run: pending embedding jobs on superseded documents; no rows written")
+		return nil
+	}
+
+	// UPDATE has no LIMIT, so bound the target set in a CTE. The job_id order
+	// keeps successive invocations walking the queue instead of racing over
+	// the same head.
+	result, err := db.ExecContext(ctx, `
+WITH targets AS (
+  SELECT job.job_id
+  FROM atheros_search.embedding_jobs AS job
+  JOIN atheros_search.search_documents AS document USING (document_id)
+  WHERE document.status = 'superseded'
+    AND job.status IN ('pending', 'leased')
+  ORDER BY job.job_id
+  LIMIT $1
+)
+UPDATE atheros_search.embedding_jobs AS job
+SET status = 'cancelled',
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+FROM targets
+WHERE job.job_id = targets.job_id
+`, limit)
+	if err != nil {
+		return fmt.Errorf("cancel superseded embedding jobs: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("embedding jobs on superseded documents cancelled")
+	if affected < int64(limit) {
+		logger.Info().Int64("cancelled", affected).Msg("fewer rows matched than the limit; nothing left to cancel")
+	}
 	return nil
 }
 

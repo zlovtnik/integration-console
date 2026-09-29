@@ -60,6 +60,8 @@ repository root.
 - Repair embedding jobs: `go run ./cmd/embedding-job-repair -action=status`.
 - Reset stale jobs: `go run ./cmd/embedding-job-repair -action=reset-stale -stale-minutes=60`.
 - Retry failed jobs: `go run ./cmd/embedding-job-repair -action=retry-failed`.
+- Count dead work first: `go run ./cmd/embedding-job-repair -action=cancel-superseded -dry-run`.
+- Reap jobs on superseded documents: `go run ./cmd/embedding-job-repair -action=cancel-superseded -limit=5000`.
 
 ## Verification
 - Run package-targeted `go test` for changed packages, then `go test ./...`
