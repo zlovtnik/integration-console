@@ -38,6 +38,17 @@ func httpStatusFromError(err error) int {
 	if errors.Is(err, search.ErrAnnotationConflict) {
 		return http.StatusConflict
 	}
+	if errors.Is(err, search.ErrSavedViewNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, search.ErrSavedViewDuplicateName) ||
+		errors.Is(err, search.ErrSavedViewStaleRevision) ||
+		errors.Is(err, search.ErrSavedViewLimitReached) {
+		return http.StatusConflict
+	}
+	if errors.Is(err, search.ErrSavedViewUnavailable) {
+		return http.StatusForbidden
+	}
 	var unavailable *search.UnavailableError
 	if errors.As(err, &unavailable) {
 		return http.StatusServiceUnavailable
@@ -52,7 +63,7 @@ func httpStatusFromError(err error) int {
 	if strings.Contains(msg, "request body too large") {
 		return http.StatusRequestEntityTooLarge
 	}
-	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported inventory sort") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "invalid entity") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "must not be negative") || strings.Contains(msg, "must be a MAC") || strings.Contains(msg, "must be ap or device") || strings.Contains(msg, "must be router or server") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") || strings.Contains(msg, "invalid AP BSSID") || strings.Contains(msg, "invalid device MAC") {
+	if strings.Contains(msg, "unsupported search kind") || strings.Contains(msg, "has been retired") || strings.Contains(msg, "unsupported inventory grouping") || strings.Contains(msg, "unsupported inventory sort") || strings.Contains(msg, "unsupported scope") || strings.Contains(msg, "invalid page_cursor") || strings.Contains(msg, "invalid entity") || strings.Contains(msg, "page_cursor requires") || strings.Contains(msg, "must be before") || strings.Contains(msg, "must not be negative") || strings.Contains(msg, "must be a MAC") || strings.Contains(msg, "must be ap or device") || strings.Contains(msg, "must be router or server") || strings.Contains(msg, "is required") || strings.Contains(msg, "unsupported merge decision") || strings.Contains(msg, "unsupported graph kind") || strings.Contains(msg, "invalid AP BSSID") || strings.Contains(msg, "invalid device MAC") || strings.Contains(msg, "invalid saved view") || strings.Contains(msg, "unsupported saved view") {
 		return http.StatusBadRequest
 	}
 	if strings.Contains(msg, "merge candidate not found") {
@@ -336,6 +347,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 		}
 		writeJSON(w, http.StatusOK, resp)
 	})
+	registerSavedViews(mux, tokenAuth, svc, logger)
 	registerJSON(mux, "POST", "/v1/explain/scoped", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		body, ok := readRequestBody(w, r)
 		if !ok {
@@ -788,12 +800,13 @@ func registerJSON(mux *runtime.ServeMux, method, pattern string, tokenAuth *auth
 
 func registerJSONRoles(mux *runtime.ServeMux, method, pattern string, tokenAuth *auth.TokenAuth, allowedRoles []string, handler func(http.ResponseWriter, *http.Request, map[string]string)) {
 	mux.HandlePath(method, pattern, func(w http.ResponseWriter, r *http.Request, params map[string]string) {
-		decision, subject := tokenAuth.AuthorizeWithSubject(r.Context(), r.Header.Get("Authorization"), allowedRoles...)
+		decision, identity := tokenAuth.AuthorizeIdentity(r.Context(), r.Header.Get("Authorization"), allowedRoles...)
 		if decision != auth.DecisionAuthorized {
 			writeAuthorizationError(w, decision)
 			return
 		}
-		handler(w, r.WithContext(auth.WithSubject(r.Context(), subject)), params)
+		ctx := auth.WithSubject(r.Context(), identity.Display)
+		handler(w, r.WithContext(auth.WithIdentity(ctx, identity)), params)
 	})
 }
 
