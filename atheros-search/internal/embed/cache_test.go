@@ -30,10 +30,11 @@ func TestQueryCacheExpiresAndInvalidatesByKind(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestCircuitClientOpensAfterFailures(t *testing.T) {
-	client := NewCircuitClient(failingClient{})
-	client.FailureMax = 2
-	client.OpenBackoff = time.Hour
+func TestLaneClientOpensAfterFailures(t *testing.T) {
+	client := NewLaneClient(failingClient{}, LaneInteractive)
+	client.Circuit.FailureMax = 2
+	client.Circuit.BaseBackoff = time.Hour
+	client.Circuit.MaxBackoff = time.Hour
 
 	_, err := client.Embed(context.Background(), []string{"a"}, KindEvent)
 	require.Error(t, err)
@@ -42,6 +43,7 @@ func TestCircuitClientOpensAfterFailures(t *testing.T) {
 	require.Equal(t, CircuitOpen, client.State())
 	_, err = client.Embed(context.Background(), []string{"a"}, KindEvent)
 	require.ErrorIs(t, err, ErrCircuitOpen)
+	require.ErrorIs(t, err, ErrBackendUnavailable)
 }
 
 type failingClient struct{}

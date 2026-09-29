@@ -69,12 +69,19 @@ message SearchResponse {
   int64 query_id = 1;
   repeated SearchResult results = 2;
   SearchMode mode_used = 3;
+  // Human-readable degradation note. It is intentionally safe to show to
+  // operators and never carries raw backend, SQL or circuit text.
   string fallback_reason = 4;
   int32 dense_result_count = 5;
   int32 sparse_result_count = 6;
   int32 fused_result_count = 7;
   google.protobuf.Struct report = 8;
   google.protobuf.Timestamp generated_at = 9;
+  // Stable degradation code, for example "embedding_backend_unavailable".
+  // Additive: clients that only read fallback_reason keep working.
+  string fallback_code = 10;
+  // When the semantic backend expects to accept traffic again, if known.
+  optional google.protobuf.Timestamp fallback_retry_at = 11;
 }
 
 message SearchResult {

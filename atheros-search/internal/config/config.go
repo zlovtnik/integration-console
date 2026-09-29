@@ -49,6 +49,7 @@ type Config struct {
 	EmbeddingBackend              string
 	EmbeddingMaxTokens            int
 	EmbeddingRequestConcurrency   int
+	EmbeddingQueryReservedSlots   int
 	EmbeddingTokenizerConcurrency int
 	EmbeddingMaxChunksPerInput    int
 	GRPCPort                      int
@@ -99,6 +100,7 @@ func Load() (Config, error) {
 		EmbeddingBackend:              firstEnv("ATHSEARCH_EMBEDDING_BACKEND", "VECTOR_EMBEDDING_URL"),
 		EmbeddingMaxTokens:            envInt("ATHSEARCH_EMBEDDING_MAX_TOKENS", DefaultEmbeddingMaxTokens),
 		EmbeddingRequestConcurrency:   envInt("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY", embed.DefaultRequestConcurrency),
+		EmbeddingQueryReservedSlots:   envInt("ATHSEARCH_EMBEDDING_QUERY_RESERVED_SLOTS", embed.DefaultQueryReservedSlots),
 		EmbeddingTokenizerConcurrency: envInt("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY", embed.DefaultTokenizerConcurrency),
 		EmbeddingMaxChunksPerInput:    envInt("ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT", DefaultEmbeddingMaxChunksPerInput),
 		GRPCPort:                      envInt("ATHSEARCH_GRPC_PORT", 50051),
@@ -276,6 +278,15 @@ func validateEmbedding(cfg Config) error {
 	}
 	if cfg.EmbeddingRequestConcurrency < 1 {
 		return fmt.Errorf("ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY must be positive, got %d", cfg.EmbeddingRequestConcurrency)
+	}
+	if cfg.EmbeddingQueryReservedSlots < 0 {
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_QUERY_RESERVED_SLOTS must not be negative, got %d", cfg.EmbeddingQueryReservedSlots)
+	}
+	if cfg.EmbeddingQueryReservedSlots >= cfg.EmbeddingRequestConcurrency {
+		return fmt.Errorf(
+			"ATHSEARCH_EMBEDDING_QUERY_RESERVED_SLOTS must be smaller than ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY, got %d >= %d",
+			cfg.EmbeddingQueryReservedSlots, cfg.EmbeddingRequestConcurrency,
+		)
 	}
 	if cfg.EmbeddingTokenizerConcurrency < 1 {
 		return fmt.Errorf("ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY must be positive, got %d", cfg.EmbeddingTokenizerConcurrency)

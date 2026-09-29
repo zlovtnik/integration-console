@@ -101,26 +101,44 @@ func main() {
 		logger.Fatal().Err(err).Msg("configure auth")
 	}
 
+	m := metrics.New()
+
 	var embedder embed.Client
+	var lanes *embed.LanedClient
+	var scheduler *embed.Scheduler
+	var preflight *embed.Preflight
 	if cfg.EmbeddingBackend == "" {
 		embedder = embed.NoopClient{Dimensions: cfg.EmbeddingDimensions}
+		preflight = embed.NewPreflight(nil)
 		logger.Warn().Msg("embedding backend not configured; using zero-vector embedder")
 	} else {
 		httpEmbedder := embed.NewHTTPClient(cfg.EmbeddingBackend, cfg.EmbeddingModel, cfg.EmbeddingDimensions, cfg.EmbeddingMaxTokens)
-		httpEmbedder.RequestConcurrency = cfg.EmbeddingRequestConcurrency
+		scheduler = embed.NewScheduler(cfg.EmbeddingRequestConcurrency, cfg.EmbeddingQueryReservedSlots)
+		httpEmbedder.Scheduler = scheduler
 		httpEmbedder.TokenizerConcurrency = cfg.EmbeddingTokenizerConcurrency
 		httpEmbedder.MaxChunksPerInput = cfg.EmbeddingMaxChunksPerInput
-		if cfg.WorkerEnabled {
-			validationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			err := httpEmbedder.ValidateTokenizer(validationCtx)
-			cancel()
-			if err != nil {
-				logger.Fatal().Err(err).Msg("validate llama.cpp tokenizer endpoints before starting embedding workers")
+		lanes = embed.NewLanedClient(httpEmbedder)
+		embedder = lanes
+		// Tokenizer compatibility is proven in the background instead of at
+		// startup: a bad backend must not keep the whole API from serving the
+		// keyword paths it does not need.
+		preflight = embed.NewPreflight(httpEmbedder.ValidateTokenizer)
+		preflight.SetTransitionObserver(func(state embed.PreflightState) {
+			m.SetEmbeddingPreflightState(string(state))
+			log := logger.Info()
+			if state != embed.PreflightCompatible {
+				log = logger.Warn()
 			}
-		}
-		embedder = embed.NewCircuitClient(httpEmbedder)
+			log.Str("preflight_state", string(state)).Msg("embedding tokenizer preflight state changed")
+		})
+		m.SetEmbeddingPreflightState(string(preflight.Snapshot().State))
+		go preflight.Run(ctx)
 	}
-	m := metrics.New()
+	if scheduler != nil {
+		scheduler.SetWaitObserver(func(lane embed.Lane, waited time.Duration, _ bool) {
+			m.ObserveEmbeddingSlotWait(string(lane), waited)
+		})
+	}
 	embedder = embed.CachedClient{
 		Inner: embedder,
 		Cache: embed.NewQueryCache(4096, 60*time.Second),
@@ -129,9 +147,18 @@ func main() {
 	}
 
 	healthMon := worker.NewHealthMonitor(pool.DB)
+	healthMon.SetSemanticStatus(&semanticStatus{preflight: preflight, lanes: lanes})
+	healthMon.SetSnapshotObserver(func(snapshot worker.ETLHealth) {
+		m.SetEmbeddingJobs(snapshot.EmbeddingPending, snapshot.EmbeddingLeased, snapshot.EmbeddingCompleted, snapshot.EmbeddingFailed)
+		m.EmbeddingOldestPendingAge.Set(oldestJobAge(snapshot.OldestEmbeddingJobAt))
+		m.EmbeddingActiveWorkers.Set(float64(len(snapshot.Workers)))
+		m.SearchableWirelessEvents.Set(float64(snapshot.WirelessEvents24h))
+		m.WirelessNewestObservation.Set(newestObservationUnix(snapshot.WirelessLastObservedAt))
+	})
 	// Prime the snapshot cache so the first /v1/etl/* caller is not the one
 	// that pays for a full refresh of the multi-million row queue gauges.
 	go healthMon.Warm(ctx)
+	go publishEmbeddingGauges(ctx, m, scheduler, lanes, preflight)
 
 	var workerPool *worker.Pool
 	if cfg.WorkerEnabled {
@@ -142,6 +169,7 @@ func main() {
 			BatchSize:         cfg.EmbeddingBatchSize,
 			WorkerID:          cfg.WorkerID,
 			HealthPollEnabled: true,
+			ClaimGate:         preflight,
 		}, logger)
 		workerPool.Start(ctx)
 	} else {
@@ -149,7 +177,7 @@ func main() {
 	}
 
 	svc := search.NewService(pool.DB, embedder, cfg, m, logger)
-	readiness := &health.Readiness{DB: pool, Embedder: embedder, Metrics: m, SchemaReadyRequired: cfg.SchemaReadyRequired}
+	readiness := &health.Readiness{DB: pool, Metrics: m, SchemaReadyRequired: cfg.SchemaReadyRequired}
 
 	metricsServer, err := metrics.StartServer(ctx, cfg.MetricsPort)
 	if err != nil {
@@ -198,6 +226,7 @@ func logStartupConfig(logger zerolog.Logger, cfg config.Config) {
 		Bool("worker_enabled", cfg.WorkerEnabled).
 		Int("worker_count", cfg.WorkerCount).
 		Int("embedding_request_concurrency", cfg.EmbeddingRequestConcurrency).
+		Int("embedding_query_reserved_slots", cfg.EmbeddingQueryReservedSlots).
 		Int("embedding_tokenizer_concurrency", cfg.EmbeddingTokenizerConcurrency).
 		Int("embedding_max_chunks_per_input", cfg.EmbeddingMaxChunksPerInput).
 		Msg("atheros-search Postgres query facade configured")
@@ -207,8 +236,119 @@ type workerEmbedderAdapter struct {
 	embedder embed.Client
 }
 
+// Embed tags the call as bulk work so the shared scheduler reserves
+// interactive slots and the worker breaker, not the query breaker, records the
+// outcome.
 func (a *workerEmbedderAdapter) Embed(ctx context.Context, texts []string, kind string) ([][]float32, error) {
-	return a.embedder.Embed(ctx, texts, embed.Kind(kind))
+	return a.embedder.Embed(embed.WithLane(ctx, embed.LaneWorker), texts, embed.Kind(kind))
+}
+
+// semanticStatus publishes the live preflight and per-lane circuit view that
+// /v1/etl/health merges over its cached database snapshot.
+type semanticStatus struct {
+	preflight *embed.Preflight
+	lanes     *embed.LanedClient
+}
+
+func (s *semanticStatus) QuerySemantic() worker.SemanticHealth {
+	return s.forLane(embed.LaneInteractive)
+}
+
+func (s *semanticStatus) WorkerSemantic() worker.SemanticHealth {
+	return s.forLane(embed.LaneWorker)
+}
+
+func (s *semanticStatus) forLane(lane embed.Lane) worker.SemanticHealth {
+	if s == nil {
+		return worker.SemanticHealth{}
+	}
+	status := worker.SemanticHealth{PreflightState: string(embed.PreflightDisabled), CircuitState: string(embed.CircuitClosed)}
+	ready := false
+	if s.preflight != nil {
+		preflight := s.preflight.Snapshot()
+		status.PreflightState = string(preflight.State)
+		ready = preflight.State == embed.PreflightCompatible
+		status.LastCheckAt = timeOrNil(preflight.LastCheckAt)
+		status.LastSuccessAt = timeOrNil(preflight.LastSuccessAt)
+	}
+	if laneClient := s.lanes.Lane(lane); laneClient != nil {
+		circuit := laneClient.Snapshot()
+		status.CircuitState = string(circuit.State)
+		if check := timeOrNil(circuit.LastCheckAt); check != nil {
+			status.LastCheckAt = check
+		}
+		if success := timeOrNil(circuit.LastSuccessAt); success != nil {
+			status.LastSuccessAt = success
+		}
+		status.RetryAt = timeOrNil(circuit.RetryAt)
+	}
+	status.BackendAvailable = ready && status.CircuitState != string(embed.CircuitOpen)
+	return status
+}
+
+// publishEmbeddingGauges refreshes the breaker, limiter and preflight series
+// on a fixed cadence so an idle deployment still scrapes fresh state.
+func publishEmbeddingGauges(ctx context.Context, m *metrics.Metrics, scheduler *embed.Scheduler, lanes *embed.LanedClient, preflight *embed.Preflight) {
+	publish := func() {
+		if preflight != nil {
+			m.SetEmbeddingPreflightState(string(preflight.Snapshot().State))
+		}
+		if scheduler == nil || lanes == nil {
+			return
+		}
+		ready := preflight != nil && preflight.Ready()
+		for _, lane := range embed.Lanes {
+			laneClient := lanes.Lane(lane)
+			state := embed.CircuitClosed
+			if laneClient != nil {
+				state = laneClient.State()
+			}
+			m.SetEmbeddingCircuitState(string(lane), string(state))
+			capacity := scheduler.Total()
+			if lane == embed.LaneWorker {
+				capacity = scheduler.WorkerMax()
+			}
+			m.SetEmbeddingLimiter(string(lane), scheduler.InUse(lane), capacity)
+			m.SetEmbeddingBackendAvailable(string(lane), ready && state != embed.CircuitOpen)
+		}
+	}
+	publish()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			publish()
+		}
+	}
+}
+
+func oldestJobAge(oldest *time.Time) float64 {
+	if oldest == nil {
+		return 0
+	}
+	age := time.Since(*oldest).Seconds()
+	if age < 0 {
+		return 0
+	}
+	return age
+}
+
+func newestObservationUnix(newest *time.Time) float64 {
+	if newest == nil {
+		return 0
+	}
+	return float64(newest.Unix())
+}
+
+func timeOrNil(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	utc := value.UTC()
+	return &utc
 }
 
 func runHealthcheck() error {

@@ -62,6 +62,10 @@ test('inventory uses bounded server presets, pages, and independent row detail',
   await expect(pipelineHealth).toContainText(
     '12 wireless events indexed in the last 24h, newest',
   );
+  await expect(pipelineHealth).toContainText('(projection fresh)');
+  await expect(pipelineHealth).toContainText(
+    'Semantic search: query lane compatible, closed, available · worker lane compatible, closed, available.',
+  );
   expect(requests[0]).toMatchObject({
     scope: 'page',
     page_size: 50,
@@ -623,3 +627,35 @@ for (const width of [375, 768, 1024, 1440]) {
     },
   );
 }
+
+test('pipeline status surfaces a stale wireless projection and dead semantic lanes', async ({
+  page,
+}) => {
+  await mockApi(page, {
+    etlHealth: {
+      wireless_projection: 'critical',
+      wireless_last_observed_at: '2026-09-27T02:00:00Z',
+      embedding_dependency: 'degraded',
+      query_semantic: {
+        preflight: 'incompatible',
+        circuit_state: 'open',
+        backend_available: false,
+        retry_at: '2026-09-27T12:10:00Z',
+      },
+      worker_semantic: {
+        preflight: 'pending',
+        circuit_state: 'closed',
+        backend_available: false,
+      },
+    },
+  });
+
+  await page.goto('/inventory?loc=lab&sensor=sensor-a');
+  const pipelineHealth = page
+    .getByRole('status')
+    .filter({ hasText: 'Pipeline health' });
+  await expect(pipelineHealth).toContainText('(projection critical)');
+  await expect(pipelineHealth).toContainText(
+    'Semantic search: query lane incompatible, open, unavailable · worker lane pending, closed, unavailable.',
+  );
+});

@@ -428,18 +428,25 @@ func (x *SearchRequest) GetSessionId() string {
 }
 
 type SearchResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	QueryId           int64                  `protobuf:"varint,1,opt,name=query_id,json=queryId,proto3" json:"query_id,omitempty"`
-	Results           []*SearchResult        `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
-	ModeUsed          SearchMode             `protobuf:"varint,3,opt,name=mode_used,json=modeUsed,proto3,enum=atheros.search.v1.SearchMode" json:"mode_used,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	QueryId  int64                  `protobuf:"varint,1,opt,name=query_id,json=queryId,proto3" json:"query_id,omitempty"`
+	Results  []*SearchResult        `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
+	ModeUsed SearchMode             `protobuf:"varint,3,opt,name=mode_used,json=modeUsed,proto3,enum=atheros.search.v1.SearchMode" json:"mode_used,omitempty"`
+	// Human-readable degradation note. It is intentionally safe to show to
+	// operators and never carries raw backend, SQL or circuit text.
 	FallbackReason    string                 `protobuf:"bytes,4,opt,name=fallback_reason,json=fallbackReason,proto3" json:"fallback_reason,omitempty"`
 	DenseResultCount  int32                  `protobuf:"varint,5,opt,name=dense_result_count,json=denseResultCount,proto3" json:"dense_result_count,omitempty"`
 	SparseResultCount int32                  `protobuf:"varint,6,opt,name=sparse_result_count,json=sparseResultCount,proto3" json:"sparse_result_count,omitempty"`
 	FusedResultCount  int32                  `protobuf:"varint,7,opt,name=fused_result_count,json=fusedResultCount,proto3" json:"fused_result_count,omitempty"`
 	Report            *structpb.Struct       `protobuf:"bytes,8,opt,name=report,proto3" json:"report,omitempty"`
 	GeneratedAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Stable degradation code, for example "embedding_backend_unavailable".
+	// Additive: clients that only read fallback_reason keep working.
+	FallbackCode string `protobuf:"bytes,10,opt,name=fallback_code,json=fallbackCode,proto3" json:"fallback_code,omitempty"`
+	// When the semantic backend expects to accept traffic again, if known.
+	FallbackRetryAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=fallback_retry_at,json=fallbackRetryAt,proto3,oneof" json:"fallback_retry_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SearchResponse) Reset() {
@@ -531,6 +538,20 @@ func (x *SearchResponse) GetReport() *structpb.Struct {
 func (x *SearchResponse) GetGeneratedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.GeneratedAt
+	}
+	return nil
+}
+
+func (x *SearchResponse) GetFallbackCode() string {
+	if x != nil {
+		return x.FallbackCode
+	}
+	return ""
+}
+
+func (x *SearchResponse) GetFallbackRetryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FallbackRetryAt
 	}
 	return nil
 }
@@ -1093,7 +1114,7 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\x05top_k\x18\x05 \x01(\x05R\x04topK\x12%\n" +
 	"\x0emin_similarity\x18\x06 \x01(\x02R\rminSimilarity\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\a \x01(\tR\tsessionId\"\xc7\x03\n" +
+	"session_id\x18\a \x01(\tR\tsessionId\"\xcf\x04\n" +
 	"\x0eSearchResponse\x12\x19\n" +
 	"\bquery_id\x18\x01 \x01(\x03R\aqueryId\x129\n" +
 	"\aresults\x18\x02 \x03(\v2\x1f.atheros.search.v1.SearchResultR\aresults\x12:\n" +
@@ -1103,7 +1124,11 @@ const file_atheros_search_v1_search_proto_rawDesc = "" +
 	"\x13sparse_result_count\x18\x06 \x01(\x05R\x11sparseResultCount\x12,\n" +
 	"\x12fused_result_count\x18\a \x01(\x05R\x10fusedResultCount\x12/\n" +
 	"\x06report\x18\b \x01(\v2\x17.google.protobuf.StructR\x06report\x12=\n" +
-	"\fgenerated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\"\xac\b\n" +
+	"\fgenerated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12#\n" +
+	"\rfallback_code\x18\n" +
+	" \x01(\tR\ffallbackCode\x12K\n" +
+	"\x11fallback_retry_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampH\x00R\x0ffallbackRetryAt\x88\x01\x01B\x14\n" +
+	"\x12_fallback_retry_at\"\xac\b\n" +
 	"\fSearchResult\x12\x1d\n" +
 	"\n" +
 	"source_key\x18\x01 \x01(\tR\tsourceKey\x12!\n" +
@@ -1232,24 +1257,25 @@ var file_atheros_search_v1_search_proto_depIdxs = []int32{
 	1,  // 6: atheros.search.v1.SearchResponse.mode_used:type_name -> atheros.search.v1.SearchMode
 	12, // 7: atheros.search.v1.SearchResponse.report:type_name -> google.protobuf.Struct
 	11, // 8: atheros.search.v1.SearchResponse.generated_at:type_name -> google.protobuf.Timestamp
-	11, // 9: atheros.search.v1.SearchResult.observed_at:type_name -> google.protobuf.Timestamp
-	10, // 10: atheros.search.v1.SearchResult.highlights:type_name -> atheros.search.v1.SearchResult.HighlightsEntry
-	11, // 11: atheros.search.v1.SearchResult.window_start:type_name -> google.protobuf.Timestamp
-	11, // 12: atheros.search.v1.SearchResult.window_end:type_name -> google.protobuf.Timestamp
-	0,  // 13: atheros.search.v1.ExplainRequest.kind:type_name -> atheros.search.v1.SearchKind
-	3,  // 14: atheros.search.v1.SearchService.Search:input_type -> atheros.search.v1.SearchRequest
-	3,  // 15: atheros.search.v1.SearchService.SearchStream:input_type -> atheros.search.v1.SearchRequest
-	6,  // 16: atheros.search.v1.SearchService.Explain:input_type -> atheros.search.v1.ExplainRequest
-	8,  // 17: atheros.search.v1.SearchService.SuggestFilters:input_type -> atheros.search.v1.SuggestFiltersRequest
-	4,  // 18: atheros.search.v1.SearchService.Search:output_type -> atheros.search.v1.SearchResponse
-	5,  // 19: atheros.search.v1.SearchService.SearchStream:output_type -> atheros.search.v1.SearchResult
-	7,  // 20: atheros.search.v1.SearchService.Explain:output_type -> atheros.search.v1.ExplainResponse
-	9,  // 21: atheros.search.v1.SearchService.SuggestFilters:output_type -> atheros.search.v1.SuggestFiltersResponse
-	18, // [18:22] is the sub-list for method output_type
-	14, // [14:18] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 9: atheros.search.v1.SearchResponse.fallback_retry_at:type_name -> google.protobuf.Timestamp
+	11, // 10: atheros.search.v1.SearchResult.observed_at:type_name -> google.protobuf.Timestamp
+	10, // 11: atheros.search.v1.SearchResult.highlights:type_name -> atheros.search.v1.SearchResult.HighlightsEntry
+	11, // 12: atheros.search.v1.SearchResult.window_start:type_name -> google.protobuf.Timestamp
+	11, // 13: atheros.search.v1.SearchResult.window_end:type_name -> google.protobuf.Timestamp
+	0,  // 14: atheros.search.v1.ExplainRequest.kind:type_name -> atheros.search.v1.SearchKind
+	3,  // 15: atheros.search.v1.SearchService.Search:input_type -> atheros.search.v1.SearchRequest
+	3,  // 16: atheros.search.v1.SearchService.SearchStream:input_type -> atheros.search.v1.SearchRequest
+	6,  // 17: atheros.search.v1.SearchService.Explain:input_type -> atheros.search.v1.ExplainRequest
+	8,  // 18: atheros.search.v1.SearchService.SuggestFilters:input_type -> atheros.search.v1.SuggestFiltersRequest
+	4,  // 19: atheros.search.v1.SearchService.Search:output_type -> atheros.search.v1.SearchResponse
+	5,  // 20: atheros.search.v1.SearchService.SearchStream:output_type -> atheros.search.v1.SearchResult
+	7,  // 21: atheros.search.v1.SearchService.Explain:output_type -> atheros.search.v1.ExplainResponse
+	9,  // 22: atheros.search.v1.SearchService.SuggestFilters:output_type -> atheros.search.v1.SuggestFiltersResponse
+	19, // [19:23] is the sub-list for method output_type
+	15, // [15:19] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_atheros_search_v1_search_proto_init() }
@@ -1258,6 +1284,7 @@ func file_atheros_search_v1_search_proto_init() {
 		return
 	}
 	file_atheros_search_v1_search_proto_msgTypes[0].OneofWrappers = []any{}
+	file_atheros_search_v1_search_proto_msgTypes[2].OneofWrappers = []any{}
 	file_atheros_search_v1_search_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

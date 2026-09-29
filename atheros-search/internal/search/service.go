@@ -83,21 +83,24 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 	var qvec []float32
 	var modeUsed = mode
 	var fallbackReason string
+	var fallbackCode string
+	var fallbackRetryAt time.Time
 
 	if mode == searchv1.SearchMode_SEARCH_MODE_DENSE || mode == searchv1.SearchMode_SEARCH_MODE_HYBRID {
 		kindForQuery := embed.Kind(embeddingKindForSourceKind(kinds[0]))
 		text := BuildQueryText(query, embeddingKindForSourceKind(kinds[0]))
 		vectors, err := s.Embedder.Embed(searchCtx, []string{text}, kindForQuery)
 		if err == nil && len(vectors) == 0 {
-			err = errors.New("embedding backend returned no vectors")
+			err = &embed.BackendUnavailableError{Cause: embed.ErrInvalidResponse}
 		}
 		if err != nil {
 			if mode == searchv1.SearchMode_SEARCH_MODE_DENSE {
-				return nil, err
+				return nil, searchLegFailure(searchCtx, err)
 			}
 			modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
-			fallbackReason = err.Error()
-			s.observeFallback(metricsKind, "backend_unavailable")
+			fallbackCode, fallbackReason = semanticFallbackCode(err)
+			fallbackRetryAt = semanticRetryAt(err)
+			s.observeFallback(metricsKind, fallbackCode)
 		} else {
 			qvec = vectors[0]
 			denseResults, err = Dense(searchCtx, s.Pool, qvec, s.Config.EmbeddingModel, opts)
@@ -106,15 +109,17 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 					return nil, err
 				}
 				modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
-				fallbackReason = err.Error()
+				fallbackCode = FallbackDenseQueryFailed
+				fallbackReason = msgDenseQueryFailed
 				qvec = nil
-				s.observeFallback(metricsKind, "dense_query_failed")
+				s.observeFallback(metricsKind, fallbackCode)
 			} else if mode == searchv1.SearchMode_SEARCH_MODE_HYBRID && len(denseResults) == 0 {
 				if reason, ok := s.noEmbeddingCoverageReason(searchCtx, kinds); ok {
 					modeUsed = searchv1.SearchMode_SEARCH_MODE_SPARSE
+					fallbackCode = FallbackNoEmbeddingCoverage
 					fallbackReason = reason
 					qvec = nil
-					s.observeFallback(metricsKind, "no_kind_coverage")
+					s.observeFallback(metricsKind, fallbackCode)
 				}
 			}
 		}
@@ -158,10 +163,14 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 		QueryId:           queryID,
 		ModeUsed:          modeUsed,
 		FallbackReason:    fallbackReason,
+		FallbackCode:      fallbackCode,
 		DenseResultCount:  int32(len(denseResults)),
 		SparseResultCount: int32(len(sparseResults)),
 		FusedResultCount:  int32(len(fused)),
 		Results:           make([]*searchv1.SearchResult, 0, len(fused)),
+	}
+	if !fallbackRetryAt.IsZero() {
+		resp.FallbackRetryAt = timestamppb.New(fallbackRetryAt)
 	}
 	for _, result := range fused {
 		resp.Results = append(resp.Results, toProtoResult(result))

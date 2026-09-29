@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/auth"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/health"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/worker"
@@ -35,6 +37,13 @@ func httpStatusFromError(err error) int {
 	}
 	if errors.Is(err, search.ErrAnnotationConflict) {
 		return http.StatusConflict
+	}
+	var unavailable *search.UnavailableError
+	if errors.As(err, &unavailable) {
+		return http.StatusServiceUnavailable
+	}
+	if errors.Is(err, embed.ErrInvalidRequest) || errors.Is(err, embed.ErrOversizedInput) {
+		return http.StatusBadRequest
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "context canceled") {
@@ -122,7 +131,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 		resp, err := svc.Search(r.Context(), &req)
 		if err != nil {
 			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("search failed")
-			writeError(w, httpStatusFromError(err), err.Error())
+			writeSearchError(w, err)
 			return
 		}
 		log.Info().
@@ -169,7 +178,7 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc *sear
 		resp, err := svc.Search(r.Context(), &req)
 		if err != nil {
 			log.Error().Err(err).Dur("latency", time.Since(start)).Msg("search stream failed")
-			writeError(w, httpStatusFromError(err), err.Error())
+			writeSearchError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -820,6 +829,24 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		message = "internal server error"
 	}
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// writeSearchError renders a search failure. A semantic outage is a
+// deliberate, safe answer: 503 with the stable fallback code and a
+// Retry-After hint instead of the generic masked server error.
+func writeSearchError(w http.ResponseWriter, err error) {
+	var unavailable *search.UnavailableError
+	if errors.As(err, &unavailable) {
+		if !unavailable.RetryAt.IsZero() {
+			if seconds := int(time.Until(unavailable.RetryAt).Seconds()); seconds > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			}
+		}
+		body := map[string]string{"error": unavailable.Message, "code": unavailable.Code}
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	}
+	writeError(w, httpStatusFromError(err), err.Error())
 }
 
 func parseKind(value string) searchv1.SearchKind {

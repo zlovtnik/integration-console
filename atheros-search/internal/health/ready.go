@@ -11,7 +11,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
-	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
 )
 
@@ -23,7 +22,6 @@ type Database interface {
 
 type Readiness struct {
 	DB                  Database
-	Embedder            embed.Client
 	Metrics             *metrics.Metrics
 	SchemaReadyRequired bool
 	countsMu            sync.Mutex
@@ -68,11 +66,10 @@ func (r *Readiness) Check(ctx context.Context) error {
 			Int64("sequence_count", counts.Sequence).
 			Msg("one or more search vector tables are empty")
 	}
-	if r.Embedder != nil {
-		if err := r.Embedder.Health(checkCtx); err != nil {
-			return fmt.Errorf("embedding backend: %w", err)
-		}
-	}
+	// The embedding backend is deliberately not part of /readyz: an outage in
+	// llama.cpp must not take the pod out of rotation, because keyword search
+	// and the whole non-semantic API keep serving. Semantic health is reported
+	// through /v1/etl/health instead.
 	return nil
 }
 

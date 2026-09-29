@@ -1,8 +1,16 @@
 import { Show, createResource, onCleanup } from 'solid-js';
-import type { ReportMetadata } from '~/api/types';
+import type { ReportMetadata, SemanticHealth } from '~/api/types';
 import { formatDateTime } from '~/utils/formatDateTime';
 import { useSearchParams } from '@solidjs/router';
 import { api } from '~/api/client';
+
+function laneSummary(lane: SemanticHealth): string {
+  if (lane.preflight === 'disabled') return 'not configured';
+  const circuit = lane.circuit_state.replace(/_/g, ' ');
+  return `${lane.preflight}, ${circuit}, ${
+    lane.backend_available ? 'available' : 'unavailable'
+  }`;
+}
 
 export function ReportStatus(props: {
   report?: ReportMetadata | undefined;
@@ -47,20 +55,37 @@ export function ReportStatus(props: {
       >
         {(status) => {
           const observedAt = status().wireless_last_observed_at;
+          const projection = status().wireless_projection;
+          const queryLane = status().query_semantic;
+          const workerLane = status().worker_semantic;
           return (
-            <p>
-              Pipeline health (global, measured{' '}
-              {formatDateTime(status().measured_at)}): {status().ingest_pending}{' '}
-              ingestion pending, {status().ingest_failed} failed;{' '}
-              {status().embedding_pending} embeddings pending,{' '}
-              {status().embedding_failed} failed (
-              {status().embedding_dependency}). {status().wireless_events_24h}{' '}
-              wireless events indexed in the last 24h
-              {observedAt
-                ? `, newest ${formatDateTime(observedAt)}`
-                : ', newest observation unknown'}
-              . These are operational counts, outside this report's scope.
-            </p>
+            <>
+              <p>
+                Pipeline health (global, measured{' '}
+                {formatDateTime(status().measured_at)}):{' '}
+                {status().ingest_pending} ingestion pending,{' '}
+                {status().ingest_failed} failed; {status().embedding_pending}{' '}
+                embeddings pending, {status().embedding_failed} failed (
+                {status().embedding_dependency}). {status().wireless_events_24h}{' '}
+                wireless events indexed in the last 24h
+                {observedAt
+                  ? `, newest ${formatDateTime(observedAt)}`
+                  : ', newest observation unknown'}
+                {projection ? ` (projection ${projection})` : ''}. These are
+                operational counts, outside this report's scope.
+              </p>
+              <Show when={queryLane}>
+                {(lane) => (
+                  <p>
+                    Semantic search: query lane {laneSummary(lane())}
+                    {workerLane
+                      ? ` · worker lane ${laneSummary(workerLane)}`
+                      : ''}
+                    .
+                  </p>
+                )}
+              </Show>
+            </>
           );
         }}
       </Show>

@@ -1,4 +1,5 @@
 const RETURN_PATH_KEY = 'atheros-search.auth-return';
+const CALLBACK_PATH = '/callback';
 
 /**
  * The full same-origin path and query to restore after authentication,
@@ -11,7 +12,7 @@ export interface AuthReturnPath {
 
 export function saveReturnPath(path: string, query: string): void {
   if (typeof window === 'undefined') return;
-  if (!isSameOriginRelative(path)) return;
+  if (!isRestorableReturnPath(path)) return;
   try {
     window.sessionStorage.setItem(
       RETURN_PATH_KEY,
@@ -25,7 +26,7 @@ export function saveReturnPath(path: string, query: string): void {
 
 /**
  * Restore the saved return path and clear it. Returns null when nothing
- * was saved or the saved value is not a same-origin relative path.
+ * was saved or the saved value is not a restorable same-origin path.
  */
 export function consumeReturnPath(): AuthReturnPath | null {
   if (typeof window === 'undefined') return null;
@@ -36,7 +37,10 @@ export function consumeReturnPath(): AuthReturnPath | null {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== 'object' || parsed === null) return null;
     const candidate = parsed as Partial<AuthReturnPath>;
-    if (typeof candidate.path !== 'string' || !isSameOriginRelative(candidate.path)) {
+    if (
+      typeof candidate.path !== 'string' ||
+      !isRestorableReturnPath(candidate.path)
+    ) {
       return null;
     }
     const query =
@@ -55,7 +59,8 @@ export function consumeReturnPath(): AuthReturnPath | null {
  * redirects through the authentication return flow.
  */
 export function isSameOriginRelative(path: string): boolean {
-  if (path === '' || !path.startsWith('/') || path.startsWith('//')) return false;
+  if (path === '' || !path.startsWith('/') || path.startsWith('//'))
+    return false;
   // Browsers treat backslashes as slashes when resolving a path, and
   // percent-encoded separators must not be trusted to stay on this origin.
   if (path.includes('\\')) return false;
@@ -76,4 +81,22 @@ export function isSameOriginRelative(path: string): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * Callback is a transport route owned by the authentication flow, never an
+ * application destination. Resolve and decode the path so persisted aliases
+ * such as dot segments or percent encoding cannot restore it indirectly.
+ */
+export function isRestorableReturnPath(path: string): boolean {
+  if (!isSameOriginRelative(path)) return false;
+
+  try {
+    const pathname = decodeURIComponent(
+      new URL(path, 'http://control.invalid').pathname,
+    ).replace(/\/+$/, '');
+    return pathname !== CALLBACK_PATH;
+  } catch {
+    return false;
+  }
 }

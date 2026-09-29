@@ -297,8 +297,9 @@ func TestEmbedKeepsConfiguredRequestsInFlight(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if peak > client.RequestConcurrency {
-		t.Fatalf("peak in-flight requests %d exceeds configured concurrency %d", peak, client.RequestConcurrency)
+	limit := client.scheduler().Total()
+	if peak > limit {
+		t.Fatalf("peak in-flight requests %d exceeds configured concurrency %d", peak, limit)
 	}
 }
 

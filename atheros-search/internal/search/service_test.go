@@ -60,7 +60,11 @@ func TestSearchRejectsEmptyDenseEmbeddingResult(t *testing.T) {
 	_, err := svc.Search(context.Background(), &searchv1.SearchRequest{
 		Query: "wireless", Kind: searchv1.SearchKind_SEARCH_KIND_EVENT, Mode: searchv1.SearchMode_SEARCH_MODE_DENSE,
 	})
-	require.EqualError(t, err, "embedding backend returned no vectors")
+	require.EqualError(t, err, "semantic backend returned an unusable response (code=embedding_invalid_response)")
+	var unavailable *UnavailableError
+	require.ErrorAs(t, err, &unavailable)
+	require.Equal(t, FallbackInvalidResponse, unavailable.Code)
+	require.Zero(t, unavailable.RetryAt)
 }
 
 func TestSearchFallsBackToSparseForEmptyEmbeddingResult(t *testing.T) {
@@ -82,7 +86,9 @@ func TestSearchFallsBackToSparseForEmptyEmbeddingResult(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_SPARSE, response.ModeUsed)
-	require.Equal(t, "embedding backend returned no vectors", response.FallbackReason)
+	require.Equal(t, "semantic backend returned an unusable response", response.FallbackReason)
+	require.Equal(t, FallbackInvalidResponse, response.FallbackCode)
+	require.Nil(t, response.FallbackRetryAt)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -125,6 +131,7 @@ func TestSearchReportsMissingKindCoverageWhenDenseIsEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_SPARSE, response.ModeUsed)
 	require.Contains(t, response.FallbackReason, `no embeddings indexed for requested kind(s) "device"`)
+	require.Equal(t, FallbackNoEmbeddingCoverage, response.FallbackCode)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -159,6 +166,7 @@ func TestSearchKeepsHybridWhenKindHasCoverage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, searchv1.SearchMode_SEARCH_MODE_HYBRID, response.ModeUsed)
 	require.Empty(t, response.FallbackReason)
+	require.Empty(t, response.FallbackCode)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

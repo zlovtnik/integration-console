@@ -29,6 +29,16 @@ type PoolConfig struct {
 	BatchSize         int
 	WorkerID          string
 	HealthPollEnabled bool
+	// ClaimGate must report ready before any claim transaction opens. A
+	// backend whose tokenizer compatibility has not been proven must not lease
+	// a job it cannot embed, and the check has to happen before BeginTx so a
+	// failed gate does not consume an attempt.
+	ClaimGate ClaimGate
+}
+
+// ClaimGate defers job claiming until the embedding backend is known usable.
+type ClaimGate interface {
+	Ready() bool
 }
 
 type Embedder interface {
@@ -117,6 +127,10 @@ func (p *Pool) runWorker(ctx context.Context, id int) {
 }
 
 func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog.Logger) {
+	if p.cfg.ClaimGate != nil && !p.cfg.ClaimGate.Ready() {
+		logger.Debug().Msg("semantic preflight not ready; deferring job claim")
+		return
+	}
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to begin transaction")

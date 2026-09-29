@@ -50,6 +50,7 @@ import {
 } from '~/stores/searchStore';
 import { shortcutsOpen, setShortcutsOpen } from '~/stores/uiStore';
 import { friendlyError } from '~/utils/friendlyError';
+import { fallbackBannerCopy, hasSearchFallback } from '~/utils/searchFallback';
 
 function describeError(errorValue: unknown): string {
   if (errorValue instanceof ApiError) {
@@ -92,20 +93,6 @@ function readLiveStreamPreference(): boolean {
   } catch {
     return true;
   }
-}
-
-function fallbackBannerCopy(reason: string): string {
-  const detail = reason.trim();
-  if (detail.startsWith('no embeddings indexed for requested kind')) {
-    return `This content type is not indexed for semantic search yet - showing keyword matches only. ${detail}`;
-  }
-  if (
-    detail.startsWith('embedding backend unavailable') ||
-    detail.startsWith('embedding backend returned no vectors')
-  ) {
-    return `Embedding backend unavailable - showing keyword results only. ${detail}`;
-  }
-  return `Semantic search unavailable - showing keyword results only. ${detail}`;
 }
 
 export default function SearchPage() {
@@ -406,13 +393,9 @@ export default function SearchPage() {
             <FilterChips />
           </div>
 
-          <Show
-            when={
-              meta.fallback_reason && meta.fallback_reason.trim().length > 0
-            }
-          >
+          <Show when={hasSearchFallback(meta)}>
             <div class="state-banner state-banner--warn" role="status">
-              {fallbackBannerCopy(meta.fallback_reason ?? '')}
+              {fallbackBannerCopy(meta)}
             </div>
           </Show>
 

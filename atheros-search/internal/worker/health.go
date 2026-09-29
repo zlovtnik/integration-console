@@ -23,12 +23,39 @@ const (
 	// jobStaleAge is the queued-work window behind job_orphaned: pending or
 	// running jobs older than this are counted as orphaned.
 	jobStaleAge = 5 * time.Minute
+	// wirelessProjectionFresh is how old the newest indexed observation may be
+	// before wireless ingestion stops counting as fresh.
+	wirelessProjectionFresh = 30 * time.Minute
+	// wirelessProjectionStale is the boundary between stale and critical.
+	wirelessProjectionStale = 2 * time.Hour
 )
+
+// SemanticHealth is the live view of one embedding lane. It is merged into
+// every snapshot at read time because a cached database read cannot describe
+// a backend that changed a second ago.
+type SemanticHealth struct {
+	PreflightState   string     `json:"preflight"`
+	CircuitState     string     `json:"circuit_state"`
+	BackendAvailable bool       `json:"backend_available"`
+	LastCheckAt      *time.Time `json:"last_check_at,omitempty"`
+	LastSuccessAt    *time.Time `json:"last_success_at,omitempty"`
+	RetryAt          *time.Time `json:"retry_at,omitempty"`
+}
+
+// SemanticStatus supplies semantic-backend health that must never be served
+// from the database snapshot cache.
+type SemanticStatus interface {
+	QuerySemantic() SemanticHealth
+	WorkerSemantic() SemanticHealth
+}
 
 type ETLHealth struct {
 	MeasuredAt             time.Time         `json:"measured_at"`
 	WirelessEvents24h      int64             `json:"wireless_events_24h"`
 	WirelessLastObservedAt *time.Time        `json:"wireless_last_observed_at,omitempty"`
+	WirelessProjection     string            `json:"wireless_projection"`
+	QuerySemantic          SemanticHealth    `json:"query_semantic"`
+	WorkerSemantic         SemanticHealth    `json:"worker_semantic"`
 	IngestPending          int64             `json:"ingest_pending"`
 	IngestProcessing       int64             `json:"ingest_processing"`
 	IngestFailed           int64             `json:"ingest_failed"`
@@ -76,10 +103,30 @@ type HealthMonitor struct {
 	refreshing  bool
 	refreshDone chan struct{}
 	cacheTTL    time.Duration
+	semantic    SemanticStatus
+	observer    func(ETLHealth)
 }
 
 func NewHealthMonitor(db *sql.DB) *HealthMonitor {
 	return &HealthMonitor{db: db, cacheTTL: snapshotCacheTTL}
+}
+
+// SetSemanticStatus binds the live semantic-backend view merged into every
+// snapshot. Call it before the first Snapshot.
+func (h *HealthMonitor) SetSemanticStatus(status SemanticStatus) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.semantic = status
+}
+
+// SetSnapshotObserver registers a callback invoked after each database
+// refresh with the newly computed snapshot. It publishes the queue gauges,
+// which must be refreshed rather than served from cache. The observer must
+// not block.
+func (h *HealthMonitor) SetSnapshotObserver(fn func(ETLHealth)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.observer = fn
 }
 
 // Warm primes the snapshot cache so the first HTTP caller does not pay for a
@@ -101,6 +148,7 @@ func (h *HealthMonitor) Snapshot(ctx context.Context) (ETLHealth, error) {
 			if expired && !h.refreshing {
 				h.startRefreshLocked()
 			}
+			h.mergeLiveLocked(&health)
 			h.mu.Unlock()
 			return health, nil
 		}
@@ -142,15 +190,54 @@ func (h *HealthMonitor) startRefreshLocked() {
 func (h *HealthMonitor) refresh() {
 	health, err := h.snapshotFromDB(context.Background())
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.refreshing = false
+	var observer func(ETLHealth)
 	if err != nil {
 		h.lastErr = err
 	} else {
 		h.cached = &health
 		h.lastErr = nil
+		observer = h.observer
 	}
+	h.mu.Unlock()
+
+	// The observer runs while the refresh is still marked running so a caller
+	// returning from Snapshot never races with gauge publication.
+	if observer != nil && err == nil {
+		observer(health)
+	}
+
+	h.mu.Lock()
+	h.refreshing = false
 	close(h.refreshDone)
+	h.mu.Unlock()
+}
+
+// mergeLiveLocked layers the live semantic view and the derived wireless
+// projection over a cached database snapshot. Callers must hold h.mu.
+func (h *HealthMonitor) mergeLiveLocked(health *ETLHealth) {
+	health.WirelessProjection = wirelessProjection(health.WirelessLastObservedAt)
+	if h.semantic == nil {
+		return
+	}
+	health.QuerySemantic = h.semantic.QuerySemantic()
+	health.WorkerSemantic = h.semantic.WorkerSemantic()
+}
+
+// wirelessProjection turns the newest indexed observation into a bounded
+// freshness state so operators and alerts do not each re-derive it.
+func wirelessProjection(lastObserved *time.Time) string {
+	if lastObserved == nil {
+		return "unknown"
+	}
+	age := time.Since(*lastObserved)
+	switch {
+	case age <= wirelessProjectionFresh:
+		return "fresh"
+	case age <= wirelessProjectionStale:
+		return "stale"
+	default:
+		return "critical"
+	}
 }
 
 // snapshotFromDB reads each gauge from the live table that owns it:

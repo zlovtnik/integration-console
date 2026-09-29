@@ -1,7 +1,7 @@
 import { useNavigate } from '@solidjs/router';
-import { createEffect, on } from 'solid-js';
+import { createSignal, Match, onMount, Switch } from 'solid-js';
 import { consumeReturnPath } from '~/auth/returnPath';
-import { initAuth } from '~/auth/session';
+import { authError, initAuth } from '~/auth/session';
 
 /**
  * Dedicated authentication callback route. Keycloak returns here after
@@ -11,33 +11,42 @@ import { initAuth } from '~/auth/session';
  */
 export default function CallbackPage() {
   const navigate = useNavigate();
+  const [failed, setFailed] = createSignal(false);
 
-  createEffect(
-    on(
-      () => true,
-      () => {
-        void initAuth()
-          .catch(() => undefined)
-          .then(() => {
-            const destination = consumeReturnPath();
-            if (destination) {
-              navigate(
-                destination.path + destination.query,
-                { replace: true },
-              );
-            } else {
-              navigate('/', { replace: true });
-            }
-          });
-      },
-    ),
-  );
+  onMount(() => {
+    void initAuth()
+      .then(() => {
+        const destination = consumeReturnPath();
+        navigate(destination ? destination.path + destination.query : '/', {
+          replace: true,
+          scroll: false,
+        });
+      })
+      .catch(() => setFailed(true));
+  });
 
   return (
     <main class="auth-page" id="main-content" tabIndex={-1}>
-      <section class="auth-panel" role="status">
-        Completing sign-in...
-      </section>
+      <Switch>
+        <Match when={failed()}>
+          <section class="auth-panel state-banner--error" role="alert">
+            <h1>Sign-in unavailable</h1>
+            <p>{authError() || 'The identity service could not be reached.'}</p>
+            <button
+              class="btn"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
+          </section>
+        </Match>
+        <Match when={true}>
+          <section class="auth-panel" role="status">
+            Completing sign-in...
+          </section>
+        </Match>
+      </Switch>
     </main>
   );
 }

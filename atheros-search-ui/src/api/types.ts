@@ -84,6 +84,21 @@ export interface SearchResult {
   classification?: string;
 }
 
+/**
+ * Stable degradation codes returned in `fallback_code`. The field stays an
+ * open string so a newer server can add a code the UI has never seen; the
+ * constants below are the ones the UI renders specific copy for.
+ */
+export const SEARCH_FALLBACK_CODES = [
+  'embedding_backend_unavailable',
+  'embedding_capacity_exhausted',
+  'embedding_invalid_response',
+  'no_embedding_coverage',
+  'dense_query_failed',
+] as const;
+
+export type SearchFallbackCode = (typeof SEARCH_FALLBACK_CODES)[number];
+
 export interface SearchResponse {
   report?: ReportMetadata;
   generated_at?: string;
@@ -91,9 +106,37 @@ export interface SearchResponse {
   results: SearchResult[];
   mode_used: SearchMode;
   fallback_reason: string;
+  fallback_code: string;
+  fallback_retry_at?: string;
   dense_result_count: number;
   sparse_result_count: number;
   fused_result_count: number;
+}
+
+/** Live semantic-backend health for one embedding lane. */
+export interface SemanticHealth {
+  preflight: string;
+  circuit_state: string;
+  backend_available: boolean;
+  last_check_at?: string;
+  last_success_at?: string;
+  retry_at?: string;
+}
+
+/** Snapshot returned by `/v1/etl/health`. */
+export interface ETLHealth {
+  measured_at: string;
+  wireless_events_24h: number;
+  wireless_last_observed_at?: string | null;
+  wireless_projection?: string;
+  ingest_pending: number;
+  ingest_processing: number;
+  ingest_failed: number;
+  embedding_pending: number;
+  embedding_failed: number;
+  embedding_dependency: string;
+  query_semantic?: SemanticHealth;
+  worker_semantic?: SemanticHealth;
 }
 
 export interface ExplainResponse {

@@ -245,7 +245,10 @@ export function useSearchStream() {
     abortCtrl?.abort();
     abortCtrl = new AbortController();
     const current = abortCtrl;
-    const initialMeta: Partial<SearchResponse> = { fallback_reason: '' };
+    const initialMeta: Partial<SearchResponse> = {
+      fallback_reason: '',
+      fallback_code: '',
+    };
     if (request.mode) initialMeta.mode_used = request.mode;
 
     batch(() => {

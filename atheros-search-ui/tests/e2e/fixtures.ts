@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  ETLHealth,
   GraphFilters,
   GraphResponse,
   InventoryResponse,
@@ -456,6 +457,8 @@ interface MockApiOptions {
   graph?: GraphResponse | ((body: unknown) => GraphResponse);
   onGraphRequest?: (body: unknown) => void;
   onSearchRequest?: (body: SearchRequest) => void;
+  etlHealth?: Partial<ETLHealth>;
+  search?: (body: SearchRequest) => Partial<Record<string, unknown>>;
 }
 
 function json(route: Route, body: unknown) {
@@ -474,12 +477,28 @@ export async function mockApi(page: Page, options: MockApiOptions = {}) {
       measured_at: '2026-09-27T12:00:00Z',
       wireless_events_24h: 12,
       wireless_last_observed_at: '2026-09-27T11:59:00Z',
+      wireless_projection: 'fresh',
       ingest_pending: 1,
       ingest_processing: 0,
       ingest_failed: 0,
       embedding_pending: 2,
       embedding_failed: 0,
       embedding_dependency: 'healthy',
+      query_semantic: {
+        preflight: 'compatible',
+        circuit_state: 'closed',
+        backend_available: true,
+        last_check_at: '2026-09-27T12:00:00Z',
+        last_success_at: '2026-09-27T11:59:30Z',
+      },
+      worker_semantic: {
+        preflight: 'compatible',
+        circuit_state: 'closed',
+        backend_available: true,
+        last_check_at: '2026-09-27T12:00:00Z',
+        last_success_at: '2026-09-27T11:59:30Z',
+      },
+      ...options.etlHealth,
     }),
   );
   await page.route('**/v1/inventory', (route) => {
@@ -599,15 +618,18 @@ export async function mockApi(page: Page, options: MockApiOptions = {}) {
     }),
   );
   await page.route('**/v1/search', (route) => {
-    options.onSearchRequest?.(route.request().postDataJSON() as SearchRequest);
+    const body = route.request().postDataJSON() as SearchRequest;
+    options.onSearchRequest?.(body);
     return json(route, {
       query_id: 1,
       results,
       mode_used: 'SEARCH_MODE_HYBRID',
       fallback_reason: '',
+      fallback_code: '',
       dense_result_count: results.length,
       sparse_result_count: results.length,
       fused_result_count: results.length,
+      ...(options.search?.(body) ?? {}),
     });
   });
   await page.route('**/v1/search/stream', (route) => {

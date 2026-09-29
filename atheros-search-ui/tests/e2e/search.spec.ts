@@ -164,3 +164,37 @@ test('opens explain page from a result', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText('shadow alert')).toBeVisible();
 });
+
+test('renders a degraded-search banner keyed on fallback_code', async ({
+  page,
+}) => {
+  const retryAt = new Date(Date.now() + 120_000).toISOString();
+  await mockApi(page, {
+    search: () => ({
+      mode_used: 'SEARCH_MODE_SPARSE',
+      fallback_code: 'embedding_backend_unavailable',
+      fallback_reason: 'semantic backend unavailable',
+      fallback_retry_at: retryAt,
+      dense_result_count: 0,
+      fused_result_count: 1,
+    }),
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Live stream').uncheck();
+  await page
+    .getByRole('combobox', { name: 'Search wireless events' })
+    .fill('probe_request');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+
+  const banner = page.locator('.state-banner--warn');
+  await expect(banner).toContainText(
+    'Embedding backend unavailable - showing keyword results only.',
+  );
+  await expect(banner).toContainText('Retry expected after');
+  // Degraded mode still returns keyword results; it is not an error page.
+  await expect(
+    page.getByRole('heading', { name: 'event:lab:001' }),
+  ).toBeVisible();
+  await expect(page.getByText('HTTP 50')).toHaveCount(0);
+});

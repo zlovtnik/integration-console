@@ -19,9 +19,9 @@ const AuthenticatedAppShell: ParentComponent = (props) => (
 export default function App() {
   return (
     <Router>
+      <Route path="/callback" component={CallbackPage} />
       <Route component={AuthenticatedAppShell}>
         <Route path="/" component={SearchPage} />
-        <Route path="/callback" component={CallbackPage} />
         <Route path="/graph" component={GraphPage} />
         <Route path="/inventory" component={InventoryPage} />
         <Route path="/explain/:sourceKey" component={ExplainPage} />

@@ -49,11 +49,13 @@ type HTTPClient struct {
 	// defaults to RequestPackTokenLimit so requests fan out across backend
 	// slots instead of stacking tokens onto one slot.
 	PackTokenLimit int
-	// RequestConcurrency is how many /v1/embeddings requests may be in flight
-	// at once. It defaults to DefaultRequestConcurrency.
-	RequestConcurrency int
+	// Scheduler is the shared backend-slot admission point used by every
+	// client and worker in the process. It defaults to a scheduler sized from
+	// DefaultRequestConcurrency and DefaultQueryReservedSlots.
+	Scheduler *Scheduler
 	// TokenizerConcurrency bounds in-flight /tokenize and /detokenize calls.
-	// It defaults to DefaultTokenizerConcurrency.
+	// The bound is one process-wide gate shared by interactive and worker
+	// callers instead of one limit per client.
 	TokenizerConcurrency int
 	// MaxChunksPerInput bounds chunks for a single input before any
 	// /detokenize work is spent. Zero disables the bound.
@@ -96,7 +98,7 @@ func NewHTTPClient(baseURL, model string, dimensions, maxTokens int) *HTTPClient
 		MaxTokens:            maxTokens,
 		Client:               &http.Client{Timeout: 30 * time.Second},
 		PackTokenLimit:       RequestPackTokenLimit,
-		RequestConcurrency:   DefaultRequestConcurrency,
+		Scheduler:            NewScheduler(DefaultRequestConcurrency, DefaultQueryReservedSlots),
 		TokenizerConcurrency: DefaultTokenizerConcurrency,
 	}
 	c.tokenizer = c
@@ -110,11 +112,11 @@ func (c *HTTPClient) packTokenLimit() int {
 	return RequestPackTokenLimit
 }
 
-func (c *HTTPClient) requestConcurrency() int {
-	if c.RequestConcurrency > 0 {
-		return c.RequestConcurrency
+func (c *HTTPClient) scheduler() *Scheduler {
+	if c.Scheduler == nil {
+		c.Scheduler = NewScheduler(DefaultRequestConcurrency, DefaultQueryReservedSlots)
 	}
-	return DefaultRequestConcurrency
+	return c.Scheduler
 }
 
 func (c *HTTPClient) tokenizerConcurrency() int {
@@ -204,7 +206,7 @@ func (c *HTTPClient) ValidateTokenizer(ctx context.Context) error {
 
 func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]float32, error) {
 	if c.BaseURL == "" {
-		return nil, errors.New("embedding backend URL is empty")
+		return nil, invalidRequest("embedding backend URL is empty")
 	}
 	offsets := make([]int, len(texts)+1)
 	inputs := make([]TokenChunk, 0, len(texts))
@@ -237,7 +239,7 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 		count, end := 0, start
 		for end < len(inputs) {
 			if inputs[end].TokenCount > RequestTokenLimit {
-				return nil, fmt.Errorf("embedding chunk has %d content tokens, limit is %d", inputs[end].TokenCount, RequestTokenLimit)
+				return nil, invalidRequest("embedding chunk has %d content tokens, limit is %d", inputs[end].TokenCount, RequestTokenLimit)
 			}
 			if end > start && count+inputs[end].TokenCount > packLimit {
 				break
@@ -248,22 +250,45 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 		batches = append(batches, inputs[start:end])
 		start = end
 	}
+	lane := LaneFromContext(ctx)
+	scheduler := c.scheduler()
 	results := make([][][]float32, len(batches))
 	jobs := make(chan int)
 	errCh := make(chan error, 1)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// One goroutine per in-flight batch is bounded by the shared scheduler,
+	// so the pool only needs enough bodies to keep every permitted slot fed
+	// instead of one fixed per-call concurrency.
+	poolSize := scheduler.Total() * 2
+	if poolSize < 8 {
+		poolSize = 8
+	}
+	if poolSize > len(batches) {
+		poolSize = len(batches)
+	}
 	var wg sync.WaitGroup
-	for worker := 0; worker < c.requestConcurrency(); worker++ {
+	for worker := 0; worker < poolSize; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for index := range jobs {
+				release, err := scheduler.Acquire(ctx, lane)
+				if err != nil {
+					select {
+					case errCh <- capacityError(err):
+						cancel()
+					default:
+					}
+					return
+				}
 				texts := make([]string, len(batches[index]))
 				for i := range batches[index] {
 					texts[i] = batches[index][i].Text
 				}
 				vectors, err := c.embedOnce(ctx, texts)
+				release()
 				if err != nil {
 					select {
 					case errCh <- err:
@@ -305,7 +330,7 @@ func (c *HTTPClient) embedInputs(ctx context.Context, inputs []TokenChunk) ([][]
 func (c *HTTPClient) embedOnce(ctx context.Context, inputs []string) ([][]float32, error) {
 	body, err := json.Marshal(embeddingsRequest{Model: c.Model, Input: inputs})
 	if err != nil {
-		return nil, err
+		return nil, invalidRequest("encode embeddings request: %v", err)
 	}
 	var parsed embeddingsResponse
 	if err := c.postJSON(ctx, "/v1/embeddings", body, &parsed); err != nil {
@@ -319,11 +344,11 @@ func (c *HTTPClient) embedOnce(ctx context.Context, inputs []string) ([][]float3
 		}
 	}
 	if len(vectors) != len(inputs) {
-		return nil, fmt.Errorf("embedding backend returned %d vectors for %d inputs", len(vectors), len(inputs))
+		return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: returned %d vectors for %d inputs", ErrInvalidResponse, len(vectors), len(inputs))}
 	}
 	for i, vec := range vectors {
 		if len(vec) != c.Dimensions {
-			return nil, fmt.Errorf("embedding %d has %d dimensions, expected %d", i, len(vec), c.Dimensions)
+			return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: embedding %d has %d dimensions, expected %d", ErrInvalidResponse, i, len(vec), c.Dimensions)}
 		}
 	}
 	return vectors, nil
@@ -331,11 +356,11 @@ func (c *HTTPClient) embedOnce(ctx context.Context, inputs []string) ([][]float3
 
 func (c *HTTPClient) postJSON(ctx context.Context, path string, body []byte, output any) error {
 	if c.BaseURL == "" {
-		return errors.New("embedding backend URL is empty")
+		return invalidRequest("embedding backend URL is empty")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(body))
 	if err != nil {
-		return err
+		return invalidRequest("build embedding request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.Client.Do(req)
@@ -355,10 +380,12 @@ func (c *HTTPClient) postJSON(ctx context.Context, path string, body []byte, out
 		if resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests {
 			return &BackendUnavailableError{Cause: err}
 		}
-		return err
+		// Other 4xx and 3xx responses reject this request rather than report
+		// on backend health, so they never move the breaker.
+		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(output); err != nil {
-		return &BackendUnavailableError{Cause: err}
+		return &BackendUnavailableError{Cause: fmt.Errorf("%w: decode response: %v", ErrInvalidResponse, err)}
 	}
 	return nil
 }

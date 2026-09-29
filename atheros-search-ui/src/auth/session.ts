@@ -35,13 +35,15 @@ export function logoutUri(): string {
   return `${window.location.origin}/`;
 }
 
-export function currentReturnPath(): string {
-  return window.location.pathname + window.location.search;
+export function captureCurrentReturnPath(): void {
+  saveReturnPath(window.location.pathname, window.location.search);
 }
 
 export function initAuth(): Promise<boolean> {
   if (!keycloak) return Promise.resolve(true);
   if (initPromise) return initPromise;
+
+  captureCurrentReturnPath();
 
   keycloak.onAuthSuccess = () => setAuthStatus('authenticated');
   keycloak.onAuthRefreshSuccess = () => setAuthStatus('authenticated');
@@ -89,9 +91,9 @@ export async function getAccessToken(forceRefresh = false): Promise<string> {
 
 export async function login(): Promise<void> {
   if (!keycloak) return;
+  captureCurrentReturnPath();
   await initAuth();
   if (keycloak.authenticated) return;
-  saveReturnPath(window.location.pathname, window.location.search);
   await keycloak.login({ redirectUri: callbackUri() });
 }
 

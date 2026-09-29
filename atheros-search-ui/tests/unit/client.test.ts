@@ -5,6 +5,7 @@ import {
   authenticatedFetch,
   apiErrorFromResponse,
   normalizeInventoryResponse,
+  normalizeSearchMeta,
   normalizeSearchResponse,
   prepareGraphFilters,
   prepareSearchRequest,
@@ -120,6 +121,51 @@ describe('api client normalization', () => {
       boost_reasons: ['open_shadow_alert'],
       detail_json: '{"channel":11}',
     });
+  });
+
+  it('normalizes fallback degradation fields from both casings', () => {
+    expect(
+      normalizeSearchMeta({
+        mode_used: 'SEARCH_MODE_SPARSE',
+        fallback_reason: 'semantic backend unavailable',
+        fallback_code: 'embedding_backend_unavailable',
+        fallback_retry_at: '2026-06-02T12:05:00Z',
+      }),
+    ).toMatchObject({
+      mode_used: 'SEARCH_MODE_SPARSE',
+      fallback_reason: 'semantic backend unavailable',
+      fallback_code: 'embedding_backend_unavailable',
+      fallback_retry_at: '2026-06-02T12:05:00Z',
+    });
+
+    expect(
+      normalizeSearchMeta({
+        modeUsed: 'SEARCH_MODE_DENSE',
+        fallbackReason: 'dense vector query failed',
+        fallbackCode: 'dense_query_failed',
+        fallbackRetryAt: '2026-06-02T12:06:00Z',
+      }),
+    ).toMatchObject({
+      mode_used: 'SEARCH_MODE_DENSE',
+      fallback_reason: 'dense vector query failed',
+      fallback_code: 'dense_query_failed',
+      fallback_retry_at: '2026-06-02T12:06:00Z',
+    });
+  });
+
+  it('defaults an absent fallback code to an empty string', () => {
+    const response = normalizeSearchResponse({
+      queryId: 1,
+      modeUsed: 'SEARCH_MODE_HYBRID',
+      fallbackReason: '',
+      denseResultCount: 0,
+      sparseResultCount: 0,
+      fusedResultCount: 0,
+      results: [],
+    });
+
+    expect(response.fallback_code).toBe('');
+    expect(response.fallback_retry_at).toBeUndefined();
   });
 
   it('uses backend error messages instead of raw error JSON', async () => {

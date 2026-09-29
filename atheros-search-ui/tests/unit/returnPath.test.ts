@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   consumeReturnPath,
+  isRestorableReturnPath,
   isSameOriginRelative,
   saveReturnPath,
 } from '~/auth/returnPath';
@@ -34,6 +35,28 @@ describe('auth return path', () => {
       query: '?view=dedup_queue&limit=100',
     });
     expect(consumeReturnPath()).toBeNull();
+  });
+
+  it('never saves or restores the callback route', () => {
+    saveReturnPath('/callback', '?code=keycloak-code');
+    expect(consumeReturnPath()).toBeNull();
+
+    window.sessionStorage.setItem(
+      'atheros-search.auth-return',
+      JSON.stringify({ path: '/callback', query: '' }),
+    );
+    expect(consumeReturnPath()).toBeNull();
+    expect(isRestorableReturnPath('/%63allback')).toBe(false);
+    expect(isRestorableReturnPath('/auth/../callback?code=value')).toBe(false);
+  });
+
+  it('does not overwrite a valid destination during a callback visit', () => {
+    saveReturnPath('/graph', '?ssid=lab-net');
+    saveReturnPath('/callback', '?code=keycloak-code');
+    expect(consumeReturnPath()).toEqual({
+      path: '/graph',
+      query: '?ssid=lab-net',
+    });
   });
 
   it('drops saved values that are not same-origin relative', () => {

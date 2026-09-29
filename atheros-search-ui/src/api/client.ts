@@ -2,6 +2,7 @@ import { env } from '~/env';
 import { getAccessToken } from '~/auth/session';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
+  ETLHealth,
   ExplainResponse,
   GraphFilters,
   GraphResponse,
@@ -68,6 +69,8 @@ type RawSearchResponse = Omit<Partial<SearchResponse>, 'results'> & {
   queryId?: unknown;
   modeUsed?: unknown;
   fallbackReason?: unknown;
+  fallbackCode?: unknown;
+  fallbackRetryAt?: unknown;
   denseResultCount?: unknown;
   sparseResultCount?: unknown;
   fusedResultCount?: unknown;
@@ -348,6 +351,11 @@ export function normalizeSearchMeta(
   if (generated) meta.generated_at = generated;
   const modeUsed = firstString(raw.mode_used, raw.modeUsed);
   const fallbackReason = firstString(raw.fallback_reason, raw.fallbackReason);
+  const fallbackCode = firstString(raw.fallback_code, raw.fallbackCode);
+  const fallbackRetryAt = firstString(
+    raw.fallback_retry_at,
+    raw.fallbackRetryAt,
+  );
   const denseResultCount = firstNumber(
     raw.dense_result_count,
     raw.denseResultCount,
@@ -364,6 +372,8 @@ export function normalizeSearchMeta(
 
   if (modeUsed) meta.mode_used = modeUsed as SearchResponse['mode_used'];
   if (fallbackReason) meta.fallback_reason = fallbackReason;
+  if (fallbackCode) meta.fallback_code = fallbackCode;
+  if (fallbackRetryAt) meta.fallback_retry_at = fallbackRetryAt;
   if (denseResultCount) meta.dense_result_count = denseResultCount;
   if (sparseResultCount) meta.sparse_result_count = sparseResultCount;
   if (fusedResultCount) meta.fused_result_count = fusedResultCount;
@@ -386,6 +396,7 @@ export function normalizeSearchResponse(
     ),
     mode_used: meta.mode_used ?? 'SEARCH_MODE_UNSPECIFIED',
     fallback_reason: meta.fallback_reason ?? '',
+    fallback_code: meta.fallback_code ?? '',
     dense_result_count: meta.dense_result_count ?? 0,
     sparse_result_count: meta.sparse_result_count ?? 0,
     fused_result_count: meta.fused_result_count ?? 0,
@@ -672,17 +683,7 @@ async function request<T>(
 
 export const api = {
   etlHealth: (signal?: AbortSignal) =>
-    request<{
-      measured_at: string;
-      wireless_events_24h: number;
-      wireless_last_observed_at?: string | null;
-      ingest_pending: number;
-      ingest_processing: number;
-      ingest_failed: number;
-      embedding_pending: number;
-      embedding_failed: number;
-      embedding_dependency: string;
-    }>('/v1/etl/health', {}, signal, 3000),
+    request<ETLHealth>('/v1/etl/health', {}, signal, 3000),
   network: (filters: import('./types').NetworkFilters, signal?: AbortSignal) =>
     request<import('./types').NetworkResponse>(
       '/v1/network-map',
