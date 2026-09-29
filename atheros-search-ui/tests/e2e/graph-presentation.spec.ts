@@ -68,7 +68,13 @@ const inventory: InventoryResponse = {
 };
 
 async function openGraph(page: Page, path: string) {
-  await mockApi(page, { graph });
+  let graphRequestCount = 0;
+  await mockApi(page, {
+    graph,
+    onGraphRequest: () => {
+      graphRequestCount += 1;
+    },
+  });
   await page.route('**/v1/inventory', (route) =>
     route.fulfill({ json: inventory }),
   );
@@ -82,10 +88,21 @@ async function openGraph(page: Page, path: string) {
     await page
       .getByRole('button', { name: 'Open projection explorer' })
       .click();
+    await expect(page.locator('.graph-node')).toHaveCount(6);
+    const previousViewport = await page
+      .locator('.graph-viewport')
+      .elementHandle();
+    const requestsBeforeFilterRefresh = graphRequestCount;
     await page.getByRole('button', { name: /^Edges/ }).click();
     await page.getByRole('button', { name: 'shadow', exact: true }).click();
     await page.getByRole('button', { name: 'probe', exact: true }).click();
     await page.keyboard.press('Escape');
+    await expect
+      .poll(() => graphRequestCount)
+      .toBeGreaterThan(requestsBeforeFilterRefresh);
+    await expect
+      .poll(() => previousViewport?.evaluate((element) => element.isConnected))
+      .toBe(false);
   }
   await expect(page.locator('.graph-node')).toHaveCount(6);
 }

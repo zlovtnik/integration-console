@@ -1,6 +1,13 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type { SearchRequest } from '~/api/types';
 import { graphForFilters, mockApi } from './fixtures';
+
+async function selectGraphNode(page: Page) {
+  const graphNode = page.locator('.graph-node[data-kind="cluster"]');
+  await graphNode.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('complementary')).toBeVisible();
+}
 
 test('graph filters auto-refresh topology requests', async ({ page }) => {
   const graphRequests: unknown[] = [];
@@ -81,7 +88,7 @@ test('projection cluster panel lists its derived identifiers with the same join'
   await page.goto('/graph');
   await page.getByText('Advanced projection explorer', { exact: true }).click();
   await page.getByRole('button', { name: 'Open projection explorer' }).click();
-  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await selectGraphNode(page);
 
   const panel = page.getByRole('complementary');
   await expect(panel).toBeVisible();
@@ -116,7 +123,7 @@ test('cluster search events action requests a sparse 200-event entity timeline',
   await page.goto('/graph');
   await page.getByText('Advanced projection explorer', { exact: true }).click();
   await page.getByRole('button', { name: 'Open projection explorer' }).click();
-  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await selectGraphNode(page);
   await page.getByRole('link', { name: 'Search events' }).click();
 
   await expect
@@ -164,7 +171,7 @@ test('cluster search events preserves the active graph SSID scope', async ({
     )
     .toBe(true);
   await expect(page.locator('.graph-node[data-kind="cluster"]')).toBeVisible();
-  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await selectGraphNode(page);
   await page.getByRole('link', { name: 'Search events' }).click();
 
   await expect
@@ -198,7 +205,7 @@ test('graph event search does not inherit stale min similarity from search URL',
   await page.goto('/graph');
   await page.getByText('Advanced projection explorer', { exact: true }).click();
   await page.getByRole('button', { name: 'Open projection explorer' }).click();
-  await page.locator('.graph-node[data-kind="cluster"]').click({ force: true });
+  await selectGraphNode(page);
   await page.getByRole('link', { name: 'Search events' }).click();
 
   await expect
