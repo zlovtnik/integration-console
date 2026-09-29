@@ -26,7 +26,7 @@ repository root.
 ## Guardrails
 - Keep public API compatibility in mind for `/v1/search`, `/v1/search/stream`,
   `/v1/explain/{source_key}`, `/v1/suggest/filters`, graph, inventory,
-  merge-decision, and `/v1/etl/*` endpoints.
+  merge-decision, saved-views, and `/v1/etl/*` endpoints.
 - The stream endpoint emits one protobuf-JSON `SearchResult` per line and ends
   with a `{"type":"done"}` marker; preserve clients that parse that contract.
 - The ETL stream endpoint (`/v1/etl/stream`) sends newline-delimited JSON
@@ -35,6 +35,8 @@ repository root.
   cancellation, and timeout handling intact.
 - Do not log raw search queries, source keys, session IDs, API tokens, or MACs
   when existing code hashes or summarizes them.
+- Saved views belong to the immutable Keycloak `sub`. Never log the owning
+  subject or return it in a response body; audit fields keep `preferred_username`.
 - Keep config in `ATHSEARCH_*` env vars. The preferred PostgreSQL connection
   setting is `ATHSEARCH_POSTGRES_DSN`; the discrete settings
   `ATHSEARCH_POSTGRES_HOST`, `ATHSEARCH_POSTGRES_PORT`, `ATHSEARCH_POSTGRES_DATABASE`,

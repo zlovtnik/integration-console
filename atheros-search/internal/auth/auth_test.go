@@ -166,3 +166,75 @@ func TestJWTUnknownKeysHonorRefreshCooldownAndAreBounded(t *testing.T) {
 	require.EqualError(t, err, "JWT key ID is unknown")
 	require.Equal(t, 2, requests)
 }
+
+func TestAuthorizeIdentityCarriesImmutableSubjectAndDisplay(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyID := "key-1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "RSA", "use": "sig", "kid": keyID,
+			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}}})
+	}))
+	defer server.Close()
+
+	issuer := "https://gateway.example.test/realms/middleware"
+	authenticator, err := NewJWTTokenAuth(JWTConfig{
+		Issuer: issuer, JWKSURI: server.URL, Audience: "atheros-search-ui", ClientID: "atheros-search-ui",
+	})
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	authenticator.jwt.now = func() time.Time { return now }
+
+	claims := map[string]any{
+		"iss":                issuer,
+		"aud":                []string{"atheros-search-ui"},
+		"exp":                now.Add(time.Minute).Unix(),
+		"sub":                "subject-1",
+		"preferred_username": "alice",
+		"resource_access": map[string]any{
+			"atheros-search-ui": map[string]any{"roles": []string{RoleViewer}},
+		},
+	}
+	token := signedJWT(t, key, keyID, claims)
+
+	decision, identity := authenticator.AuthorizeIdentity(context.Background(), "Bearer "+token, RoleViewer, RoleOperator, RoleAdmin)
+	require.Equal(t, DecisionAuthorized, decision)
+	require.Equal(t, IdentityJWT, identity.Kind)
+	require.Equal(t, "subject-1", identity.Subject)
+	require.Equal(t, "alice", identity.Display)
+
+	// The audit-facing subject helper keeps the display name, never the sub.
+	require.Equal(t, "alice", SubjectFromContext(WithSubject(context.Background(), identity.Display)))
+
+	withoutUsername := signedJWT(t, key, keyID, map[string]any{
+		"iss":             issuer,
+		"aud":             []string{"atheros-search-ui"},
+		"exp":             now.Add(time.Minute).Unix(),
+		"sub":             "subject-2",
+		"resource_access": map[string]any{"atheros-search-ui": map[string]any{"roles": []string{RoleViewer}}},
+	})
+	_, identity = authenticator.AuthorizeIdentity(context.Background(), "Bearer "+withoutUsername, RoleViewer)
+	require.Equal(t, "subject-2", identity.Subject)
+	require.Equal(t, "subject-2", identity.Display)
+
+	sum := sha256.Sum256([]byte("secret-token"))
+	staticAuth, err := NewTokenAuth(hex.EncodeToString(sum[:]))
+	require.NoError(t, err)
+	_, identity = staticAuth.AuthorizeIdentity(context.Background(), "Bearer secret-token", RoleViewer)
+	require.Equal(t, IdentityStatic, identity.Kind)
+	require.Empty(t, identity.Subject)
+	require.Equal(t, "static-token", identity.Display)
+
+	disabledAuth, err := NewTokenAuth("")
+	require.NoError(t, err)
+	decision, identity = disabledAuth.AuthorizeIdentity(context.Background(), "", RoleViewer)
+	require.Equal(t, DecisionAuthorized, decision)
+	require.Equal(t, IdentityDisabled, identity.Kind)
+	require.Empty(t, identity.Subject)
+
+	// A context without an attached identity reports the disabled kind.
+	require.Equal(t, IdentityDisabled, IdentityFromContext(context.Background()).Kind)
+}

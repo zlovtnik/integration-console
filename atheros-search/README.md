@@ -136,6 +136,10 @@ Key routes:
 | `POST` | `/v1/graph` | Graph projection query |
 | `POST` | `/v1/inventory` | Inventory query |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Persist a final merge decision (operator/admin) |
+| `GET` | `/v1/saved-views?surface=graph_projection` | List the caller's saved graph views |
+| `POST` | `/v1/saved-views` | Create a saved graph view (`201`) |
+| `PUT` | `/v1/saved-views/{id}` | Update a saved view using `expected_revision` |
+| `DELETE` | `/v1/saved-views/{id}` | Delete a saved view (`204`) |
 | `GET` | `/v1/etl/health` | ETL summary |
 | `GET` | `/v1/etl/embedding/jobs` | Embedding job state |
 | `GET` | `/v1/etl/workers` | Worker heartbeat state |
@@ -212,6 +216,51 @@ Viewer, operator and admin can read/search, query graph, and query
 inventory; only operator and admin can submit merge decisions. Static
 token-digest auth remains a mutually exclusive local development option.
 Preserve CORS, deadlines and the NDJSON completion marker.
+
+### Saved graph views
+
+Saved views are personal, durable graph layouts for one authenticated user.
+The versioned contract is:
+
+```json
+{
+  "id": "uuid",
+  "name": "Nightly APs",
+  "surface": "graph_projection",
+  "view_version": 1,
+  "revision": 1,
+  "state": {
+    "filters": { "...": "validated GraphFilters" },
+    "visible_node_kinds": ["ap"],
+    "visible_edge_kinds": ["association"]
+  },
+  "created_at": "RFC3339",
+  "updated_at": "RFC3339"
+}
+```
+
+Rules:
+
+- `PUT /v1/saved-views/{id}` requires `expected_revision`; stale revisions are
+  rejected with `409`.
+- Names are 1-80 trimmed characters, unique per user and surface
+  (case-insensitive), with at most 20 views per user.
+- `state.filters` is normalized through the graph filter contract, so a saved
+  view can never persist a filter set the graph endpoint would reject.
+- Views are owned by the immutable Keycloak `sub`. The owning subject is never
+  returned in a response body and is never logged; audit-facing fields keep
+  using `preferred_username`.
+- Static-token and auth-disabled deployments have no stable user identity and
+  report saved views as unavailable instead of sharing one synthetic owner.
+
+Error mapping for the saved-view routes:
+
+| Condition | Status |
+|---|---|
+| Invalid name, surface, or state | `400` |
+| No stable user identity (static token or auth disabled) | `403` |
+| Absent or foreign-owned view ID | `404` |
+| Duplicate name, stale revision, or per-user limit reached | `409` |
 
 ## Observability and privacy
 

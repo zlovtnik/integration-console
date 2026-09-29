@@ -21,6 +21,7 @@ func TestCanonicalPostgresSchemaMatchesQueryFacade(t *testing.T) {
 		"sql/postgres/atheros_search/01_tables/009_embedding_recovery_contract.sql",
 		"sql/postgres/atheros_search/01_tables/011_identity_graph.sql",
 		"sql/postgres/atheros_search/01_tables/015_graph_edge_weight_basis.sql",
+		"sql/postgres/atheros_search/01_tables/018_saved_views.sql",
 	}
 	combined := ""
 	for _, relative := range files {
@@ -46,6 +47,8 @@ func TestCanonicalPostgresSchemaMatchesQueryFacade(t *testing.T) {
 		"graph_edges_source_idx ON atheros_search.graph_edges (source_node_id, edge_kind)",
 		"graph_edges_target_idx ON atheros_search.graph_edges (target_node_id, edge_kind)",
 		"ADD COLUMN IF NOT EXISTS weight_basis",
+		"CREATE TABLE IF NOT EXISTS atheros_search.saved_views",
+		"saved_views_owner_surface_name_uq",
 	} {
 		require.Contains(t, combined, required)
 	}
