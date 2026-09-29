@@ -15,6 +15,7 @@
     "test:a11y": "playwright test tests/e2e/a11y.spec.ts"
   },
   "dependencies": {
+    "@ark-ui/solid": "5.39.2",
     "@solidjs/router": "^0.15.4",
     "d3": "^7.9.0",
     "keycloak-js": "^26.2.4",
@@ -23,6 +24,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",
+    "@pandacss/dev": "1.12.1",
+    "@park-ui/cli": "1.0.1",
     "@playwright/test": "^1.60.0",
     "@solidjs/testing-library": "^0.8.10",
     "@testing-library/jest-dom": "^6.9.1",

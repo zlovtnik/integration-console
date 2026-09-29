@@ -241,8 +241,8 @@ The versioned contract is:
 
 Rules:
 
-- `PUT /v1/saved-views/{id}` requires `expected_revision`; stale revisions are
-  rejected with `409`.
+- `PUT /v1/saved-views/{id}` requires `expected_revision`; a missing or
+  non-positive value is rejected with `400`, and a stale one with `409`.
 - Names are 1-80 trimmed characters, unique per user and surface
   (case-insensitive), with at most 20 views per user.
 - `state.filters` is normalized through the graph filter contract, so a saved

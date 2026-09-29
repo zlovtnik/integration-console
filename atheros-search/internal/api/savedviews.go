@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -68,6 +69,10 @@ func registerSavedViews(mux *runtime.ServeMux, tokenAuth *auth.TokenAuth, svc *s
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid saved view payload")
+			return
+		}
 		view, err := svc.CreateSavedView(r.Context(), owner, input)
 		if err != nil {
 			log := loggerWithTrace(logger.With().Str("endpoint", "/v1/saved-views").Str("method", "POST").Logger(), r.Context())
@@ -96,6 +101,10 @@ func registerSavedViews(mux *runtime.ServeMux, tokenAuth *auth.TokenAuth, svc *s
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&input); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid saved view payload")
 			return
 		}
 		view, err := svc.UpdateSavedView(r.Context(), owner, params["id"], input)

@@ -235,6 +235,16 @@ func (s *Service) CreateSavedView(ctx context.Context, owner string, input Saved
 	}
 	defer tx.Rollback()
 
+	// Serialize creates for one owner and surface. Without this lock two
+	// concurrent requests can both observe a count below the limit and both
+	// insert, overshooting the cap. Row locks cannot cover this because an
+	// owner with no rows yet has nothing to lock, and count(*) may not be
+	// combined with FOR UPDATE. The lock is released at commit or rollback.
+	if _, err := tx.ExecContext(ctx, `
+SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))`, owner, SavedViewSurfaceGraphProjection); err != nil {
+		return nil, fmt.Errorf("lock saved view limit: %w", err)
+	}
+
 	var count int
 	if err := tx.QueryRowContext(ctx, `
 SELECT count(*)
@@ -278,8 +288,11 @@ func (s *Service) UpdateSavedView(ctx context.Context, owner, id string, input S
 	if err != nil {
 		return nil, err
 	}
-	if input.ExpectedRevision < 0 {
-		return nil, fmt.Errorf("invalid saved view: expected_revision must not be negative")
+	// Stored revisions start at 1, so a zero (absent or explicit) value can
+	// never match an existing row. Reject it as a malformed request instead
+	// of letting it surface as a misleading revision conflict.
+	if input.ExpectedRevision < 1 {
+		return nil, fmt.Errorf("invalid saved view: expected_revision must be at least 1")
 	}
 	state, err := normalizeSavedViewState(input.State)
 	if err != nil {

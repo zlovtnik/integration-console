@@ -107,6 +107,8 @@ func TestSavedViewCreateReturnsCreated(t *testing.T) {
 
 	createdAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WithArgs("subject-1", "graph_projection").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("count").WithArgs("subject-1", "graph_projection").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("LIMIT 1").
@@ -151,6 +153,27 @@ func TestSavedViewCreateRejectsInvalidPayload(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, request)
 		require.Equal(t, http.StatusBadRequest, response.Code, "body %s", body)
+	}
+}
+
+func TestSavedViewRequestsRejectTrailingJSONValues(t *testing.T) {
+	tokenAuth, bearer := savedViewJWTAuth(t, "subject-1", "alice")
+	server := startSavedViewServer(t, tokenAuth, &search.Service{})
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "https://gateway.rclabs.uk/v1/saved-views", `{"name":"Nightly","state":{}} {"unexpected":"second value"}`},
+		{http.MethodPut, "https://gateway.rclabs.uk/v1/saved-views/" + savedViewFixtureID, `{"name":"Nightly","state":{},"expected_revision":1} {"unexpected":"second value"}`},
+	} {
+		request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, request)
+
+		require.Equal(t, http.StatusBadRequest, response.Code, "%s body %s", tc.method, tc.body)
 	}
 }
 
@@ -202,6 +225,17 @@ func TestSavedViewUpdateConflictAndOwnership(t *testing.T) {
 	t.Run("negative expected revision is invalid", func(t *testing.T) {
 		server := startSavedViewServer(t, tokenAuth, &search.Service{})
 		body := `{"name":"Nightly","state":{"filters":{"limit":200}},"expected_revision":-1}`
+		request := httptest.NewRequest(http.MethodPut, "https://gateway.rclabs.uk/v1/saved-views/"+savedViewFixtureID, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, request)
+
+		require.Equal(t, http.StatusBadRequest, response.Code)
+	})
+
+	t.Run("absent expected revision is invalid, not a conflict", func(t *testing.T) {
+		server := startSavedViewServer(t, tokenAuth, &search.Service{})
+		body := `{"name":"Nightly","state":{"filters":{"limit":200}}}`
 		request := httptest.NewRequest(http.MethodPut, "https://gateway.rclabs.uk/v1/saved-views/"+savedViewFixtureID, strings.NewReader(body))
 		request.Header.Set("Authorization", "Bearer "+bearer)
 		response := httptest.NewRecorder()

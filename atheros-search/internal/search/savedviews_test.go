@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,8 @@ func TestCreateSavedViewEnforcesPerUserLimit(t *testing.T) {
 	defer database.Close()
 
 	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WithArgs("subject-1", "graph_projection").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("count").WithArgs("subject-1", "graph_projection").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(SavedViewMaxPerUser))
 
@@ -145,12 +148,28 @@ func TestCreateSavedViewEnforcesPerUserLimit(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestCreateSavedViewPropagatesLockFailure(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer database.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WithArgs("subject-1", "graph_projection").
+		WillReturnError(errors.New("canceling statement due to lock timeout"))
+
+	service := &Service{Pool: database}
+	_, err = service.CreateSavedView(context.Background(), "subject-1", SavedViewCreate{Name: "Nightly"})
+	require.ErrorContains(t, err, "lock saved view limit")
+}
+
 func TestCreateSavedViewRejectsDuplicateNameCaseInsensitively(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer database.Close()
 
 	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WithArgs("subject-1", "graph_projection").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("count").WithArgs("subject-1", "graph_projection").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("LIMIT 1").
@@ -211,6 +230,18 @@ func TestUpdateSavedViewRevisionAndOwnership(t *testing.T) {
 			ExpectedRevision: 1,
 		})
 		require.ErrorIs(t, err, ErrSavedViewNotFound)
+	})
+
+	t.Run("zero and negative revisions are invalid, not conflicts", func(t *testing.T) {
+		service := &Service{}
+		for _, revision := range []int64{0, -1} {
+			_, err := service.UpdateSavedView(context.Background(), "subject-1", fixtureID, SavedViewUpdate{
+				Name:             "Nightly",
+				ExpectedRevision: revision,
+			})
+			require.ErrorContains(t, err, "expected_revision must be at least 1")
+			require.NotErrorIs(t, err, ErrSavedViewStaleRevision)
+		}
 	})
 }
 
