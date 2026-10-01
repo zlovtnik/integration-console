@@ -44,7 +44,7 @@ func TestJWTAuthValidatesClaimsSignatureAndRoles(t *testing.T) {
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
 		}}})
 	}))
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 
 	issuer := "https://gateway.example.test/realms/middleware"
 	authenticator, err := NewJWTTokenAuth(JWTConfig{
@@ -145,7 +145,7 @@ func TestJWTUnknownKeysHonorRefreshCooldownAndAreBounded(t *testing.T) {
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
 		}}})
 	}))
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 
 	authenticator, err := NewJWTTokenAuth(JWTConfig{
 		Issuer: "https://issuer.example.test", JWKSURI: server.URL, Audience: "audience", ClientID: "client",
@@ -178,7 +178,7 @@ func TestAuthorizeIdentityCarriesImmutableSubjectAndDisplay(t *testing.T) {
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
 		}}})
 	}))
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 
 	issuer := "https://gateway.example.test/realms/middleware"
 	authenticator, err := NewJWTTokenAuth(JWTConfig{

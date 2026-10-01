@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -121,7 +121,7 @@ func validateDriverConfig(cfg *pgx.ConnConfig) error {
 func configureTLS(cfg *pgx.ConnConfig, opts Options) error {
 	if strings.TrimSpace(opts.TLSCAFile) == "" {
 		if opts.TLSCertFile != "" || opts.TLSKeyFile != "" || opts.TLSServerName != "" {
-			return errors.New("Postgres TLS CA file is required when TLS settings are configured")
+			return errors.New("postgres TLS CA file is required when TLS settings are configured")
 		}
 		return nil
 	}
@@ -131,7 +131,7 @@ func configureTLS(cfg *pgx.ConnConfig, opts Options) error {
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
-		return errors.New("Postgres CA file contains no valid certificates")
+		return errors.New("postgres CA file contains no valid certificates")
 	}
 
 	tlsConfig := &tls.Config{
@@ -140,11 +140,11 @@ func configureTLS(cfg *pgx.ConnConfig, opts Options) error {
 		ServerName: strings.TrimSpace(opts.TLSServerName),
 	}
 	if tlsConfig.ServerName == "" {
-		return errors.New("Postgres TLS server name is required")
+		return errors.New("postgres TLS server name is required")
 	}
 	if opts.TLSCertFile != "" || opts.TLSKeyFile != "" {
 		if opts.TLSCertFile == "" || opts.TLSKeyFile == "" {
-			return errors.New("Postgres client certificate and key must be configured together")
+			return errors.New("postgres client certificate and key must be configured together")
 		}
 		certificate, err := tls.LoadX509KeyPair(opts.TLSCertFile, opts.TLSKeyFile)
 		if err != nil {
@@ -159,25 +159,25 @@ func configureTLS(cfg *pgx.ConnConfig, opts Options) error {
 
 func (p *Pool) Health(ctx context.Context) error {
 	if p == nil || p.DB == nil {
-		return errors.New("Postgres pool is not initialized")
+		return errors.New("postgres pool is not initialized")
 	}
 	if err := p.PingContext(ctx); err != nil {
-		return fmt.Errorf("Postgres ping: %w", err)
+		return fmt.Errorf("postgres ping: %w", err)
 	}
 
 	var databaseName, schemaName, timeZone string
 	var versionNum int
 	if err := p.QueryRowContext(ctx, "SELECT current_database(), current_schema(), current_setting('TimeZone'), current_setting('server_version_num')::int").Scan(&databaseName, &schemaName, &timeZone, &versionNum); err != nil {
-		return fmt.Errorf("Postgres session health query: %w", err)
+		return fmt.Errorf("postgres session health query: %w", err)
 	}
 	if databaseName != expectedDatabase {
-		return fmt.Errorf("Postgres selected database %q, expected %q", databaseName, expectedDatabase)
+		return fmt.Errorf("postgres selected database %q, expected %q", databaseName, expectedDatabase)
 	}
 	if schemaName != expectedSchema {
-		return fmt.Errorf("Postgres selected schema %q, expected %q", schemaName, expectedSchema)
+		return fmt.Errorf("postgres selected schema %q, expected %q", schemaName, expectedSchema)
 	}
 	if !strings.EqualFold(timeZone, "UTC") && !strings.EqualFold(timeZone, "Etc/UTC") {
-		return fmt.Errorf("Postgres session time_zone is %q, expected UTC", timeZone)
+		return fmt.Errorf("postgres session time_zone is %q, expected UTC", timeZone)
 	}
 	if err := validatePostgresVersion(versionNum); err != nil {
 		return err
@@ -207,7 +207,7 @@ LIMIT 1
 		if errors.Is(err, sql.ErrNoRows) {
 			return status, nil
 		}
-		return SchemaReadyStatus{}, fmt.Errorf("Postgres schema readiness query: %w", err)
+		return SchemaReadyStatus{}, fmt.Errorf("postgres schema readiness query: %w", err)
 	}
 	status.ManifestSHA256 = strings.ToLower(status.ManifestSHA256)
 	status.VectorReady = ready
@@ -226,65 +226,4 @@ SELECT
 FROM atheros_search.embeddings
 `).Scan(&counts.Event, &counts.Device, &counts.Behaviour, &counts.Sequence)
 	return counts, err
-}
-
-func (p *Pool) PendingJobCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := p.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'pending'
-`).Scan(&count)
-	return count, err
-}
-
-func (p *Pool) FailedJobCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := p.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'failed'
-`).Scan(&count)
-	return count, err
-}
-
-func (p *Pool) LeasedJobCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := p.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'leased'
-`).Scan(&count)
-	return count, err
-}
-
-func (p *Pool) CompletedJobCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := p.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'completed'
-`).Scan(&count)
-	return count, err
-}
-
-func (p *Pool) WorkerHeartbeats(ctx context.Context) ([]WorkerHeartbeatRow, error) {
-	rows, err := p.QueryContext(ctx, `
-SELECT worker_id, worker_type, last_seen_at, metadata
-FROM atheros_search.worker_heartbeat
-ORDER BY worker_id
-`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []WorkerHeartbeatRow
-	for rows.Next() {
-		var r WorkerHeartbeatRow
-		if err := rows.Scan(&r.WorkerID, &r.WorkerType, &r.LastSeenAt, &r.Metadata); err != nil {
-			return nil, err
-		}
-		result = append(result, r)
-	}
-	return result, rows.Err()
-}
-
-type WorkerHeartbeatRow struct {
-	WorkerID   string
-	WorkerType string
-	LastSeenAt time.Time
-	Metadata   []byte
 }

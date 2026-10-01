@@ -1,4 +1,4 @@
-package worker
+package etlhealth
 
 import (
 	"context"
@@ -162,7 +162,6 @@ func TestSnapshotServesCachedResultWithinTTL(t *testing.T) {
 
 func TestSnapshotRefreshesAfterCacheTTL(t *testing.T) {
 	monitor, mock := newHealthMonitor(t)
-	monitor.cacheTTL = -time.Second
 
 	stale := liveHealthRows()
 	stale.embedPending = 11
@@ -175,6 +174,9 @@ func TestSnapshotRefreshesAfterCacheTTL(t *testing.T) {
 	first, err := monitor.Snapshot(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, int64(11), first.EmbeddingPending)
+	monitor.mu.Lock()
+	monitor.cacheTTL = -time.Second
+	monitor.mu.Unlock()
 
 	// The expired cache is served immediately while the refresh runs.
 	second, err := monitor.Snapshot(context.Background())
@@ -188,6 +190,23 @@ func TestSnapshotRefreshesAfterCacheTTL(t *testing.T) {
 	monitor.mu.Unlock()
 	require.NoError(t, mock.ExpectationsWereMet())
 	require.Equal(t, int64(22), refreshed.EmbeddingPending)
+}
+
+func TestSnapshotRefreshDeadlineReleasesWaiters(t *testing.T) {
+	monitor, mock := newHealthMonitor(t)
+	monitor.refreshTimeout = 20 * time.Millisecond
+	mock.ExpectQuery("SELECT").WillDelayFor(time.Second).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	_, err := monitor.Snapshot(ctx)
+	require.Error(t, err)
+	require.NoError(t, ctx.Err(), "the refresh must fail before its caller's deadline")
+	monitor.mu.Lock()
+	refreshing := monitor.refreshing
+	monitor.mu.Unlock()
+	require.False(t, refreshing)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func waitForRefresh(t *testing.T, monitor *HealthMonitor) {

@@ -37,7 +37,7 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 	if err != nil {
 		return nil, fmt.Errorf("claim embedding jobs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 
 	var jobs []Job
 	for rows.Next() {
@@ -72,7 +72,7 @@ WHERE document_id IN (%s)
 	if err != nil {
 		return nil, fmt.Errorf("fetch document text: %w", err)
 	}
-	defer textRows.Close()
+	defer func() { _ = textRows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	textByDocument := make(map[string]string, len(seen))
 	for textRows.Next() {
 		var documentID, normalizedText string
@@ -343,30 +343,4 @@ VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
 ON CONFLICT (worker_id) DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP, metadata = EXCLUDED.metadata
 `, workerID, workerType, metadata)
 	return err
-}
-
-func staleJobs(ctx context.Context, db *sql.DB, staleThreshold time.Duration) (int64, error) {
-	var count int64
-	err := db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs
-WHERE (status = 'leased' AND lease_expires_at < $1)
-   OR (status = 'pending' AND next_attempt_at <= CURRENT_TIMESTAMP)
-`, time.Now().Add(-staleThreshold)).Scan(&count)
-	return count, err
-}
-
-func pendingJobCount(ctx context.Context, db *sql.DB) (int64, error) {
-	var count int64
-	err := db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'pending'
-`).Scan(&count)
-	return count, err
-}
-
-func failedJobCount(ctx context.Context, db *sql.DB) (int64, error) {
-	var count int64
-	err := db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM atheros_search.embedding_jobs WHERE status = 'failed'
-`).Scan(&count)
-	return count, err
 }

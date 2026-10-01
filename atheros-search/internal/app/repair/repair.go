@@ -1,0 +1,356 @@
+package repair
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	athdb "github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
+)
+
+func Run() error {
+	dsn := flag.String("dsn", envOr("ATHSEARCH_POSTGRES_DSN", ""), "Postgres DSN (required)")
+	tlsCA := flag.String("tls-ca", envOr("ATHSEARCH_POSTGRES_TLS_CA_FILE", ""), "Optional Postgres TLS CA file")
+	tlsCert := flag.String("tls-cert", envOr("ATHSEARCH_POSTGRES_TLS_CERT_FILE", ""), "Postgres TLS cert file")
+	tlsKey := flag.String("tls-key", envOr("ATHSEARCH_POSTGRES_TLS_KEY_FILE", ""), "Postgres TLS key file")
+	tlsServer := flag.String("tls-server", envOr("ATHSEARCH_POSTGRES_TLS_SERVER_NAME", ""), "Postgres TLS server name")
+	schemaManifestSHA256 := flag.String("schema-manifest-sha256", envOr("ATHSEARCH_SCHEMA_MANIFEST_SHA256", ""), "Expected schema manifest SHA-256 (required)")
+	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only), cancel-superseded")
+	staleMinutes := flag.Int("stale-minutes", 60, "Minutes after which a leased job is considered stale")
+	cancelLimit := flag.Int("limit", 5000, "Maximum rows for cancel-superseded per invocation")
+	dryRun := flag.Bool("dry-run", false, "Count affected rows without writing (cancel-superseded)")
+	flag.Parse()
+
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
+
+	if *dsn == "" {
+		return fmt.Errorf("ATHSEARCH_POSTGRES_DSN is required")
+	}
+	manifestSHA256 := strings.ToLower(strings.TrimSpace(*schemaManifestSHA256))
+	if len(manifestSHA256) != sha256.Size*2 {
+		return fmt.Errorf("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
+	}
+	if _, err := hex.DecodeString(manifestSHA256); err != nil {
+		return fmt.Errorf("ATHSEARCH_SCHEMA_MANIFEST_SHA256 must be a 64-character hex SHA-256 digest")
+	}
+
+	db, err := openDB(*dsn, *tlsCA, *tlsCert, *tlsKey, *tlsServer)
+	if err != nil {
+		return fmt.Errorf("connect to postgres: %w", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Warn().Err(err).Msg("database close failed")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := verifySchemaGate(ctx, db, manifestSHA256, logger); err != nil {
+		return fmt.Errorf("schema readiness verification failed: %w", err)
+	}
+	logger.Info().Msg("schema readiness gate passed")
+
+	switch *action {
+	case "status":
+		err = showStatus(ctx, db, logger)
+	case "reset-stale":
+		if *staleMinutes <= 0 {
+			err = fmt.Errorf("stale-minutes must be greater than zero")
+		} else {
+			err = resetStaleJobs(ctx, db, logger, time.Duration(*staleMinutes)*time.Minute)
+		}
+	case "retry-failed":
+		err = retryFailedJobs(ctx, db, logger)
+	case "cancel-superseded":
+		if *cancelLimit <= 0 {
+			err = fmt.Errorf("limit must be greater than zero")
+		} else {
+			err = cancelSupersededJobs(ctx, db, logger, *cancelLimit, *dryRun)
+		}
+	default:
+		return fmt.Errorf("unknown action %q", *action)
+	}
+
+	if err != nil {
+		return fmt.Errorf("action %s failed: %w", *action, err)
+	}
+	return nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func openDB(dsn, tlsCA, tlsCert, tlsKey, tlsServer string) (*sql.DB, error) {
+	pool, err := athdb.NewPool(context.Background(), athdb.Options{
+		DSN: dsn, TLSCAFile: tlsCA, TLSCertFile: tlsCert, TLSKeyFile: tlsKey,
+		TLSServerName: tlsServer, MaxOpenConns: 4, MaxIdleConns: 1,
+		ConnMaxLifetime: 5 * time.Minute, ConnMaxIdleTime: time.Minute,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pool.DB, nil
+}
+
+func showStatus(ctx context.Context, db *sql.DB, logger zerolog.Logger) error {
+	type statusRow struct {
+		Status string
+		Count  int64
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT status, COUNT(*) AS count
+FROM embedding_jobs
+GROUP BY status
+ORDER BY status
+`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
+
+	logger.Info().Msg("=== Embedding Job Status ===")
+	for rows.Next() {
+		var r statusRow
+		if err := rows.Scan(&r.Status, &r.Count); err != nil {
+			return err
+		}
+		logger.Info().Str("status", r.Status).Int64("count", r.Count).Msg("")
+	}
+
+	var total int64
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embedding_jobs").Scan(&total); err != nil {
+		return err
+	}
+	logger.Info().Int64("total", total).Msg("")
+
+	var workerCount int64
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM worker_heartbeat").Scan(&workerCount); err != nil {
+		return err
+	}
+	logger.Info().Int64("heartbeat_rows", workerCount).Msg("Worker heartbeats")
+
+	return showKindCoverage(ctx, db, logger)
+}
+
+func showKindCoverage(ctx context.Context, db *sql.DB, logger zerolog.Logger) error {
+	type kindRow struct {
+		Kind   string
+		Status string
+		Count  int64
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT embedding_kind, status, COUNT(*) AS count
+FROM embedding_jobs
+GROUP BY embedding_kind, status
+ORDER BY embedding_kind, status
+`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
+
+	logger.Info().Msg("=== Embedding Jobs by Kind and Status ===")
+	for rows.Next() {
+		var r kindRow
+		if err := rows.Scan(&r.Kind, &r.Status, &r.Count); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Str("status", r.Status).Int64("count", r.Count).Msg("")
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	type vectorRow struct {
+		Kind  string
+		Total int64
+	}
+	vectorRows, err := db.QueryContext(ctx, `
+SELECT embedding_kind, COUNT(*) AS total
+FROM atheros_search.embeddings
+GROUP BY embedding_kind
+ORDER BY embedding_kind
+`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = vectorRows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
+
+	logger.Info().Msg("=== Embedded Vectors by Kind ===")
+	for vectorRows.Next() {
+		var r vectorRow
+		if err := vectorRows.Scan(&r.Kind, &r.Total); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Int64("vectors", r.Total).Msg("")
+	}
+
+	type pendingRow struct {
+		Kind    string
+		Pending int64
+		Sources int64
+	}
+	pendingRows, err := db.QueryContext(ctx, `
+SELECT embedding_kind,
+       COUNT(*) FILTER (WHERE job.status IN ('pending', 'leased')) AS pending_jobs,
+       COUNT(*) AS total_jobs
+FROM embedding_jobs job
+GROUP BY embedding_kind
+ORDER BY embedding_kind
+`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = pendingRows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
+
+	logger.Info().Msg("=== Per-Kind Backlog ===")
+	for pendingRows.Next() {
+		var r pendingRow
+		if err := pendingRows.Scan(&r.Kind, &r.Pending, &r.Sources); err != nil {
+			return err
+		}
+		logger.Info().Str("embedding_kind", r.Kind).Int64("pending_or_leased", r.Pending).Int64("total_jobs", r.Sources).Msg("")
+	}
+
+	return nil
+}
+
+func resetStaleJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, staleThreshold time.Duration) error {
+	result, err := db.ExecContext(ctx, `
+UPDATE atheros_search.embedding_jobs
+SET status = 'pending',
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE status = 'leased'
+  AND lease_expires_at < $1
+`, time.Now().Add(-staleThreshold))
+	if err != nil {
+		return fmt.Errorf("reset stale jobs: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	logger.Info().Int64("reset", affected).Dur("stale_threshold", staleThreshold).Msg("stale jobs reset to pending")
+	return nil
+}
+
+func retryFailedJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger) error {
+	result, err := db.ExecContext(ctx, `
+UPDATE atheros_search.embedding_jobs
+SET status = 'pending',
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE status = 'failed'
+  AND attempt_count < max_attempts
+`)
+	if err != nil {
+		return fmt.Errorf("retry failed jobs: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	logger.Info().Int64("retried", affected).Msg("retryable embedding jobs reset to pending; terminal diagnostics retained")
+	return nil
+}
+
+// cancelSupersededJobs retires pending work whose document no longer serves
+// search. Octopus cancels these as it supersedes a document
+// (SearchPreparationSql.cancelSupersededEmbeddingJobs), but jobs superseded
+// before that path shipped are still claimable: the vector would describe
+// content the index has already replaced, and the worker spends a scarce
+// backend slot on it. This mirrors that statement's status transition and
+// lease clearing, driven by a join instead of an explicit id list.
+func cancelSupersededJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, limit int, dryRun bool) error {
+	if dryRun {
+		var matched int64
+		if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM atheros_search.embedding_jobs AS job
+JOIN atheros_search.search_documents AS document USING (document_id)
+WHERE document.status = 'superseded'
+  AND job.status IN ('pending', 'leased')
+`).Scan(&matched); err != nil {
+			return fmt.Errorf("count superseded embedding jobs: %w", err)
+		}
+		logger.Info().
+			Int64("matching", matched).
+			Int("limit", limit).
+			Msg("dry run: pending embedding jobs on superseded documents; no rows written")
+		return nil
+	}
+
+	// UPDATE has no LIMIT, so bound the target set in a CTE. The job_id order
+	// keeps successive invocations walking the queue instead of racing over
+	// the same head.
+	result, err := db.ExecContext(ctx, `
+WITH targets AS (
+  SELECT job.job_id
+  FROM atheros_search.embedding_jobs AS job
+  JOIN atheros_search.search_documents AS document USING (document_id)
+  WHERE document.status = 'superseded'
+    AND job.status IN ('pending', 'leased')
+  ORDER BY job.job_id
+  LIMIT $1
+)
+UPDATE atheros_search.embedding_jobs AS job
+SET status = 'cancelled',
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+FROM targets
+WHERE job.job_id = targets.job_id
+`, limit)
+	if err != nil {
+		return fmt.Errorf("cancel superseded embedding jobs: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("embedding jobs on superseded documents cancelled")
+	if affected < int64(limit) {
+		logger.Info().Int64("cancelled", affected).Msg("fewer rows matched than the limit; nothing left to cancel")
+	}
+	return nil
+}
+
+func verifySchemaGate(ctx context.Context, database *sql.DB, expectedSHA256 string, logger zerolog.Logger) error {
+	var manifestSHA256 string
+	var ready bool
+	err := database.QueryRowContext(ctx, `
+SELECT applied_checksum, ready
+FROM atheros_search.schema_readiness
+WHERE domain = 'atheros_search'
+LIMIT 1
+`).Scan(&manifestSHA256, &ready)
+	if err != nil {
+		return fmt.Errorf("schema readiness query: %w", err)
+	}
+	manifestSHA256 = strings.ToLower(manifestSHA256)
+	if manifestSHA256 != expectedSHA256 {
+		return fmt.Errorf("schema manifest mismatch: got %s, expected %s", manifestSHA256, expectedSHA256)
+	}
+	if !ready {
+		return fmt.Errorf("schema not ready: ready=%t", ready)
+	}
+	logger.Info().
+		Str("manifest_sha256", manifestSHA256).
+		Bool("ready", ready).
+		Msg("schema gate passed")
+	return nil
+}

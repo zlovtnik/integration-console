@@ -167,7 +167,7 @@ func inputTokens(f *llamaFake, input string) int {
 func TestEmbedPoolsChunkVectorsInDeterministicOrder(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	client := newTestClient(server)
 	short := "kind: event query"
 	medium := syntheticSequenceText(490)
@@ -195,7 +195,7 @@ func TestEmbedPoolsChunkVectorsInDeterministicOrder(t *testing.T) {
 func TestEmbedRequestPackingStaysWithinTokenBudget(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	client := newTestClient(server)
 	texts := make([]string, 12)
 	for i := range texts {
@@ -234,7 +234,7 @@ func TestEmbedRequestPackingStaysWithinTokenBudget(t *testing.T) {
 func TestEmbedSplitsPackedRequestsAcrossBackendSlots(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	client := newTestClient(server)
 	client.PackTokenLimit = 4096
 	texts := make([]string, 4)
@@ -253,7 +253,7 @@ func TestEmbedSplitsPackedRequestsAcrossBackendSlots(t *testing.T) {
 func TestEmbedKeepsConfiguredRequestsInFlight(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	var mu sync.Mutex
 	inFlight := 0
 	peak := 0
@@ -306,7 +306,7 @@ func TestEmbedKeepsConfiguredRequestsInFlight(t *testing.T) {
 func TestEmbedRejectsOversizedInputBeforeEmbedding(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	client := newTestClient(server)
 	client.MaxChunksPerInput = 1
 
@@ -330,7 +330,7 @@ func TestEmbedRejectsOversizedInputBeforeEmbedding(t *testing.T) {
 func TestEmbedTokenizerConcurrencyIsBounded(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	var mu sync.Mutex
 	inFlight, peak := 0, 0
 	inner := server.Config.Handler
@@ -372,7 +372,7 @@ func TestEmbedTokenizerConcurrencyIsBounded(t *testing.T) {
 func TestChunkingSynthetic173443TokenSequence(t *testing.T) {
 	fake := &llamaFake{}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	client := newTestClient(server)
 	text := syntheticSequenceText(173443)
 	if _, err := client.Embed(context.Background(), []string{text}, KindSequence); err != nil {
@@ -400,7 +400,7 @@ func TestChunkingSynthetic173443TokenSequence(t *testing.T) {
 func TestValidateTokenizerRejectsUnavailableEndpoints(t *testing.T) {
 	fake := &llamaFake{tokenError: true}
 	server := fake.server()
-	defer server.Close()
+	defer server.Close() // Best-effort test teardown; assertions verify the operation before cleanup.
 	err := newTestClient(server).ValidateTokenizer(context.Background())
 	if err == nil || !errors.Is(err, ErrBackendUnavailable) {
 		t.Fatalf("ValidateTokenizer error = %v, want unavailable error", err)

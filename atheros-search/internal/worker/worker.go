@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 )
 

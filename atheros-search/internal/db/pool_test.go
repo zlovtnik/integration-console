@@ -35,7 +35,7 @@ func TestValidateDriverConfigRequiresDedicatedExternalAtherosSearchDatabase(t *t
 func TestSchemaReadyTreatsMissingRowAsNotReady(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	mock.ExpectQuery("SELECT applied_checksum, ready").WillReturnError(sql.ErrNoRows)
 
 	pool := &Pool{DB: sqlDB, expectedManifest: "expected"}

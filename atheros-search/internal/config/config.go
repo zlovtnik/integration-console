@@ -263,7 +263,7 @@ func validatePostgresPool(cfg Config) error {
 		return errors.New("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS must be between 0 and ATHSEARCH_POSTGRES_MAX_OPEN_CONNS")
 	}
 	if cfg.PostgresConnMaxLifetime <= 0 || cfg.PostgresConnMaxIdleTime <= 0 {
-		return errors.New("Postgres connection lifetime and idle time must be positive")
+		return errors.New("postgres connection lifetime and idle time must be positive")
 	}
 	return nil
 }
@@ -344,7 +344,7 @@ func validateJWTURL(name, value string) error {
 		return nil
 	}
 	parsed, err := url.ParseRequestURI(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Host))) {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && (parsed.Scheme != "http" || !isLoopbackHost(parsed.Host))) {
 		return fmt.Errorf("%s must be an absolute HTTPS URL (HTTP allowed for loopback only)", name)
 	}
 	return nil

@@ -1,4 +1,4 @@
-package worker
+package etlhealth
 
 import (
 	"context"
@@ -13,7 +13,8 @@ type stubSemanticStatus struct {
 	worker SemanticHealth
 }
 
-func (s stubSemanticStatus) QuerySemantic() SemanticHealth  { return s.query }
+func (s stubSemanticStatus) QuerySemantic() SemanticHealth { return s.query }
+
 func (s stubSemanticStatus) WorkerSemantic() SemanticHealth { return s.worker }
 
 func TestWirelessProjection(t *testing.T) {

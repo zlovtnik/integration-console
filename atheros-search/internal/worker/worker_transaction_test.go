@@ -10,7 +10,6 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
-
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 )
 

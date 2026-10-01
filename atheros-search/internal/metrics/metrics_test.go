@@ -30,7 +30,7 @@ func TestNewInitializesStableZeroValuedSeries(t *testing.T) {
 func TestStartServerReturnsBindFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "[::]:0")
 	require.NoError(t, err)
-	defer listener.Close()
+	defer func() { _ = listener.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	port := listener.Addr().(*net.TCPAddr).Port
 
 	server, err := StartServer(context.Background(), port, false)
@@ -47,7 +47,7 @@ func TestProfilingRoutesAreOptIn(t *testing.T) {
 
 			response, err := http.Get("http://" + server.Addr + "/debug/pprof/")
 			require.NoError(t, err)
-			defer response.Body.Close()
+			defer func() { _ = response.Body.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 			body, err := io.ReadAll(response.Body)
 			require.NoError(t, err)
 			if profilingEnabled {

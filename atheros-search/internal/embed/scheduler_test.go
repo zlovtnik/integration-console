@@ -81,8 +81,8 @@ func TestSchedulerReturnsWorkerPermitWhenGlobalWaitIsCanceled(t *testing.T) {
 func TestSchedulerReportsSlotWaitsToObserver(t *testing.T) {
 	scheduler := NewScheduler(1, 0)
 	type observed struct {
-		lane    Lane
-		waited  time.Duration
+		lane     Lane
+		waited   time.Duration
 		canceled bool
 	}
 	var events []observed

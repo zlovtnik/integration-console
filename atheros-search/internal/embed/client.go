@@ -367,7 +367,7 @@ func (c *HTTPClient) postJSON(ctx context.Context, path string, body []byte, out
 	if err != nil {
 		return &BackendUnavailableError{Cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // Response body is already decoded or discarded; closing releases transport resources.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		responseBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {

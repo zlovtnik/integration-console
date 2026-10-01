@@ -1,4 +1,4 @@
-package worker
+package etlhealth
 
 import (
 	"context"
@@ -13,16 +13,11 @@ const (
 	// background refresh runs. The health queries count multi-million row
 	// queue tables (seconds of database time per refresh) and four HTTP
 	// surfaces plus the 5s ETL stream all share one Snapshot.
-	snapshotCacheTTL = 30 * time.Second
-	// workerHeartbeatFresh is the age past which a worker_heartbeat row no
-	// longer counts as a live worker. Workers write every max(10s, poll*10).
-	workerHeartbeatFresh = 5 * time.Minute
+	snapshotCacheTTL       = 30 * time.Second
+	snapshotRefreshTimeout = 30 * time.Second
 	// embeddingBacklogAge is how old the oldest open embedding job may be
 	// before embedding_dependency reports backlog instead of healthy.
 	embeddingBacklogAge = time.Hour
-	// jobStaleAge is the queued-work window behind job_orphaned: pending or
-	// running jobs older than this are counted as orphaned.
-	jobStaleAge = 5 * time.Minute
 	// wirelessProjectionFresh is how old the newest indexed observation may be
 	// before wireless ingestion stops counting as fresh.
 	wirelessProjectionFresh = 30 * time.Minute
@@ -92,23 +87,21 @@ type WorkerHeartbeat struct {
 }
 
 type HealthMonitor struct {
-	db     *sql.DB
-	logger interface {
-		Debug() interface{ Msg(string) }
-	}
+	db *sql.DB
 
-	mu          sync.Mutex
-	cached      *ETLHealth
-	lastErr     error
-	refreshing  bool
-	refreshDone chan struct{}
-	cacheTTL    time.Duration
-	semantic    SemanticStatus
-	observer    func(ETLHealth)
+	mu             sync.Mutex
+	cached         *ETLHealth
+	lastErr        error
+	refreshing     bool
+	refreshDone    chan struct{}
+	cacheTTL       time.Duration
+	refreshTimeout time.Duration
+	semantic       SemanticStatus
+	observer       func(ETLHealth)
 }
 
 func NewHealthMonitor(db *sql.DB) *HealthMonitor {
-	return &HealthMonitor{db: db, cacheTTL: snapshotCacheTTL}
+	return &HealthMonitor{db: db, cacheTTL: snapshotCacheTTL, refreshTimeout: snapshotRefreshTimeout}
 }
 
 // SetSemanticStatus binds the live semantic-backend view merged into every
@@ -188,7 +181,9 @@ func (h *HealthMonitor) startRefreshLocked() {
 }
 
 func (h *HealthMonitor) refresh() {
-	health, err := h.snapshotFromDB(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), h.refreshTimeout)
+	defer cancel()
+	health, err := h.snapshotFromDB(ctx)
 	h.mu.Lock()
 	var observer func(ETLHealth)
 	if err != nil {
@@ -391,7 +386,7 @@ WHERE last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
 ORDER BY worker_id
 `)
 	if err == nil {
-		defer rows.Close()
+		defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 		for rows.Next() {
 			var (
 				wh       WorkerHeartbeat
