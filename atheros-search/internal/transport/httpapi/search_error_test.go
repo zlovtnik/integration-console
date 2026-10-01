@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -57,6 +58,32 @@ func TestHTTPStatusFromErrorClassifiesDegradationAndBadRequests(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, httpStatusFromError(&search.UnavailableError{Code: search.FallbackBackendUnavailable}))
 	require.Equal(t, http.StatusBadRequest, httpStatusFromError(embed.ErrInvalidRequest))
 	require.Equal(t, http.StatusBadRequest, httpStatusFromError(embed.ErrOversizedInput))
+}
+
+func TestErrorProducerMatchesSharedUIFixtures(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/contracts/errors.json")
+	require.NoError(t, err)
+	var fixtures []struct {
+		Status int               `json:"status"`
+		Body   map[string]string `json:"body"`
+	}
+	require.NoError(t, json.Unmarshal(data, &fixtures))
+	for _, fixture := range fixtures {
+		recorder := httptest.NewRecorder()
+		if fixture.Status == http.StatusServiceUnavailable {
+			writeSearchError(recorder, &search.UnavailableError{Code: fixture.Body["code"], Message: fixture.Body["error"]})
+		} else {
+			message := fixture.Body["error"]
+			if fixture.Status == http.StatusInternalServerError {
+				message = "private database failure"
+			}
+			writeError(recorder, fixture.Status, message)
+		}
+		require.Equal(t, fixture.Status, recorder.Code)
+		expected, err := json.Marshal(fixture.Body)
+		require.NoError(t, err)
+		require.JSONEq(t, string(expected), recorder.Body.String())
+	}
 }
 
 type errInternal struct{}

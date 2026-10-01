@@ -244,7 +244,10 @@ WHERE status = 'leased'
 	if err != nil {
 		return fmt.Errorf("reset stale jobs: %w", err)
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	logger.Info().Int64("reset", affected).Dur("stale_threshold", staleThreshold).Msg("stale jobs reset to pending")
 	return nil
 }
@@ -264,7 +267,10 @@ WHERE status = 'failed'
 	if err != nil {
 		return fmt.Errorf("retry failed jobs: %w", err)
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	logger.Info().Int64("retried", affected).Msg("retryable embedding jobs reset to pending; terminal diagnostics retained")
 	return nil
 }
@@ -321,7 +327,10 @@ WHERE job.job_id = targets.job_id
 	if err != nil {
 		return fmt.Errorf("cancel superseded embedding jobs: %w", err)
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("embedding jobs on superseded documents cancelled")
 	if affected < int64(limit) {
 		logger.Info().Int64("cancelled", affected).Msg("fewer rows matched than the limit; nothing left to cancel")

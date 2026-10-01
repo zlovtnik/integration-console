@@ -1,7 +1,7 @@
 LINT_VERSION := 2.13.2
 GO ?= go
 PYTHON ?= python3
-export PATH := $(shell $(GO) env GOPATH)/bin:$(PATH)
+export PATH := $(PATH):$(shell $(GO) env GOPATH)/bin
 
 .PHONY: quality quality-go fmt-check vet test test-race lint boundaries proto proto-check stack-contract db-contract fixtures fixtures-go ui-check build duplication-report tools
 quality: quality-go fixtures ui-check
