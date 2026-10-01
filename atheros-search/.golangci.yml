@@ -1,0 +1,36 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - errcheck
+    - bodyclose
+    - gosec
+    - depguard
+  exclusions:
+    presets: []
+  settings:
+    depguard:
+      rules:
+        reporting:
+          files:
+            - "**/internal/reporting/*.go"
+          deny:
+            - pkg: github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search
+              desc: Reporting cannot depend on Search.
+        transport:
+          files:
+            - "**/internal/transport/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: database/sql
+              desc: Feature services own SQL and transactions.
+            - pkg: github.com/jackc/pgx
+              desc: Feature services own SQL and transactions.
+            - pkg: github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db
+              desc: Inject consuming transport interfaces.

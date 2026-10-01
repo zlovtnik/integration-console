@@ -1,0 +1,8 @@
+[
+  {"status":400, "body":{"error":"unsupported asset annotation kind"}},
+  {"status":404, "body":{"error":"saved view not found"}},
+  {"status":409, "body":{"error":"saved view revision conflict"}},
+  {"status":403, "body":{"error":"saved views require a signed-in user"}},
+  {"status":500, "body":{"error":"internal server error"}},
+  {"status":503, "body":{"error":"semantic backend capacity exhausted", "code":"embedding_capacity_exhausted"}}
+]

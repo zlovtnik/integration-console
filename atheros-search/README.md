@@ -148,7 +148,7 @@ Key routes:
 | `GET` | `/v1/etl/health` | ETL summary |
 | `GET` | `/v1/etl/embedding/jobs` | Embedding job state |
 | `GET` | `/v1/etl/workers` | Worker heartbeat state |
-| `GET` | `/v1/etl/stream` | NDJSON ETL snapshots when WebSockets are enabled |
+| `GET` | `/v1/etl/stream` | WebSocket JSON text snapshots when enabled |
 | `GET` | `/healthz` | Liveness |
 | `GET` | `/readyz` | Postgres/schema/vector/embedding readiness |
 
@@ -289,9 +289,14 @@ Do not log raw queries, source keys, session IDs, tokens or full MACs. See
 ```bash
 go test ./...
 go build ./cmd/server
-make atheros-search-proto
+make proto-check
 go run ./cmd/embedding-job-repair -action=status
 ```
+
+See [maintenance rules](docs/quality.md), [package map](docs/package-map.md), and
+[contract inventory](docs/contracts.md) for required checks and ownership.
+Run `make quality-go` and `make ui-check`; canonical database checks require
+`ATHSEARCH_STACK_ROOT`. Use `make proto` for generation.
 
 Run protobuf generation only after changing the source `.proto`. Repair
 commands and deployment cautions are documented in

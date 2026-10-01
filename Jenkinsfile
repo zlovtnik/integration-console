@@ -24,7 +24,7 @@ pipeline {
             sh '''
               set -eu
               tar -cf - atheros-search | docker run --rm -i -w /workspace/atheros-search golang:1.26-bookworm \
-                sh -c 'mkdir -p /workspace && tar --no-same-owner -C /workspace -xf - && go test ./...'
+                sh -c 'mkdir -p /workspace && tar --no-same-owner -C /workspace -xf - && apt-get update && apt-get install -y --no-install-recommends unzip && sh scripts/ci-tools.sh && make quality-go'
             '''
           }
         }
@@ -32,7 +32,7 @@ pipeline {
           steps {
             sh '''
               set -eu
-              tar -cf - atheros-search-ui | docker run --rm -i -w /workspace/atheros-search-ui oven/bun:1.3.11 \
+              tar -cf - atheros-search-ui atheros-search/testdata/contracts | docker run --rm -i -w /workspace/atheros-search-ui oven/bun:1.3.11 \
                 sh -c 'mkdir -p /workspace && tar --no-same-owner -C /workspace -xf - && bun install --frozen-lockfile && bun run test && bun run build'
             '''
           }

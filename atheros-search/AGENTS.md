@@ -1,73 +1,31 @@
-# AGENTS.md
+# Atheros Search agent instructions
 
-## Scope
-This file governs `apps/integration-console/atheros-search` relative to the
-repository root.
+This subtree retains the Go module
+`github.com/zlovtnik/ssl-proxy/services/atheros-search` and inherits the parent
+repository architecture rules. Follow [maintenance rules](docs/quality.md),
+[package ownership](docs/package-map.md), and [contracts](docs/contracts.md).
 
-## Project Shape
-- Go module: `github.com/zlovtnik/ssl-proxy/services/atheros-search`.
-- `cmd/server/` starts the HTTP/gRPC service with optional embedding worker
-  pool and ETL health monitor.
-- `cmd/embedding-job-repair/` is a CLI tool for inspecting and repairing
-  stuck or failed embedding jobs.
-- `internal/api/` owns HTTP routes, CORS, auth wiring, NDJSON streaming,
-  gRPC gateway behavior, and ETL health/WebSocket endpoints.
-- `internal/search/` owns dense/sparse/hybrid search, graph, inventory,
-  explain, and suggest logic.
-- `internal/embed/` owns query embedding, caching, and backend circuit
-  breaking.
-- `internal/worker/` owns the embedding job worker pool with fenced lease-based
-  claiming and ETL health monitoring. Workers claim
-  pending jobs from `embedding_jobs`, call the embedding backend, and
-  write vectors to `search_vectors_*` tables.
-- `internal/health/` owns readiness checks and schema gate logic.
-- Alert derivation and projection maintenance remain Octopus concerns.
+- Entrypoints call internal/app; HTTP and gRPC transports consume small feature
+  interfaces. Feature services own their SQL and transactions.
+- Reporting cannot import Search. Shared leaf packages cannot import features
+  or transports. Verify these boundaries with `make boundaries`.
+- Search streaming emits protobuf-JSON result lines followed by a done marker
+  with response metadata. ETL streaming uses WebSocket JSON text frames.
+- Saved-view owner identity is the immutable JWT subject; static tokens do not
+  supply an end-user owner. Responses and logs never expose that subject.
+- Keep diagnostic query/source/session/MAC values hashed or summarized.
+- PostgreSQL configuration accepts only ATHSEARCH_POSTGRES_* variables, with no
+  DATABASE_URL or SYNC_DATABASE_URL fallback. ATHSEARCH_STACK_ROOT is test-only.
+- Workers remain opt-in through ATHSEARCH_WORKER_ENABLED=true. Keep token/fence
+  checks in every lease mutation and atomic vector completion.
+- Operational embedding repair lives in app/repair; health aggregation lives
+  in etlhealth. Do not combine their query lifecycles.
 
-## Guardrails
-- Keep public API compatibility in mind for `/v1/search`, `/v1/search/stream`,
-  `/v1/explain/{source_key}`, `/v1/suggest/filters`, graph, inventory,
-  merge-decision, saved-views, and `/v1/etl/*` endpoints.
-- The stream endpoint emits one protobuf-JSON `SearchResult` per line and ends
-  with a `{"type":"done"}` marker; preserve clients that parse that contract.
-- The ETL stream endpoint (`/v1/etl/stream`) sends newline-delimited JSON
-  snapshots; preserve this contract for Solid.js consumers.
-- Keep request body limits, CORS allow-list behavior, token auth, request
-  cancellation, and timeout handling intact.
-- Do not log raw search queries, source keys, session IDs, API tokens, or MACs
-  when existing code hashes or summarizes them.
-- Saved views belong to the immutable Keycloak `sub`. Never log the owning
-  subject or return it in a response body; audit fields keep `preferred_username`.
-- Keep config in `ATHSEARCH_*` env vars. The preferred PostgreSQL connection
-  setting is `ATHSEARCH_POSTGRES_DSN`; the discrete settings
-  `ATHSEARCH_POSTGRES_HOST`, `ATHSEARCH_POSTGRES_PORT`, `ATHSEARCH_POSTGRES_DATABASE`,
-  `ATHSEARCH_POSTGRES_USER`, and `ATHSEARCH_POSTGRES_PASSWORD` remain supported
-  when the DSN is absent. Shared PostgreSQL URL fallbacks outside the
-  `ATHSEARCH_POSTGRES_*` family are prohibited.
-- Keep shared PostgreSQL/vector schema changes in the repository `sql/postgres/atheros_search`
-  domain.
-  Service-local migrations are only for future private schema.
-- Do not hand-edit generated protobuf files. Change `search.proto`, regenerate,
-  and include generated outputs only when the proto contract changes.
-- Worker pool configuration uses `ATHSEARCH_WORKER_*` and
-  `ATHSEARCH_EMBEDDING_BATCH_SIZE`, `ATHSEARCH_LEASE_SECONDS`,
-  `ATHSEARCH_POLL_INTERVAL_MS` env vars. Workers are opt-in via
-  `ATHSEARCH_WORKER_ENABLED=true`.
+Run `make quality-go` for standalone Go checks, `make fixtures` for shared UI
+fixtures, and `make ui-check` for UI tests/build. Canonical checks require an
+absolute ATHSEARCH_STACK_ROOT: `make stack-contract` and `make db-contract`.
+Required database checks must execute without skips.
 
-## Commands
-- Run all tests: `go test ./...`.
-- Root Makefile equivalent: `make atheros-search-test`.
-- Build server: `make atheros-search-build`.
-- Regenerate protobufs after proto changes: `make atheros-search-proto`.
-- Format Go files: `gofmt -w <files>`.
-- Repair embedding jobs: `go run ./cmd/embedding-job-repair -action=status`.
-- Reset stale jobs: `go run ./cmd/embedding-job-repair -action=reset-stale -stale-minutes=60`.
-- Retry failed jobs: `go run ./cmd/embedding-job-repair -action=retry-failed`.
-- Count dead work first: `go run ./cmd/embedding-job-repair -action=cancel-superseded -dry-run`.
-- Reap jobs on superseded documents: `go run ./cmd/embedding-job-repair -action=cancel-superseded -limit=5000`.
-
-## Verification
-- Run package-targeted `go test` for changed packages, then `go test ./...`
-  when search, API, database, embedding, or shared types changed.
-- If `search.proto` changes, regenerate protobufs and run `go test ./...`.
-- If SQL assumptions change, run relevant service tests plus schema-migrator or
-  coordinator SQL contract tests as appropriate.
+Use `make proto` only after proto source changes and `make proto-check` for
+comparison. Tool pins and parent Make wrappers are documented in quality.md.
+Repair CLI operations are documented in [scripts/README.md](scripts/README.md).

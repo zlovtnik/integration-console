@@ -1,0 +1,36 @@
+{
+  "queryId": "42",
+  "results": [
+    {
+      "sourceKey": "synthetic-record",
+      "sourceTable": "wireless_frames",
+      "sourceMac": "aa:bb:cc:dd:ee:01",
+      "observedAt": "2026-09-01T11:00:00Z",
+      "score": 0.5,
+      "keywordRank": 0.25,
+      "tags": ["synthetic"],
+      "sourceKind": "event",
+      "detailJson": "{}",
+      "blocked": false
+    },
+    {"sourceKey": "synthetic-nullable", "sourceKind": "device"}
+  ],
+  "modeUsed": "SEARCH_MODE_SPARSE",
+  "fallbackReason": "semantic backend capacity exhausted",
+  "sparseResultCount": 2,
+  "fusedResultCount": 2,
+  "report": {
+    "scope": null,
+    "entity_grain": "versioned source record",
+    "count_meaning": "returned records",
+    "observation_basis": "event times",
+    "freshness": "unavailable",
+    "loaded_rows": 2,
+    "incomplete_coverage": true,
+    "unavailable_capabilities": ["source_watermark", "projection_watermark", "sensor_coverage"],
+    "live": true
+  },
+  "generatedAt": "2026-09-01T11:00:00Z",
+  "fallbackCode": "embedding_capacity_exhausted",
+  "fallbackRetryAt": "2026-09-01T11:01:00Z"
+}
