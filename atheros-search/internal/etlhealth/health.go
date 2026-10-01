@@ -125,7 +125,7 @@ func (h *HealthMonitor) SetSnapshotObserver(fn func(ETLHealth)) {
 // Warm primes the snapshot cache so the first HTTP caller does not pay for a
 // full refresh. Failures are retried by Snapshot.
 func (h *HealthMonitor) Warm(ctx context.Context) {
-	_, _ = h.Snapshot(ctx)
+	_, _ = h.Snapshot(ctx) // Best-effort warmup; refresh records errors and later Snapshot callers retry.
 }
 
 // Snapshot returns the most recent health snapshot. Because the gauges count

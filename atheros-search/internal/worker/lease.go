@@ -287,7 +287,11 @@ func insertVector(ctx context.Context, tx *sql.Tx, documentID, embeddingKind, em
 	if err != nil {
 		return err
 	}
-	vecStr := formatVector(embedding)
+	encoded, err := json.Marshal(embedding)
+	if err != nil {
+		return fmt.Errorf("encode embedding vector: %w", err)
+	}
+	vecStr := string(encoded)
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO atheros_search.embeddings (
   document_id, embedding_kind, embedding_model, content_sha256, embedding, embedded_at
@@ -326,11 +330,6 @@ func vectorTableForKind(kind string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown embedding kind: %s", kind)
 	}
-}
-
-func formatVector(v []float32) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }
 
 func upsertHeartbeat(ctx context.Context, db *sql.DB, workerID, workerType string, metadata json.RawMessage) error {

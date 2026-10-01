@@ -411,9 +411,9 @@ func (v *jwtVerifier) refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch JWKS: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = resp.Body.Close() }() // Best-effort release after decoding or rejecting the response.
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)) // Best-effort drain; the rejected status is returned below.
 		return fmt.Errorf("fetch JWKS: unexpected status %d", resp.StatusCode)
 	}
 	var document jwksDocument
