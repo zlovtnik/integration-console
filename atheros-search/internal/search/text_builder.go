@@ -2,7 +2,6 @@ package search
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -225,22 +224,4 @@ func laterLinesHaveWords(lines []string) bool {
 		}
 	}
 	return false
-}
-
-func TagsFromJSON(tags []string) []string {
-	out := make([]string, 0, len(tags))
-	seen := map[string]struct{}{}
-	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
-		}
-		if _, ok := seen[tag]; ok {
-			continue
-		}
-		seen[tag] = struct{}{}
-		out = append(out, tag)
-	}
-	sort.Strings(out)
-	return out
 }

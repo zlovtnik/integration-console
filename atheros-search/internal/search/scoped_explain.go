@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
 
@@ -23,7 +24,7 @@ type ScopedExplainRequest struct {
 func (s *Service) ExplainScoped(ctx context.Context, req ScopedExplainRequest) (*ExplainDetails, error) {
 	req.SourceKey = strings.TrimSpace(req.SourceKey)
 	if req.SourceKey == "" {
-		return nil, errors.New("source_key is required")
+		return nil, apperror.Validationf("source_key is required")
 	}
 	kinds, err := requestKinds(req.Kind)
 	if err != nil {

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/reporting"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
 
@@ -58,10 +61,10 @@ type RecordFields struct {
 // with neither a device MAC nor an AP BSSID has no neighbourhood to report,
 // which is surfaced as unavailable rather than as an empty result.
 func (f RecordFields) anchor() (kind, id string) {
-	if macPattern.MatchString(f.SourceMAC) {
+	if queryscope.MacPattern.MatchString(f.SourceMAC) {
 		return "device", f.SourceMAC
 	}
-	if macPattern.MatchString(f.BSSID) {
+	if queryscope.MacPattern.MatchString(f.BSSID) {
 		return "ap", f.BSSID
 	}
 	return "", ""
@@ -163,20 +166,20 @@ type RecordContextRequest struct {
 }
 
 type RecordContext struct {
-	SourceKey     string                 `json:"source_key"`
-	Found         bool                   `json:"found"`
-	Record        *RecordFields          `json:"record"`
-	WindowStart   time.Time              `json:"window_start"`
-	WindowEnd     time.Time              `json:"window_end"`
-	BucketMinutes int                    `json:"bucket_minutes"`
-	Activity      []ActivityBucket       `json:"activity"`
-	ActivityTotal ActivityTotals         `json:"activity_totals"`
-	Related       *RelatedContext        `json:"related"`
-	RelatedReason string                 `json:"related_unavailable_reason,omitempty"`
-	Embedding     []EmbeddingWork        `json:"embedding"`
-	EmbeddingNote string                 `json:"embedding_note,omitempty"`
-	Freshness     InvestigationFreshness `json:"freshness"`
-	GeneratedAt   time.Time              `json:"generated_at"`
+	SourceKey     string                           `json:"source_key"`
+	Found         bool                             `json:"found"`
+	Record        *RecordFields                    `json:"record"`
+	WindowStart   time.Time                        `json:"window_start"`
+	WindowEnd     time.Time                        `json:"window_end"`
+	BucketMinutes int                              `json:"bucket_minutes"`
+	Activity      []ActivityBucket                 `json:"activity"`
+	ActivityTotal ActivityTotals                   `json:"activity_totals"`
+	Related       *RelatedContext                  `json:"related"`
+	RelatedReason string                           `json:"related_unavailable_reason,omitempty"`
+	Embedding     []EmbeddingWork                  `json:"embedding"`
+	EmbeddingNote string                           `json:"embedding_note,omitempty"`
+	Freshness     reporting.InvestigationFreshness `json:"freshness"`
+	GeneratedAt   time.Time                        `json:"generated_at"`
 }
 
 type resolvedDocument struct {
@@ -193,8 +196,8 @@ func (s *Service) resolveDocument(ctx context.Context, sourceKey string, kinds [
 	for _, kind := range kinds {
 		args = append(args, kind)
 	}
-	placeholders := pgPlaceholders(2, len(kinds))
-	scope, scopeArgs := documentScopeSQL("d", filters, len(args)+1)
+	placeholders := queryscope.PgPlaceholders(2, len(kinds))
+	scope, scopeArgs := queryscope.DocumentScopeSQL("d", filters, len(args)+1)
 	args = append(args, scopeArgs...)
 
 	var (
@@ -232,9 +235,9 @@ ORDER BY d.source_kind LIMIT 1`, args...).Scan(
 	if err != nil {
 		return nil, err
 	}
-	document.Fields.ObservedAt = nullTimePtr(observedAt)
-	document.Fields.WindowStart = nullTimePtr(windowStart)
-	document.Fields.WindowEnd = nullTimePtr(windowEnd)
+	document.Fields.ObservedAt = queryscope.NullTimePtr(observedAt)
+	document.Fields.WindowStart = queryscope.NullTimePtr(windowStart)
+	document.Fields.WindowEnd = queryscope.NullTimePtr(windowEnd)
 	document.Fields.DocumentID = document.DocumentID
 	if blocked.Valid {
 		value := blocked.Bool
@@ -281,7 +284,7 @@ func sequenceTokensFromDetail(detailJSON string) []string {
 func (s *Service) RecordContext(ctx context.Context, req RecordContextRequest) (*RecordContext, error) {
 	sourceKey := strings.TrimSpace(req.SourceKey)
 	if sourceKey == "" {
-		return nil, errors.New("source_key is required")
+		return nil, apperror.Validationf("source_key is required")
 	}
 	kinds, err := requestKinds(req.Kind)
 	if err != nil {
@@ -337,17 +340,17 @@ func (s *Service) RecordContext(ctx context.Context, req RecordContextRequest) (
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // Cleanup after the operation; Commit errors are returned and an already committed transaction needs no rollback.
 
-	freshness, err := investigationWatermarks(ctx, tx)
+	freshness, err := reporting.InvestigationWatermarks(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	response.Freshness = freshness
 
 	anchorKind, anchorID := document.Fields.anchor()
-	switch {
-	case anchorKind == "":
+	switch anchorKind {
+	case "":
 		response.RelatedReason = "This record carries no device MAC and no AP BSSID, so the evidence projection has no neighbourhood to report for it."
 	default:
 		if err := s.loadRecordActivity(ctx, tx, anchorKind, anchorID, windowStart, windowEnd, bucket, response); err != nil {
@@ -394,6 +397,7 @@ func (s *Service) loadRecordActivity(ctx context.Context, tx *sql.Tx, anchorKind
 	seconds := bucketMinutes * 60
 	bucketExpr := `to_timestamp(FLOOR(EXTRACT(EPOCH FROM summary.window_start) / ` +
 		fmt.Sprint(seconds) + `) * ` + fmt.Sprint(seconds) + `)`
+	// #nosec G202 -- bucketExpr and clauses are fixed SQL expressions; window and anchor values are bound in args.
 	rows, err := tx.QueryContext(ctx, `SELECT `+bucketExpr+` AS bucket,
  SUM(summary.frame_count), COUNT(DISTINCT summary.sensor_id), COUNT(DISTINCT summary.bssid),
  AVG(summary.rssi_avg_dbm), MIN(summary.first_observed_at), MAX(summary.last_observed_at)
@@ -403,7 +407,7 @@ GROUP BY 1 ORDER BY 1 ASC`, args...)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	minutes := float64(bucketMinutes)
 	for rows.Next() {
 		var item ActivityBucket
@@ -459,37 +463,30 @@ func (s *Service) loadRecordRelated(ctx context.Context, tx *sql.Tx, anchorKind,
 	// APBSSID. investigationScopeWith reads those fields, not Anchor, so
 	// skipping it would scope the roster to the whole window instead of this
 	// anchor's neighbourhood.
-	request, err := normalizeInvestigationRequest(InvestigationRequest{
-		Anchor:         InvestigationAnchor{Kind: anchorKind, ID: anchorID},
+	request, err := reporting.NormalizeInvestigationRequest(reporting.InvestigationRequest{
+		Anchor:         reporting.InvestigationAnchor{Kind: anchorKind, ID: anchorID},
 		ObservedAfter:  &windowStart,
 		ObservedBefore: &windowEnd,
-		NodeLimit:      InvestigationDefaultNodes,
-		EdgeLimit:      InvestigationDefaultEdges,
-		EvidenceSize:   InvestigationDefaultRows,
+		NodeLimit:      reporting.InvestigationDefaultNodes,
+		EdgeLimit:      reporting.InvestigationDefaultEdges,
+		EvidenceSize:   reporting.InvestigationDefaultRows,
 	})
 	if err != nil {
 		return nil, err
 	}
-	scope, args := investigationScope(request, "summary")
-	investigation := &InvestigationResponse{
+	investigation := &reporting.InvestigationResponse{
 		Anchor:       request.Anchor,
-		Nodes:        []GraphNode{},
-		Links:        []InvestigationLink{},
-		Roster:       []RosterMember{},
-		Evidence:     []InvestigationEvidence{},
+		Nodes:        []reporting.GraphNode{},
+		Links:        []reporting.InvestigationLink{},
+		Roster:       []reporting.RosterMember{},
+		Evidence:     []reporting.InvestigationEvidence{},
 		RFProximity:  "unknown",
 		EvidencePage: 0,
-		Freshness:    InvestigationFreshness{CoverageStatus: "unknown"},
+		Freshness:    reporting.InvestigationFreshness{CoverageStatus: "unknown"},
 		GeneratedAt:  generatedAt,
 	}
 	freshCutoff := generatedAt.Add(-24 * time.Hour)
-	if err := s.investigationRoster(ctx, tx, scope, args, request, investigation, freshCutoff); err != nil {
-		return nil, err
-	}
-	if err := s.investigationAssociationLinks(ctx, tx, request, investigation, freshCutoff); err != nil {
-		return nil, err
-	}
-	if err := s.investigationTypedLinks(ctx, tx, request, investigation, freshCutoff); err != nil {
+	if err := (&reporting.Service{Pool: s.Pool}).RecordEvidence(ctx, tx, request, investigation, freshCutoff, anchorKind != "device"); err != nil {
 		return nil, err
 	}
 
@@ -522,16 +519,13 @@ func (s *Service) loadRecordRelated(ctx context.Context, tx *sql.Tx, anchorKind,
 				To:          "device:" + peer.MAC,
 				Weight:      float64(peer.WindowCount),
 				WeightBasis: "time_overlap_windows",
-				Confidence:  rfConfidence(peer.SensorCount, peer.WindowCount),
+				Confidence:  reporting.RFConfidence(peer.SensorCount, peer.WindowCount),
 				Fresh:       !peer.LastSeen.Before(freshCutoff),
 			})
 		}
 	} else {
 		// An AP anchor yields many devices in the roster, so device-to-device
 		// proximity among them is meaningful here.
-		if err := s.investigationRFSimilarityLinks(ctx, tx, request, investigation, freshCutoff); err != nil {
-			return nil, err
-		}
 		related.RFProximity = investigation.RFProximity
 		for _, member := range investigation.Roster {
 			related.Neighbours = append(related.Neighbours, Neighbour{
@@ -565,7 +559,7 @@ func (s *Service) loadRecordRelated(ctx context.Context, tx *sql.Tx, anchorKind,
 			break
 		}
 	}
-	focus := strings.TrimSpace(investigation.FocusReason + " " + investigation.rfProximityReason)
+	focus := strings.TrimSpace(investigation.FocusReason + " " + investigation.RFProximityReason())
 	if focus != "" {
 		related.FocusReason = focus
 	}
@@ -611,7 +605,7 @@ LIMIT $4`, anchorMAC, windowStart, windowEnd, recordContextNeighbourLimit)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	for rows.Next() {
 		var item Neighbour
 		var rssi sql.NullFloat64
@@ -623,7 +617,7 @@ LIMIT $4`, anchorMAC, windowStart, windowEnd, recordContextNeighbourLimit)
 			value := rssi.Float64
 			item.RSSIAvgDBM = &value
 		}
-		item.Qualifies = qualifiesRFOverlap(item.SensorCount, item.WindowCount)
+		item.Qualifies = reporting.QualifiesRFOverlap(item.SensorCount, item.WindowCount)
 		related.Neighbours = append(related.Neighbours, item)
 	}
 	return rows.Err()
@@ -644,7 +638,7 @@ ORDER BY job.embedding_kind ASC, job.embedding_model ASC`, documentID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	for rows.Next() {
 		var item EmbeddingWork
 		if err := rows.Scan(&item.EmbeddingKind, &item.EmbeddingModel, &item.Status,

@@ -45,3 +45,11 @@ type Options struct {
 }
 
 const rrfK = 60.0
+
+func resultCount(results []RawResult) int32 {
+	count := len(results)
+	if count > 2147483647 {
+		return 2147483647
+	}
+	return int32(count)
+}

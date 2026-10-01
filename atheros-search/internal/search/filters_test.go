@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestResultMatchesFilters(t *testing.T) {
@@ -33,7 +33,7 @@ func TestResultMatchesFiltersRejectsMissingRequirements(t *testing.T) {
 }
 
 func TestFilterSourceMACsNormalizesAndDeduplicates(t *testing.T) {
-	got := filterSourceMACs(&searchv1.SearchFilters{
+	got := queryscope.FilterSourceMACs(&searchv1.SearchFilters{
 		SourceMac: "AA:BB", SourceMacs: []string{"aa:bb", "CC:DD"},
 	})
 	require.Equal(t, []string{"aa:bb", "cc:dd"}, got)

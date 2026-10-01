@@ -1,6 +1,8 @@
 package search
 
-import "sort"
+import (
+	"sort"
+)
 
 func Fuse(dense []RawResult, sparse []RawResult, topK int, alpha float64) []RawResult {
 	byKey := make(map[string]*RawResult, len(dense)+len(sparse))

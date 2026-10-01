@@ -3,11 +3,14 @@ package search
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 )
 
 func Sparse(ctx context.Context, pool *sql.DB, query string, opts Options) ([]RawResult, error) {
@@ -15,7 +18,7 @@ func Sparse(ctx context.Context, pool *sql.DB, query string, opts Options) ([]Ra
 	if query == "" {
 		return nil, nil
 	}
-	if err := ensureDB(pool); err != nil {
+	if err := db.Require(pool); err != nil {
 		return nil, err
 	}
 	results := make([]RawResult, 0, opts.TopK*len(opts.Kinds))
@@ -40,7 +43,7 @@ func Sparse(ctx context.Context, pool *sql.DB, query string, opts Options) ([]Ra
 
 func sparseKind(ctx context.Context, pool *sql.DB, query, kind string, opts Options) ([]RawResult, error) {
 	if _, ok := supportedSearchKinds[kind]; !ok {
-		return nil, fmt.Errorf("unsupported sparse search kind %q", kind)
+		return nil, apperror.Validationf("unsupported sparse search kind %q", kind)
 	}
 	overfetch := opts.TopK * opts.OverfetchFactor
 	if overfetch < opts.TopK*4 {
@@ -85,7 +88,7 @@ ORDER BY ts_rank_cd(d.search_vector, websearch_to_tsquery('simple', $1)) DESC,
          d.observed_at DESC,
          d.source_id ASC
 LIMIT $3`
-	scope, args := documentScopeSQL("d", opts.Filters, 4)
+	scope, args := queryscope.DocumentScopeSQL("d", opts.Filters, 4)
 	querySQL = strings.Replace(querySQL, "\nORDER BY", scope+"\nORDER BY", 1)
 	return scanSparseRows(ctx, pool, querySQL, opts, append([]any{query, kind, overfetch}, args...)...)
 }
@@ -120,7 +123,7 @@ FROM atheros_search.search_documents d
 WHERE d.source_kind = $1 AND d.status = 'active'
 ORDER BY d.observed_at DESC, d.source_id ASC
 LIMIT $2`
-	scope, args := documentScopeSQL("d", opts.Filters, 3)
+	scope, args := queryscope.DocumentScopeSQL("d", opts.Filters, 3)
 	query = strings.Replace(query, "\nORDER BY", scope+"\nORDER BY", 1)
 	return scanSparseRows(ctx, pool, query, opts, append([]any{kind, limit}, args...)...)
 }
@@ -130,7 +133,7 @@ func scanSparseRows(ctx context.Context, pool *sql.DB, query string, opts Option
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	results := make([]RawResult, 0)
 	for rows.Next() {
 		result, err := scanSparseResult(rows)
@@ -147,64 +150,6 @@ func scanSparseRows(ctx context.Context, pool *sql.DB, query string, opts Option
 		}
 	}
 	return results, rows.Err()
-}
-
-func scanSparseResult(row scanner) (RawResult, error) {
-	var result RawResult
-	var observed, windowStart, windowEnd sql.NullTime
-	var blocked sql.NullBool
-	var tagsJSON, detailJSON string
-	var securityFlags int64
-	var handshake bool
-	err := row.Scan(
-		&result.SourceKey,
-		&result.SourceTable,
-		&result.SourceKind,
-		&result.SourceMAC,
-		&result.LocationID,
-		&result.SensorID,
-		&observed,
-		&result.BSSID,
-		&result.SSID,
-		&result.FrameSubtype,
-		&result.CosineSimilarity,
-		&result.KeywordRank,
-		&tagsJSON,
-		&detailJSON,
-		&securityFlags,
-		&handshake,
-		&result.Host,
-		&blocked,
-		&result.ProxyEventType,
-		&result.ProxyDeviceID,
-		&windowStart,
-		&windowEnd,
-		&result.Classification,
-	)
-	if err != nil {
-		return result, err
-	}
-	if observed.Valid {
-		value := observed.Time.UTC()
-		result.ObservedAt = &value
-	}
-	if blocked.Valid {
-		value := blocked.Bool
-		result.Blocked = &value
-	}
-	if windowStart.Valid {
-		value := windowStart.Time.UTC()
-		result.WindowStart = &value
-	}
-	if windowEnd.Valid {
-		value := windowEnd.Time.UTC()
-		result.WindowEnd = &value
-	}
-	result.Tags = parseTagsJSON(tagsJSON)
-	result.DetailJSON = normalizeJSONObject(detailJSON)
-	result.securityFlags = int32(securityFlags)
-	result.handshakeCaptured = handshake
-	return result, nil
 }
 
 func sparseTokenPatterns(query string) []string {

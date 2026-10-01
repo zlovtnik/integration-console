@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,17 +10,16 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/reportmeta"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Service struct {
-	searchv1.UnimplementedSearchServiceServer
-
 	Pool      *sql.DB
 	Embedder  embed.Client
 	Config    config.Config
@@ -56,13 +54,13 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 		s.Metrics.ObserveSearch(metricsKind, metricsMode, status, started, results)
 	}()
 	if req == nil {
-		return nil, errors.New("request is required")
+		return nil, apperror.Validationf("request is required")
 	}
 	metricsKind = responseKind(req.Kind)
 	metricsMode = modeName(normalizeMode(req.Mode))
 	wildcardAll := isWildcardAllSearch(req.Query)
 	if !wildcardAll && !hasMeaningfulSearchTerms(req.Query) {
-		return nil, errors.New("search query is required and must contain meaningful terms")
+		return nil, apperror.Validationf("search query is required and must contain meaningful terms")
 	}
 	query := req.Query
 	topK := config.ClampTopK(req.TopK)
@@ -164,9 +162,9 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 		ModeUsed:          modeUsed,
 		FallbackReason:    fallbackReason,
 		FallbackCode:      fallbackCode,
-		DenseResultCount:  int32(len(denseResults)),
-		SparseResultCount: int32(len(sparseResults)),
-		FusedResultCount:  int32(len(fused)),
+		DenseResultCount:  resultCount(denseResults),
+		SparseResultCount: resultCount(sparseResults),
+		FusedResultCount:  resultCount(fused),
 		Results:           make([]*searchv1.SearchResult, 0, len(fused)),
 	}
 	if !fallbackRetryAt.IsZero() {
@@ -175,7 +173,7 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 	for _, result := range fused {
 		resp.Results = append(resp.Results, toProtoResult(result))
 	}
-	report := reportMetadata(req.Filters, "versioned source record", "returned ranked records (not distinct physical assets or a full-result count)", "event times of returned records; result budget may truncate coverage", len(fused), nil)
+	report := reportmeta.New(req.Filters, "versioned source record", "returned ranked records (not distinct physical assets or a full-result count)", "event times of returned records; result budget may truncate coverage", len(fused), nil)
 	for _, result := range fused {
 		if result.ObservedAt != nil {
 			if report.ObservationStart == nil || result.ObservedAt.Before(*report.ObservationStart) {
@@ -186,22 +184,12 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 			}
 		}
 	}
-	resp.Report = reportStruct(report)
+	resp.Report, err = reportmeta.Proto(report)
+	if err != nil {
+		return nil, fmt.Errorf("encode search report: %w", err)
+	}
 	resp.GeneratedAt = timestamppb.Now()
 	return resp, nil
-}
-
-func (s *Service) SearchStream(req *searchv1.SearchRequest, stream searchv1.SearchService_SearchStreamServer) error {
-	resp, err := s.Search(stream.Context(), req)
-	if err != nil {
-		return err
-	}
-	for _, result := range resp.Results {
-		if err := stream.Send(result); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Service) Explain(ctx context.Context, req *searchv1.ExplainRequest) (*searchv1.ExplainResponse, error) {
@@ -243,7 +231,7 @@ type ExplainDetails struct {
 
 func (s *Service) ExplainDetails(ctx context.Context, req *searchv1.ExplainRequest) (*ExplainDetails, error) {
 	if req == nil || req.SourceKey == "" {
-		return nil, errors.New("source_key is required")
+		return nil, apperror.Validationf("source_key is required")
 	}
 	kinds, err := requestKinds(req.Kind)
 	if err != nil {
@@ -365,9 +353,9 @@ func requestKinds(kind searchv1.SearchKind) ([]string, error) {
 	case searchv1.SearchKind_SEARCH_KIND_UNSPECIFIED, searchv1.SearchKind_SEARCH_KIND_EVENT:
 		return []string{"event"}, nil
 	case searchv1.SearchKind_SEARCH_KIND_BEHAVIOUR:
-		return nil, errors.New("behaviour search has been retired")
+		return nil, apperror.Validationf("behaviour search has been retired")
 	case searchv1.SearchKind_SEARCH_KIND_SEQUENCE:
-		return nil, errors.New("sequence search has been retired")
+		return nil, apperror.Validationf("sequence search has been retired")
 	case searchv1.SearchKind_SEARCH_KIND_DEVICE:
 		return []string{"device"}, nil
 	case searchv1.SearchKind_SEARCH_KIND_PROXY_EVENT:
@@ -377,7 +365,7 @@ func requestKinds(kind searchv1.SearchKind) ([]string, error) {
 	case searchv1.SearchKind_SEARCH_KIND_CROSS:
 		return []string{"event", "device", "proxy_event", "proxy_blocked_host_window"}, nil
 	default:
-		return nil, errors.New("unsupported search kind")
+		return nil, apperror.Validationf("unsupported search kind")
 	}
 }
 

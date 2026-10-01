@@ -1,3 +1,5 @@
+//go:build dbcontract
+
 package search
 
 import (
@@ -5,18 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/testdb"
+
 	"github.com/stretchr/testify/require"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
 
-// These run against the canonical DDL in a Testcontainer. sqlmock cannot catch
-// a type or expression error in the record-context SQL: the document_id and
-// proxy_device_id casts, the jsonb column reads, the time-bucket expression and
-// the neighbour CTE are all only exercised here.
-
 func reportingSeedRecordContext(t *testing.T) (context.Context, *Service, time.Time) {
 	t.Helper()
-	db := reportingDB(t)
+	db := testdb.Provision(t)
+	runtimeDB := testdb.Runtime(t)
 	ctx := context.Background()
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
 	_, err := db.Exec(`TRUNCATE atheros_search.embeddings, atheros_search.embedding_jobs,
@@ -78,7 +78,7 @@ func reportingSeedRecordContext(t *testing.T) (context.Context, *Service, time.T
   FROM (VALUES ('aa:bb:cc:dd:ee:01'),('aa:bb:cc:dd:ee:02')) AS s(src),
        generate_series(1,6) w, (VALUES ('2026-03-04T09:15:00Z'::timestamptz)) AS b(base);`)
 	require.NoError(t, err)
-	return ctx, &Service{Pool: db}, observed
+	return ctx, &Service{Pool: runtimeDB}, observed
 }
 
 func TestReportingRecordContextDeviceAnchor(t *testing.T) {
@@ -211,7 +211,7 @@ func TestReportingRecordContextProxyRecordHasNoNeighbourhood(t *testing.T) {
 
 func TestReportingRecordContextApAnchorListsDevices(t *testing.T) {
 	ctx, svc, _ := reportingSeedRecordContext(t)
-	db := svc.Pool
+	db := testdb.Provision(t)
 	// A device document anchored on the AP answers the AP-side question: which
 	// identifiers were seen there.
 	_, err := db.Exec(`INSERT INTO atheros_search.search_documents

@@ -10,7 +10,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
-
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	athmetrics "github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
@@ -22,6 +21,7 @@ type emptyEmbedder struct{}
 func (emptyEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32, error) {
 	return nil, nil
 }
+
 func (emptyEmbedder) Health(context.Context) error { return nil }
 
 func TestSearchRejectsEmptyQuery(t *testing.T) {
@@ -70,7 +70,7 @@ func TestSearchRejectsEmptyDenseEmbeddingResult(t *testing.T) {
 func TestSearchFallsBackToSparseForEmptyEmbeddingResult(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	mock.ExpectQuery("FROM atheros_search.search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"source_id"}))
 	mock.ExpectQuery("INSERT INTO atheros_search.search_queries").
@@ -98,12 +98,13 @@ func (staticEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32,
 	vector := make([]float32, embeddingDimensions)
 	return [][]float32{vector}, nil
 }
+
 func (staticEmbedder) Health(context.Context) error { return nil }
 
 func TestSearchReportsMissingKindCoverageWhenDenseIsEmpty(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 
 	denseRows := sqlmock.NewRows([]string{
 		"source_id", "source_kind", "source_key", "title", "snippet", "source_table",
@@ -138,7 +139,7 @@ func TestSearchReportsMissingKindCoverageWhenDenseIsEmpty(t *testing.T) {
 func TestSearchKeepsHybridWhenKindHasCoverage(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 
 	denseRows := sqlmock.NewRows([]string{
 		"source_id", "source_kind", "source_key", "title", "snippet", "source_table",
@@ -235,7 +236,7 @@ func TestProxyResultMetadataIsReturned(t *testing.T) {
 func TestExplainDetailsDistinguishesMissingFromUnrankedRecord(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)

@@ -3,12 +3,9 @@ package search
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 )
 
@@ -36,28 +33,7 @@ const (
 // UnavailableError reports that a search could not use the semantic leg. The
 // HTTP gateway renders it as 503 with a Retry-After header when a retry time
 // is known, and the gRPC server reports it as codes.Unavailable.
-type UnavailableError struct {
-	Code    string
-	RetryAt time.Time
-	Message string
-}
-
-func (e *UnavailableError) Error() string {
-	message := e.Message
-	if message == "" {
-		message = msgBackendUnavailable
-	}
-	if e.Code == "" {
-		return message
-	}
-	return fmt.Sprintf("%s (code=%s)", message, e.Code)
-}
-
-// GRPCStatus keeps the gRPC transport from flattening the failure into
-// codes.Unknown, which proxies would otherwise surface as a server bug.
-func (e *UnavailableError) GRPCStatus() *status.Status {
-	return status.New(codes.Unavailable, e.Error())
-}
+type UnavailableError = apperror.UnavailableError
 
 // Unavailable classifies an embedding failure into a stable public code, a
 // safe static message and the backend's own retry time.

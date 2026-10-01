@@ -36,5 +36,5 @@ func TestProxyKindsReuseEventEmbeddings(t *testing.T) {
 
 func TestDenseRejectsUninitializedPool(t *testing.T) {
 	_, err := Dense(context.Background(), nil, make([]float32, embeddingDimensions), "model", Options{TopK: 1, Kinds: []string{"event"}})
-	require.EqualError(t, err, "Postgres pool is not initialized")
+	require.EqualError(t, err, "postgres pool is not initialized")
 }

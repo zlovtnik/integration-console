@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 )
 
 const embeddingDimensions = 768
@@ -51,12 +54,12 @@ func Dense(ctx context.Context, pool *sql.DB, qvec []float32, model string, opts
 }
 
 func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind string, opts Options) ([]RawResult, error) {
-	if err := ensureDB(pool); err != nil {
+	if err := db.Require(pool); err != nil {
 		return nil, err
 	}
 	_, ok := supportedSearchKinds[kind]
 	if !ok {
-		return nil, fmt.Errorf("unsupported dense search kind %q", kind)
+		return nil, apperror.Validationf("unsupported dense search kind %q", kind)
 	}
 	overfetch := opts.TopK * opts.OverfetchFactor
 	if overfetch < opts.TopK {
@@ -67,14 +70,14 @@ func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind st
 	}
 	vector := VectorLiteral(qvec)
 	query := denseKindQuery()
-	scope, scopeArgs := documentScopeSQL("candidate", opts.Filters, 6)
+	scope, scopeArgs := queryscope.DocumentScopeSQL("candidate", opts.Filters, 6)
 	query = strings.Replace(query, "  ORDER BY embedding_row.embedding", scope+"\n  ORDER BY embedding_row.embedding", 1)
 	args := append([]any{vector, overfetch, model, embeddingKindForSourceKind(kind), kind}, scopeArgs...)
 	rows, err := pool.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 
 	results := make([]RawResult, 0, overfetch)
 	for rows.Next() {
@@ -140,67 +143,6 @@ WHERE d.status = 'active'
 ORDER BY nearest.cosine_distance ASC, d.source_id ASC`
 }
 
-type scanner interface {
-	Scan(dest ...any) error
-}
-
-func scanDenseResult(row scanner) (RawResult, error) {
-	var result RawResult
-	var observed, windowStart, windowEnd sql.NullTime
-	var blocked sql.NullBool
-	var tagsJSON, detailJSON string
-	var securityFlags int64
-	var handshake bool
-	err := row.Scan(
-		&result.SourceKey,
-		&result.SourceTable,
-		&result.SourceKind,
-		&result.SourceMAC,
-		&result.LocationID,
-		&result.SensorID,
-		&observed,
-		&result.BSSID,
-		&result.SSID,
-		&result.FrameSubtype,
-		&result.CosineSimilarity,
-		&tagsJSON,
-		&detailJSON,
-		&securityFlags,
-		&handshake,
-		&result.Host,
-		&blocked,
-		&result.ProxyEventType,
-		&result.ProxyDeviceID,
-		&windowStart,
-		&windowEnd,
-		&result.Classification,
-	)
-	if err != nil {
-		return result, err
-	}
-	if observed.Valid {
-		value := observed.Time.UTC()
-		result.ObservedAt = &value
-	}
-	if blocked.Valid {
-		value := blocked.Bool
-		result.Blocked = &value
-	}
-	if windowStart.Valid {
-		value := windowStart.Time.UTC()
-		result.WindowStart = &value
-	}
-	if windowEnd.Valid {
-		value := windowEnd.Time.UTC()
-		result.WindowEnd = &value
-	}
-	result.Tags = parseTagsJSON(tagsJSON)
-	result.DetailJSON = normalizeJSONObject(detailJSON)
-	result.securityFlags = int32(securityFlags)
-	result.handshakeCaptured = handshake
-	return result, nil
-}
-
 func validateVector(vector []float32) error {
 	if len(vector) != embeddingDimensions {
 		return fmt.Errorf("embedding vector has %d dimensions, expected %d", len(vector), embeddingDimensions)
@@ -213,29 +155,10 @@ func validateVector(vector []float32) error {
 	return nil
 }
 
-func parseTagsJSON(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "null" || value == "[]" {
-		return nil
-	}
-	var tags []string
-	if err := json.Unmarshal([]byte(value), &tags); err != nil {
-		return nil
-	}
-	return TagsFromJSON(tags)
-}
-
 func normalizeJSONObject(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "null" || !json.Valid([]byte(value)) {
 		return "{}"
 	}
 	return value
-}
-
-func ensureDB(pool *sql.DB) error {
-	if pool == nil {
-		return errors.New("Postgres pool is not initialized")
-	}
-	return nil
 }

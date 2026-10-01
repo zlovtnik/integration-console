@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
 
@@ -26,7 +27,7 @@ LIMIT 50`
 func SuggestFilters(ctx context.Context, pool *sql.DB, prefix string) (*searchv1.SuggestFiltersResponse, error) {
 	resp := &searchv1.SuggestFiltersResponse{}
 	normalizedPrefix := strings.ToLower(strings.TrimSpace(prefix))
-	pattern := escapeLike(normalizedPrefix) + "%"
+	pattern := queryscope.EscapeLike(normalizedPrefix) + "%"
 	if err := scanDistinct(ctx, pool, suggestSSIDSQL, &resp.Ssids, normalizedPrefix, pattern); err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func scanDistinct(ctx context.Context, pool *sql.DB, query string, target *[]str
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	for rows.Next() {
 		var value string
 		if err := rows.Scan(&value); err != nil {

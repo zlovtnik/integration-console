@@ -39,7 +39,7 @@ func emptyResolvedRows() *sqlmock.Rows {
 func TestResolveDocumentReadsTheWholeRecord(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
 
@@ -70,7 +70,7 @@ func TestResolveDocumentReadsTheWholeRecord(t *testing.T) {
 func TestResolveDocumentExtractsSequenceTokens(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 
 	rows := sqlmock.NewRows(resolveColumns()).
@@ -91,7 +91,7 @@ func TestResolveDocumentExtractsSequenceTokens(t *testing.T) {
 func TestResolveDocumentMissingRow(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 
 	mock.ExpectQuery("FROM atheros_search.search_documents").WillReturnRows(emptyResolvedRows())
@@ -124,7 +124,7 @@ func TestRecordContextRejectsBlankSourceKey(t *testing.T) {
 func TestRecordContextMissingRecordIsNotAnError(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 
 	mock.ExpectQuery("FROM atheros_search.search_documents").WillReturnRows(emptyResolvedRows())
@@ -140,7 +140,7 @@ func TestRecordContextMissingRecordIsNotAnError(t *testing.T) {
 func TestRecordContextWithoutAnchorExplainsItself(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
 
@@ -179,7 +179,7 @@ func TestRecordContextWithoutAnchorExplainsItself(t *testing.T) {
 func TestRecordContextLoadsActivityAndEmbedding(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
 	windowEnd := observed.Add(time.Minute)
@@ -274,7 +274,7 @@ func TestRecordContextLoadsActivityAndEmbedding(t *testing.T) {
 func TestEmbeddingWorkContentCurrentRequiresMatchingHash(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	svc := &Service{Pool: database}
 	observed := time.Date(2026, 3, 4, 9, 15, 0, 0, time.UTC)
 	windowEnd := observed.Add(time.Minute)

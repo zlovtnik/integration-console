@@ -11,9 +11,6 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
@@ -55,16 +52,6 @@ func TestUnavailableClassifiesEmbeddingFailuresWithoutLeakingText(t *testing.T) 
 	}
 }
 
-func TestUnavailableErrorReportsUnavailableGRPCStatus(t *testing.T) {
-	unavailable := &UnavailableError{
-		Code:    FallbackCapacityExhausted,
-		RetryAt: time.Now().Add(30 * time.Second),
-		Message: msgCapacityExhausted,
-	}
-	require.Equal(t, codes.Unavailable, status.Convert(unavailable).Code())
-	require.Contains(t, unavailable.Error(), FallbackCapacityExhausted)
-}
-
 func TestSearchLegFailurePassesCallerDeadlineAndInvalidRequestsThrough(t *testing.T) {
 	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
@@ -81,7 +68,7 @@ func TestSearchLegFailurePassesCallerDeadlineAndInvalidRequestsThrough(t *testin
 func TestSearchHybridFallsBackWithStableCodeAndRetryHint(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer database.Close()
+	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
 	mock.ExpectQuery("FROM atheros_search.search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"source_id"}))
 	mock.ExpectQuery("INSERT INTO atheros_search.search_queries").
@@ -117,4 +104,5 @@ type failingEmbedder struct{ err error }
 func (f failingEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32, error) {
 	return nil, f.err
 }
+
 func (f failingEmbedder) Health(context.Context) error { return f.err }
