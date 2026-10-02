@@ -74,7 +74,7 @@ pipeline {
             --build-arg VITE_KEYCLOAK_URL=https://gateway.rclabs.uk \
             --build-arg VITE_KEYCLOAK_REALM=middleware \
             --build-arg VITE_KEYCLOAK_CLIENT_ID=atheros-search-ui \
-            --metadata-file artifacts/atheros-search-ui.json --push atheros-search-ui
+            --metadata-file artifacts/atheros-search-ui.json --push .
         '''
         archiveArtifacts artifacts: 'artifacts/*.json', fingerprint: true
       }
