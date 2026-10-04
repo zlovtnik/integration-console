@@ -20,6 +20,7 @@ export interface ForceLayoutBuild<T extends ForceLayoutNode> {
 
 export interface ForceLayoutOptions {
   pinnedNodeIds?: Accessor<Set<string>> | undefined;
+  maxFitScale?: number;
 }
 
 export function useForceLayout<
@@ -138,7 +139,7 @@ export function useForceLayout<
     const scale = Math.max(
       0.12,
       Math.min(
-        2,
+        options.maxFitScale ?? 2,
         (width - padding * 2) / graphWidth,
         (height - padding * 2) / graphHeight,
       ),

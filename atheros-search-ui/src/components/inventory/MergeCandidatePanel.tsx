@@ -1,4 +1,11 @@
-import { createMemo, createResource, createSignal, For, Show, onCleanup } from 'solid-js';
+import {
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  Show,
+  onCleanup,
+} from 'solid-js';
 import { A } from '@solidjs/router';
 import { Check, Clock3, Split, X } from 'lucide-solid';
 import type { InventoryNode, MergeDecision } from '~/api/types';
@@ -51,7 +58,9 @@ function CandidateIdentity(props: { node: InventoryNode }) {
 export function MergeCandidatePanel(props: {
   node: InventoryNode;
   onClose: () => void;
-  onDecision: (decision: MergeDecision) => void | Promise<void>;
+  onDecision: (
+    decision: MergeDecision,
+  ) => void | boolean | Promise<void | boolean>;
 }) {
   const [busyDecision, setBusyDecision] = createSignal<MergeDecision | null>(
     null,
@@ -85,7 +94,10 @@ export function MergeCandidatePanel(props: {
    * store is folded in because it is loaded independently of the graph.
    */
   const index = createMemo(() => {
-    const graph = buildInventoryRelationIndex(inventoryNodes(), inventoryEdges());
+    const graph = buildInventoryRelationIndex(
+      inventoryNodes(),
+      inventoryEdges(),
+    );
     const queue = buildInventoryRelationIndex(
       inventoryDedupDevices(),
       inventoryDedupEdges(),
@@ -119,9 +131,9 @@ export function MergeCandidatePanel(props: {
     });
     for (const mac of macs.slice(0, 50)) params.append('mac', mac);
     for (const key of ['loc', 'sensor', 'after', 'before']) {
-      for (const value of new URLSearchParams(
-        window.location.search,
-      ).getAll(key)) {
+      for (const value of new URLSearchParams(window.location.search).getAll(
+        key,
+      )) {
         params.append(key, value);
       }
     }
@@ -203,7 +215,10 @@ export function MergeCandidatePanel(props: {
         <h3>Actions</h3>
         <div class="graph-panel-links">
           <Show when={candidateMacs().length > 0}>
-            <A class="btn btn-secondary" href={eventSearchHref(candidateMacs())}>
+            <A
+              class="btn btn-secondary"
+              href={eventSearchHref(candidateMacs())}
+            >
               Search events
             </A>
           </Show>

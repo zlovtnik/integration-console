@@ -2,6 +2,45 @@
   position: relative;
 }
 
+.inventory-page--presenting {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  height: 100dvh;
+  background: var(--color-bg);
+}
+
+.inventory-page--presenting .inventory-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.inventory-canvas-toolbar {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - 24px);
+}
+
+.inventory-canvas-toolbar > span {
+  padding: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  background: var(--color-bg);
+}
+
+.inventory-node.related .graph-node-label {
+  opacity: 1;
+}
+
 .inventory-controls {
   grid-template-columns: minmax(0, 1fr) minmax(240px, auto) auto;
   align-items: end;
@@ -141,7 +180,7 @@
 .dedup-queue-row {
   display: grid;
   grid-template-columns:
-    minmax(180px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.2fr)
+    32px minmax(180px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.2fr)
     minmax(136px, auto);
   gap: var(--space-3);
   align-items: center;
@@ -180,6 +219,28 @@
 
 .dedup-candidate-cell {
   min-width: 0;
+}
+
+.dedup-bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-4);
+}
+
+.dedup-bulk-preview {
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dedup-bulk-preview ul {
+  max-height: 240px;
+  overflow: auto;
+  padding-left: var(--space-5);
+  margin: var(--space-3) 0;
 }
 
 .dedup-candidate-link:hover {

@@ -72,6 +72,7 @@ function snapshotFilters(): InventoryFilters {
 }
 
 export default function InventoryPage() {
+  const [presenting, setPresenting] = createSignal(false);
   const [detailError, setDetailError] = createSignal('');
   let detailController: AbortController | undefined;
   const [rowDetail, { refetch: retryDetail }] = createResource(
@@ -172,6 +173,7 @@ export default function InventoryPage() {
 
       if (event.key === 'Escape') {
         setSelectedInventoryNodeId(null);
+        setPresenting(false);
       } else if (event.key.toLowerCase() === 'r') {
         graph.resetZoom();
       }
@@ -237,18 +239,25 @@ export default function InventoryPage() {
   }
 
   async function handleDecision(candidateId: string, decision: MergeDecision) {
-    await decideMerge(candidateId, decision);
+    return decideMerge(candidateId, decision);
   }
 
   return (
-    <main id="main-content" class="graph-page inventory-page" tabIndex={-1}>
-      <InventoryControls
-        onRefresh={() => {
-          void load(snapshotFilters());
-          if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
-        }}
-        onResetView={() => graph.resetZoom()}
-      />
+    <main
+      id="main-content"
+      class="graph-page inventory-page"
+      classList={{ 'inventory-page--presenting': presenting() }}
+      tabIndex={-1}
+    >
+      <Show when={!presenting()}>
+        <InventoryControls
+          onRefresh={() => {
+            void load(snapshotFilters());
+            if (inventoryViewMode() === 'dedup_queue') void loadDedupQueue();
+          }}
+          onResetView={() => graph.resetZoom()}
+        />
+      </Show>
       <Show when={inventoryDecisionNotice()}>
         <p role="status">{inventoryDecisionNotice()}</p>
       </Show>
@@ -285,6 +294,33 @@ export default function InventoryPage() {
           when={inventoryViewMode() === 'dedup_queue'}
           fallback={
             <div class="graph-canvas-wrap inventory-canvas-wrap">
+              <div class="inventory-canvas-toolbar">
+                <span>
+                  {
+                    inventoryNodes().filter((node) => node.kind === 'device')
+                      .length
+                  }{' '}
+                  devices / {inventoryEdges().length} relationships
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onClick={() => graph.resetZoom()}
+                >
+                  Fit graph
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  aria-pressed={presenting()}
+                  onClick={() => {
+                    setPresenting((value) => !value);
+                    requestAnimationFrame(() => graph.resetZoom());
+                  }}
+                >
+                  {presenting() ? 'Exit presentation' : 'Presentation view'}
+                </button>
+              </div>
               <Show when={inventoryLoading()}>
                 <div class="inventory-loading" role="status">
                   Building inventory...

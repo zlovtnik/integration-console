@@ -126,6 +126,27 @@ export function InventoryControls(props: {
             )}
           </For>
         </fieldset>
+        <Show when={inventoryViewMode() === 'graph'}>
+          <label class="field">
+            <span>Graph relationships</span>
+            <select
+              value={inventoryFilters.grouping}
+              onChange={(event) =>
+                setInventoryFilters(
+                  'grouping',
+                  event.currentTarget.value as
+                    | 'registry'
+                    | 'cmdb'
+                    | 'similarity',
+                )
+              }
+            >
+              <option value="cmdb">Owner / location</option>
+              <option value="similarity">Pending similarity</option>
+              <option value="registry">Devices only</option>
+            </select>
+          </label>
+        </Show>
         <Show when={inventoryViewMode() !== 'table'}>
           <button
             type="button"
@@ -173,22 +194,6 @@ export function InventoryControls(props: {
             />
           </label>
           <Show when={inventoryViewMode() === 'graph'}>
-            <label class="field">
-              <span>Graph grouping</span>
-              <select
-                value={inventoryFilters.grouping}
-                onChange={(e) =>
-                  setInventoryFilters(
-                    'grouping',
-                    e.currentTarget.value as 'registry' | 'cmdb' | 'similarity',
-                  )
-                }
-              >
-                <option value="registry">Registry</option>
-                <option value="cmdb">Owner / location</option>
-                <option value="similarity">Pending similarity</option>
-              </select>
-            </label>
             <label class="field">
               <span>Graph limit</span>
               <select

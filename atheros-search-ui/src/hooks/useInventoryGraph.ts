@@ -9,7 +9,6 @@ import type {
 } from '~/api/types';
 import {
   finiteCoord,
-  stableUnitValue,
   useForceLayout,
   type SimNodeDatum,
 } from './useForceLayout';
@@ -60,6 +59,7 @@ export function useInventoryGraph(
 ) {
   const layout = useForceLayout<InventoryRenderNode, InventorySimEdge>(svgRef, {
     pinnedNodeIds: options.pinnedNodeIds,
+    maxFitScale: 1,
   });
   const presentation = useGraphPresentation<InventorySimNode>(
     svgRef,
@@ -127,8 +127,8 @@ export function useInventoryGraph(
       .attr('data-edge-kind', (edge) => edge.kind)
       .attr('stroke', (edge) => inventoryEdgeColor(edge.kind))
       .attr('stroke-width', (edge) => Math.max(0.7, (edge.weight ?? 1) * 1.1))
-      .attr('stroke-opacity', 0.45)
-      .style('--edge-opacity', '0.45')
+      .attr('stroke-opacity', 0.65)
+      .style('--edge-opacity', '0.65')
       .attr(
         'marker-end',
         (edge) => `url(#${presentation.prefix}-arrow-${edge.kind})`,
@@ -182,9 +182,7 @@ export function useInventoryGraph(
       color: inventoryNodeColor,
       count: (item) => item.member_count,
       alwaysLabel: (item) =>
-        ['owner', 'location_asset', 'cluster', 'aggregate_group'].includes(
-          item.kind,
-        ),
+        ['owner', 'location_asset', 'aggregate_group'].includes(item.kind),
     });
 
     let fitOnSimulationEnd = true;
@@ -198,7 +196,7 @@ export function useInventoryGraph(
           .distance((edge) => inventoryLinkDistance(edge.kind))
           .strength(0.34),
       )
-      .force('charge', d3.forceManyBody().strength(-120))
+      .force('charge', d3.forceManyBody().strength(-180))
       .force(
         'group',
         forceInventoryGroups(
@@ -211,9 +209,11 @@ export function useInventoryGraph(
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collide',
-        d3.forceCollide<InventorySimNode>(
-          (item) => inventoryNodeRadius(item) + 16,
-        ),
+        d3
+          .forceCollide<InventorySimNode>(
+            (item) => inventoryNodeRadius(item) + 28,
+          )
+          .iterations(3),
       )
       .on('tick', () => {
         link
@@ -241,6 +241,19 @@ export function useInventoryGraph(
       });
 
     layout.setSimulation(simulation);
+    // Settle the first frame before fitting, so presentations do not open on
+    // the initial pile of nodes while the simulation warms up.
+    simulation.tick(120);
+    link
+      .attr('x1', (edge) => finiteCoord((edge.source as InventorySimNode).x))
+      .attr('y1', (edge) => finiteCoord((edge.source as InventorySimNode).y))
+      .attr('x2', (edge) => finiteCoord((edge.target as InventorySimNode).x))
+      .attr('y2', (edge) => finiteCoord((edge.target as InventorySimNode).y));
+    node.attr(
+      'transform',
+      (item) => `translate(${finiteCoord(item.x)},${finiteCoord(item.y)})`,
+    );
+    layout.fitToGraph();
     applyVisibility(false);
     applySelection();
     applyPinned();
@@ -346,11 +359,16 @@ export function buildInventoryRenderModel(
   }
 
   const sourceById = new Map(nodes.map((node) => [node.id, node]));
+  // Keep relationship endpoints individual. Collapsing both ends of a pair
+  // into one summary silently erased similarity and ownership evidence.
+  const connected = new Set(
+    edges.flatMap((edge) => [edge.source, edge.target]),
+  );
   const groups = new Map<string, InventoryNode[]>();
   const renderedNodes: InventoryRenderNode[] = [];
 
   for (const node of nodes) {
-    if (node.kind !== 'device') {
+    if (node.kind !== 'device' || connected.has(node.id)) {
       renderedNodes.push(node);
       continue;
     }
@@ -456,28 +474,24 @@ function forceInventoryGroups(
 ): d3.Force<InventorySimNode, InventorySimEdge> {
   const groupIds = Array.from(
     new Set(nodes.map((node) => inventoryGroupId(node, grouping))),
-  );
+  ).sort();
   const centers = new Map<string, { x: number; y: number }>();
-  const radius = Math.max(80, Math.min(width, height) * 0.32);
   const centerX = width / 2;
   const centerY = height / 2;
+  const columns = Math.max(
+    1,
+    Math.ceil(Math.sqrt((groupIds.length * width) / height)),
+  );
+  const rows = Math.ceil(groupIds.length / columns);
+  const spacing = Math.max(
+    240,
+    Math.sqrt(nodes.length / Math.max(1, groupIds.length)) * 70,
+  );
 
   groupIds.forEach((groupId, index) => {
-    if (grouping === 'cmdb') {
-      const angle = (index / Math.max(1, groupIds.length)) * Math.PI * 2;
-      centers.set(groupId, {
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
-      });
-      return;
-    }
-
-    const seed = stableUnitValue(groupId);
-    const angle = seed * Math.PI * 2;
-    const distance = radius * (0.45 + seed * 0.55);
     centers.set(groupId, {
-      x: centerX + Math.cos(angle) * distance,
-      y: centerY + Math.sin(angle) * distance,
+      x: centerX + ((index % columns) - (columns - 1) / 2) * spacing,
+      y: centerY + (Math.floor(index / columns) - (rows - 1) / 2) * spacing,
     });
   });
 
@@ -502,7 +516,7 @@ function forceInventoryGroups(
 
 export function inventoryNodeRadius(node: InventoryRenderNode): number {
   if (node.aggregate_group_id) {
-    return 12 + Math.min((node.member_count ?? 1) * 0.9, 18);
+    return 12 + Math.min(Math.log2((node.member_count ?? 1) + 1), 8);
   }
   if (node.kind === 'cluster') return 12;
   if (node.kind === 'owner' || node.kind === 'location_asset') return 10;
@@ -573,14 +587,14 @@ function inventoryEdgeColor(kind: string): string {
 function inventoryLinkDistance(kind: string): number {
   switch (kind) {
     case 'cluster_member':
-      return 54;
+      return 100;
     case 'same_device':
     case 'candidate_pair':
     case 'merge_candidate':
-      return 64;
+      return 110;
     case 'owns':
     case 'located_at':
-      return 88;
+      return 140;
     default:
       return 96;
   }

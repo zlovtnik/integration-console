@@ -1,4 +1,12 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Show,
+  on,
+  onCleanup,
+} from 'solid-js';
 import { AlertTriangle, Check, Clock3, Split } from 'lucide-solid';
 import type { InventoryNode, MergeDecision } from '~/api/types';
 import { ScoreBar } from '~/components/ScoreBar';
@@ -54,8 +62,28 @@ export function DedupQueue(props: {
   onDecision: (
     candidateId: string,
     decision: MergeDecision,
-  ) => void | Promise<void>;
+  ) => void | boolean | Promise<void | boolean>;
 }) {
+  const [query, setQuery] = createSignal('');
+  const [selectedIds, setSelectedIds] = createSignal(new Set<string>());
+  const [reviewing, setReviewing] = createSignal(false);
+  const [batchBusy, setBatchBusy] = createSignal(false);
+  const [batchNotice, setBatchNotice] = createSignal('');
+  let active = true;
+  onCleanup(() => {
+    active = false;
+  });
+  const scopeKey = () => JSON.stringify(inventoryFilters);
+  createEffect(
+    on(
+      scopeKey,
+      () => {
+        setSelectedIds(new Set<string>());
+        setReviewing(false);
+      },
+      { defer: true },
+    ),
+  );
   const [busyCandidateIds, setBusyCandidateIds] = createSignal<Set<string>>(
     new Set(),
   );
@@ -68,12 +96,72 @@ export function DedupQueue(props: {
         candidate,
         devices: relatedDevices(index, candidate.id),
       }))
+      .filter((item) => {
+        const search = query().trim().toLowerCase();
+        return (
+          !search ||
+          [
+            item.candidate.label,
+            ...item.devices.flatMap((device) => [
+              device.label,
+              device.owner_id ?? '',
+              ...deviceAliasMacs(device),
+            ]),
+          ].some((value) => value.toLowerCase().includes(search))
+        );
+      })
       .sort(
         (left, right) =>
           (right.candidate.dedup_confidence ?? 0) -
           (left.candidate.dedup_confidence ?? 0),
       );
   });
+  const selectedItems = createMemo(() =>
+    queueItems().filter((item) => selectedIds().has(item.candidate.id)),
+  );
+  const selectionLocked = () =>
+    batchBusy() || busyCandidateIds().size > 0 || inventoryDedupLoading();
+  function select(id: string, checked: boolean) {
+    setReviewing(false);
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function approveSelected() {
+    const items = [...selectedItems()];
+    const scope = scopeKey();
+    setBatchBusy(true);
+    setReviewing(false);
+    let approved = 0;
+    let failed = 0;
+    try {
+      for (const item of items) {
+        if (!active || scopeKey() !== scope) break;
+        setBatchNotice(
+          `Approving ${approved + failed + 1} of ${items.length} selected pairs...`,
+        );
+        try {
+          const accepted = await props.onDecision(item.candidate.id, 'merge');
+          if (accepted !== false) {
+            approved += 1;
+            select(item.candidate.id, false);
+          } else failed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      const remaining = items.length - approved - failed;
+      setBatchNotice(
+        `${approved} approved, ${failed} failed${remaining ? `, ${remaining} not submitted because the review scope changed` : ''}.${failed && scopeKey() === scope ? ' Failed pairs remain selected for retry.' : ''} Identity projection updates are not yet confirmed.`,
+      );
+    } finally {
+      setBatchBusy(false);
+    }
+  }
 
   async function decide(candidateId: string, decision: MergeDecision) {
     setBusyCandidateIds((prev) => new Set(prev).add(candidateId));
@@ -128,7 +216,7 @@ export function DedupQueue(props: {
       </Show>
 
       <Show
-        when={queueItems().length > 0}
+        when={inventoryDedupCandidates().length > 0}
         fallback={
           <Show
             when={!inventoryDedupLoading() && !inventoryDedupError()}
@@ -140,12 +228,105 @@ export function DedupQueue(props: {
           </Show>
         }
       >
+        <div class="dedup-bulk-toolbar">
+          <label class="field">
+            <span>Find a device or owner</span>
+            <input
+              type="search"
+              value={query()}
+              disabled={batchBusy()}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value);
+                setReviewing(false);
+                setSelectedIds(new Set<string>());
+              }}
+            />
+          </label>
+          <span aria-live="polite">
+            {selectedItems().length} pairs selected
+          </span>
+          <button
+            type="button"
+            class="btn btn-primary"
+            disabled={selectionLocked() || selectedItems().length === 0}
+            onClick={() => setReviewing(true)}
+          >
+            Review selected approvals
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            disabled={selectionLocked()}
+            onClick={() => {
+              setSelectedIds(new Set<string>());
+              setReviewing(false);
+            }}
+          >
+            Clear selection
+          </button>
+        </div>
+        <Show when={reviewing()}>
+          <section
+            class="dedup-bulk-preview"
+            aria-label="Selected approval preview"
+          >
+            <h3>Approve {selectedItems().length} identity pairs</h3>
+            <p>
+              Each selected pair will be recorded as a merge. Decisions are
+              final. Review the devices below before approving.
+            </p>
+            <ul>
+              <For each={selectedItems()}>
+                {(item) => (
+                  <li>
+                    {item.candidate.label} -{' '}
+                    {item.devices.map((device) => device.label).join(' / ')}
+                  </li>
+                )}
+              </For>
+            </ul>
+            <button
+              type="button"
+              class="btn btn-primary"
+              disabled={selectionLocked()}
+              onClick={() => void approveSelected()}
+            >
+              Approve selected pairs
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onClick={() => setReviewing(false)}
+            >
+              Cancel
+            </button>
+          </section>
+        </Show>
         <div
           class="dedup-queue-table"
           role="table"
           aria-label="Merge candidates"
         >
           <div class="dedup-queue-row dedup-queue-row--head" role="row">
+            <span role="columnheader">
+              <input
+                type="checkbox"
+                aria-label="Select all visible pairs"
+                disabled={selectionLocked()}
+                checked={
+                  queueItems().length > 0 &&
+                  selectedItems().length === queueItems().length
+                }
+                onChange={(event) => {
+                  setReviewing(false);
+                  setSelectedIds(
+                    event.currentTarget.checked
+                      ? new Set(queueItems().map((item) => item.candidate.id))
+                      : new Set<string>(),
+                  );
+                }}
+              />
+            </span>
             <span role="columnheader">Candidate</span>
             <span role="columnheader">Candidate devices</span>
             <span role="columnheader">Confidence</span>
@@ -154,6 +335,17 @@ export function DedupQueue(props: {
           <For each={queueItems()}>
             {(item) => (
               <div class="dedup-queue-row" role="row">
+                <span role="cell">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.candidate.label}`}
+                    checked={selectedIds().has(item.candidate.id)}
+                    disabled={selectionLocked()}
+                    onChange={(event) =>
+                      select(item.candidate.id, event.currentTarget.checked)
+                    }
+                  />
+                </span>
                 <div class="dedup-candidate-cell" role="cell">
                   <button
                     type="button"
@@ -173,7 +365,10 @@ export function DedupQueue(props: {
                     }
                   >
                     <span class="dedup-identity-join">
-                      {derivedDevicesTitle('merge_candidate', item.devices.length)}
+                      {derivedDevicesTitle(
+                        'merge_candidate',
+                        item.devices.length,
+                      )}
                     </span>
                     <For each={item.devices}>
                       {(device) => (
@@ -202,7 +397,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Merge ${item.candidate.label}`}
-                    disabled={isCandidateBusy(item.candidate.id)}
+                    disabled={batchBusy() || isCandidateBusy(item.candidate.id)}
                     onClick={() => void decide(item.candidate.id, 'merge')}
                   >
                     <Check size={16} aria-hidden="true" />
@@ -211,7 +406,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Mark ${item.candidate.label} as not a match`}
-                    disabled={isCandidateBusy(item.candidate.id)}
+                    disabled={batchBusy() || isCandidateBusy(item.candidate.id)}
                     onClick={() => void decide(item.candidate.id, 'not_match')}
                   >
                     <Split size={16} aria-hidden="true" />
@@ -220,7 +415,7 @@ export function DedupQueue(props: {
                     type="button"
                     class="icon-btn"
                     aria-label={`Record needs more data for ${item.candidate.label}`}
-                    disabled={isCandidateBusy(item.candidate.id)}
+                    disabled={batchBusy() || isCandidateBusy(item.candidate.id)}
                     onClick={() =>
                       void decide(item.candidate.id, 'needs_more_data')
                     }
@@ -232,6 +427,9 @@ export function DedupQueue(props: {
             )}
           </For>
         </div>
+      </Show>
+      <Show when={batchNotice()}>
+        <p role="status">{batchNotice()}</p>
       </Show>
     </section>
   );

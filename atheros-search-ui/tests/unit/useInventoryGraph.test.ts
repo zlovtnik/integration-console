@@ -35,13 +35,20 @@ describe('buildInventoryRenderModel', () => {
     );
 
     expect(collapsed.aggregated).toBe(true);
-    expect(collapsed.nodes).toHaveLength(1);
-    expect(collapsed.nodes[0]).toMatchObject({
+    expect(collapsed.nodes).toHaveLength(3);
+    expect(
+      collapsed.nodes.find((node) => node.kind === 'aggregate_group'),
+    ).toMatchObject({
       id: 'aggregate:owner:security',
       aggregate_group_id: 'owner:security',
-      member_count: 5,
+      member_count: 3,
     });
-    expect(collapsed.edges).toHaveLength(0);
+    expect(collapsed.edges).toHaveLength(1);
+    expect(collapsed.edges[0]).toMatchObject({
+      source: 'device:1',
+      target: 'device:2',
+      kind: 'same_device',
+    });
 
     const expanded = buildInventoryRenderModel(
       nodes,

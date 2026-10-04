@@ -62,7 +62,7 @@ export const [inventoryCoverage, setInventoryCoverage] = createSignal<{
 } | null>(null);
 export const [inventoryFilters, setInventoryFilters] =
   createStore<InventoryFilters>({
-    grouping: 'registry',
+    grouping: 'cmdb',
     scope: INVENTORY_SCOPE_ALL,
     min_dedup_confidence: 0.75,
   });
@@ -147,7 +147,7 @@ export function toggleInventoryGroupExpansion(groupId: string) {
 export function resetInventoryFilters() {
   setInventoryFilters(
     reconcile({
-      grouping: 'registry',
+      grouping: 'cmdb',
       scope: INVENTORY_SCOPE_ALL,
       min_dedup_confidence: 0.75,
     }),

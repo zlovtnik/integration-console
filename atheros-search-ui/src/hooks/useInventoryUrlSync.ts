@@ -30,7 +30,7 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 function grouping(value: string | undefined): InventoryFilters['grouping'] {
-  return value === 'cmdb' || value === 'similarity' ? value : 'registry';
+  return value === 'registry' || value === 'similarity' ? value : 'cmdb';
 }
 
 function viewMode(value: string | undefined): InventoryViewMode {
@@ -122,7 +122,7 @@ export function useInventoryUrlSync() {
       after: inventoryFilters.observed_after,
       before: inventoryFilters.observed_before,
       grouping:
-        inventoryFilters.grouping === 'registry'
+        inventoryFilters.grouping === 'cmdb'
           ? undefined
           : inventoryFilters.grouping,
       loc: inventoryFilters.location_ids?.length
