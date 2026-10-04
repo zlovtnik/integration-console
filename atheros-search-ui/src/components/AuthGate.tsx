@@ -1,5 +1,11 @@
 import { Match, onMount, Switch, type ParentComponent } from 'solid-js';
-import { authError, authStatus, initAuth, login } from '~/auth/session';
+import {
+  authError,
+  authSession,
+  authStatus,
+  initAuth,
+  login,
+} from '~/auth/session';
 
 export const AuthGate: ParentComponent = (props) => {
   onMount(() => {
@@ -8,7 +14,9 @@ export const AuthGate: ParentComponent = (props) => {
 
   return (
     <Switch>
-      <Match when={authStatus() === 'authenticated'}>{props.children}</Match>
+      <Match when={authStatus() === 'authenticated' && authSession() + 1} keyed>
+        {props.children}
+      </Match>
       <Match when={authStatus() === 'anonymous'}>
         <main class="auth-page" id="main-content" tabIndex={-1}>
           <section class="auth-panel" aria-labelledby="auth-title">
@@ -31,7 +39,7 @@ export const AuthGate: ParentComponent = (props) => {
       <Match when={authStatus() === 'error'}>
         <main class="auth-page" id="main-content" tabIndex={-1}>
           <section class="auth-panel state-banner--error" role="alert">
-            <h1>Sign-in unavailable</h1>
+            <h1>Access unavailable</h1>
             <p>{authError() || 'The identity service could not be reached.'}</p>
             <button
               class="btn"

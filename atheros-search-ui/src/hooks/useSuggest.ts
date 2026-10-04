@@ -2,6 +2,7 @@ import { onCleanup, onMount } from 'solid-js';
 import { api } from '~/api/client';
 import { setSuggestLoaded, setSuggestions } from '~/stores/suggestStore';
 import type { SuggestFiltersResponse } from '~/api/types';
+import { auditGeneration } from '~/auth/auditState';
 
 const SUGGEST_STORAGE_KEY = 'atheros-search.suggestions';
 
@@ -40,8 +41,10 @@ function hydrateSuggestions() {
 }
 
 export async function fetchSuggestions(prefix = '', signal?: AbortSignal) {
+  const generation = auditGeneration();
   try {
     const data = await api.suggestFilters(prefix, signal);
+    if (generation !== auditGeneration() || signal?.aborted) return false;
     setSuggestions(data);
     setSuggestLoaded(true);
     persistSuggestions(data);

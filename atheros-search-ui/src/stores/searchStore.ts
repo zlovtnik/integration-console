@@ -18,6 +18,10 @@ export const DEFAULT_TOP_K = 20;
 export const DEFAULT_MIN_SIMILARITY = 0;
 let fallbackSessionId: string | null = null;
 
+export function resetSearchSessionId(): void {
+  fallbackSessionId = null;
+}
+
 function readSessionList(key: string): string[] {
   if (typeof window === 'undefined') return [];
 

@@ -1,5 +1,6 @@
 import { env } from '~/env';
-import { getAccessToken } from '~/auth/session';
+import { denyAuditAccess, getAccessToken } from '~/auth/session';
+import { auditGeneration, auditSignal } from '~/auth/auditState';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
   ActivityBucket,
@@ -49,6 +50,7 @@ type ApiErrorPayload = {
 };
 
 let outgoingTimestampReporter: OutgoingTimestampReporter | undefined;
+const responseGenerations = new WeakMap<Response, number>();
 
 type RawSearchResult = Partial<SearchResult> & {
   sourceKey?: unknown;
@@ -496,10 +498,7 @@ function normalizeActivityBucket(raw: RawRecord): ActivityBucket {
   return {
     window_start: firstString(raw.window_start, raw.windowStart),
     frame_count: firstNumber(raw.frame_count, raw.frameCount),
-    frames_per_minute: firstNumber(
-      raw.frames_per_minute,
-      raw.framesPerMinute,
-    ),
+    frames_per_minute: firstNumber(raw.frames_per_minute, raw.framesPerMinute),
     sensor_count: firstNumber(raw.sensor_count, raw.sensorCount),
     ap_count: firstNumber(raw.ap_count, raw.apCount),
     rssi_avg_dbm: optionalNumber(raw.rssi_avg_dbm, raw.rssiAvgDbm),
@@ -553,7 +552,11 @@ function normalizeEmbeddingWork(raw: RawRecord): EmbeddingWork {
     embedded_at: firstString(raw.embedded_at, raw.embeddedAt),
     content_sha256: firstString(raw.content_sha256, raw.contentSha256),
     has_vector: firstBoolean(false, raw.has_vector, raw.hasVector),
-    content_current: firstBoolean(false, raw.content_current, raw.contentCurrent),
+    content_current: firstBoolean(
+      false,
+      raw.content_current,
+      raw.contentCurrent,
+    ),
   };
 }
 
@@ -588,14 +591,18 @@ export function normalizeRecordContext(
   const related = raw.related;
   const activity = Array.isArray(raw.activity) ? raw.activity : [];
   const embedding = Array.isArray(raw.embedding) ? raw.embedding : [];
-  const totals = (raw.activity_totals ?? raw.activityTotals) as RawRecord | undefined;
+  const totals = (raw.activity_totals ?? raw.activityTotals) as
+    | RawRecord
+    | undefined;
   const normalized: RecordContextResponse = {
     source_key: firstString(raw.source_key, raw.sourceKey),
     found: firstBoolean(false, raw.found),
     window_start: firstString(raw.window_start, raw.windowStart),
     window_end: firstString(raw.window_end, raw.windowEnd),
     bucket_minutes: firstNumber(raw.bucket_minutes, raw.bucketMinutes),
-    activity: activity.map((item) => normalizeActivityBucket(item as RawRecord)),
+    activity: activity.map((item) =>
+      normalizeActivityBucket(item as RawRecord),
+    ),
     activity_totals: {
       buckets: firstNumber(totals?.buckets),
       frame_count: firstNumber(totals?.frame_count, totals?.frameCount),
@@ -859,9 +866,17 @@ export async function authenticatedFetch(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   const token = await getAccessToken();
+  const generation = auditGeneration();
+  const sessionSignal = auditSignal();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const requestInit = { ...init, headers };
+  const requestInit = {
+    ...init,
+    headers,
+    signal: init.signal
+      ? AbortSignal.any([init.signal, sessionSignal])
+      : sessionSignal,
+  };
   let response = await fetch(input, requestInit);
 
   if (response.status === 401) {
@@ -872,6 +887,10 @@ export async function authenticatedFetch(
     }
   }
 
+  if (generation !== auditGeneration())
+    throw new DOMException('Identity changed', 'AbortError');
+  if (response.status === 401 || response.status === 403) denyAuditAccess();
+  responseGenerations.set(response, generation);
   return response;
 }
 
@@ -912,7 +931,11 @@ async function request<T>(
     throw await apiErrorFromResponse(response);
   }
 
-  return response.json() as Promise<T>;
+  const generation = responseGenerations.get(response) ?? auditGeneration();
+  const data = (await response.json()) as T;
+  if (generation !== auditGeneration())
+    throw new DOMException('Identity changed', 'AbortError');
+  return data;
 }
 
 export const api = {
@@ -931,38 +954,50 @@ export const api = {
     signal?: AbortSignal,
   ) =>
     request<import('./types').EntitiesResponse>(
-      buildUrl('/v1/entities', { kind, q, page_cursor: pageCursor, page_size: '12' }),
+      buildUrl('/v1/entities', {
+        kind,
+        q,
+        page_cursor: pageCursor,
+        page_size: '12',
+      }),
       {},
       signal,
     ),
   investigation: (
     body: import('./types').InvestigationRequest,
     signal?: AbortSignal,
-  ) => request<import('./types').InvestigationResponse>(
-    '/v1/investigation',
-    { method: 'POST', body: JSON.stringify(body) },
-    signal,
-  ),
+  ) =>
+    request<import('./types').InvestigationResponse>(
+      '/v1/investigation',
+      { method: 'POST', body: JSON.stringify(body) },
+      signal,
+    ),
   evidence: (
     body: import('./types').InvestigationRequest,
     signal?: AbortSignal,
-  ) => request<import('./types').InvestigationResponse>(
-    '/v1/evidence',
-    { method: 'POST', body: JSON.stringify(body) },
-    signal,
-  ),
+  ) =>
+    request<import('./types').InvestigationResponse>(
+      '/v1/evidence',
+      { method: 'POST', body: JSON.stringify(body) },
+      signal,
+    ),
   assetAnnotation: (kind: 'ap' | 'device', id: string, signal?: AbortSignal) =>
     request<import('./types').AssetAnnotation>(
       `/v1/asset-annotations/${kind}/${encodeURIComponent(id)}`,
-      {}, signal,
+      {},
+      signal,
     ),
   updateAssetAnnotation: (
-    kind: 'ap' | 'device', id: string, body: import('./types').AssetAnnotationUpdate,
+    kind: 'ap' | 'device',
+    id: string,
+    body: import('./types').AssetAnnotationUpdate,
     signal?: AbortSignal,
-  ) => request<import('./types').AssetAnnotation>(
-    `/v1/asset-annotations/${kind}/${encodeURIComponent(id)}`,
-    { method: 'PUT', body: JSON.stringify(body) }, signal,
-  ),
+  ) =>
+    request<import('./types').AssetAnnotation>(
+      `/v1/asset-annotations/${kind}/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+      signal,
+    ),
   pairDetail: (candidateId: string, signal?: AbortSignal) =>
     request<import('./types').PairDetail>(
       `/v1/inventory/merge-candidates/${encodeURIComponent(candidateId)}`,
@@ -995,34 +1030,41 @@ export const api = {
   },
 
   explainScoped: async (
-    body: { source_key: string; query: string; kind: string; filters?: SearchFilters },
+    body: {
+      source_key: string;
+      query: string;
+      kind: string;
+      filters?: SearchFilters;
+    },
     signal?: AbortSignal,
-  ) => normalizeExplainResponse(
-    await request<RawExplainResponse>(
-      '/v1/explain/scoped',
-      { method: 'POST', body: JSON.stringify(body) },
-      signal,
+  ) =>
+    normalizeExplainResponse(
+      await request<RawExplainResponse>(
+        '/v1/explain/scoped',
+        { method: 'POST', body: JSON.stringify(body) },
+        signal,
+      ),
     ),
-  ),
 
   recordContext: async (
     sourceKey: string,
     params: { kind?: string; window?: string; bucket_minutes?: number } = {},
     signal?: AbortSignal,
-  ) => normalizeRecordContext(
-    await request<Record<string, unknown>>(
-      buildUrl(`/v1/records/${encodeURIComponent(sourceKey)}/context`, {
-        kind: params.kind,
-        window: params.window,
-        bucket_minutes:
-          params.bucket_minutes === undefined
-            ? undefined
-            : String(params.bucket_minutes),
-      }),
-      {},
-      signal,
+  ) =>
+    normalizeRecordContext(
+      await request<Record<string, unknown>>(
+        buildUrl(`/v1/records/${encodeURIComponent(sourceKey)}/context`, {
+          kind: params.kind,
+          window: params.window,
+          bucket_minutes:
+            params.bucket_minutes === undefined
+              ? undefined
+              : String(params.bucket_minutes),
+        }),
+        {},
+        signal,
+      ),
     ),
-  ),
 
   suggestFilters: (prefix: string, signal?: AbortSignal) =>
     request<SuggestFiltersResponse>(

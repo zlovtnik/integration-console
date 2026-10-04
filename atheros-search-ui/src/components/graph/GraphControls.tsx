@@ -1,4 +1,12 @@
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createSignal,
+  onCleanup,
+  onMount,
+} from 'solid-js';
+import { auditGeneration } from '~/auth/auditState';
 import {
   ChevronDown,
   LocateFixed,
@@ -118,6 +126,11 @@ export function GraphControls(props: {
     loadGraphSavedViews(),
   );
   const [viewName, setViewName] = createSignal('');
+  createEffect(() => {
+    auditGeneration();
+    setSavedViews(loadGraphSavedViews());
+    setViewName('');
+  });
   const [openMenu, setOpenMenu] = createSignal<GraphMenuId | null>(null);
 
   onMount(() => {

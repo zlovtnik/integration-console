@@ -2,6 +2,11 @@ import Keycloak from 'keycloak-js';
 import { createSignal } from 'solid-js';
 import { env } from '~/env';
 import { consumeReturnPath, saveReturnPath } from '~/auth/returnPath';
+import {
+  auditGeneration,
+  clearAuditState,
+  setAuditIdentity,
+} from '~/auth/auditState';
 
 export type AuthStatus = 'checking' | 'authenticated' | 'anonymous' | 'error';
 
@@ -21,11 +26,43 @@ const [authStatus, setAuthStatus] = createSignal<AuthStatus>(
   configured ? 'checking' : 'authenticated',
 );
 const [authError, setAuthError] = createSignal('');
+export const [authSession, setAuthSession] = createSignal(0);
 
 let initPromise: Promise<boolean> | undefined;
 let refreshPromise: Promise<string> | undefined;
 
+function acceptIdentity(): void {
+  const token = keycloak?.tokenParsed;
+  const previous = auditGeneration();
+  const realmRoles = [...(token?.realm_access?.roles ?? [])].sort();
+  const clientRoles = Object.entries(token?.resource_access ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([client, access]) => [client, [...access.roles].sort()]);
+  setAuditIdentity(
+    token?.sub
+      ? JSON.stringify([token.iss, token.sub, realmRoles, clientRoles])
+      : undefined,
+  );
+  if (auditGeneration() !== previous) setAuthSession((value) => value + 1);
+  setAuthStatus('authenticated');
+}
+
+function loseIdentity(): void {
+  setAuditIdentity(undefined);
+  setAuthStatus('anonymous');
+}
+
+window.addEventListener('atheros-search.identity-changed', () =>
+  setAuthStatus('anonymous'),
+);
+
 export { authError, authStatus };
+
+export function denyAuditAccess(): void {
+  clearAuditState();
+  setAuthError('Your account does not have access to this data.');
+  setAuthStatus('error');
+}
 
 export function callbackUri(): string {
   return `${window.location.origin}/callback`;
@@ -45,12 +82,12 @@ export function initAuth(): Promise<boolean> {
 
   captureCurrentReturnPath();
 
-  keycloak.onAuthSuccess = () => setAuthStatus('authenticated');
-  keycloak.onAuthRefreshSuccess = () => setAuthStatus('authenticated');
-  keycloak.onAuthLogout = () => setAuthStatus('anonymous');
-  keycloak.onAuthRefreshError = () => setAuthStatus('anonymous');
+  keycloak.onAuthSuccess = acceptIdentity;
+  keycloak.onAuthRefreshSuccess = acceptIdentity;
+  keycloak.onAuthLogout = loseIdentity;
+  keycloak.onAuthRefreshError = loseIdentity;
   keycloak.onTokenExpired = () => {
-    void getAccessToken().catch(() => setAuthStatus('anonymous'));
+    void getAccessToken().catch(loseIdentity);
   };
 
   initPromise = keycloak
@@ -61,10 +98,12 @@ export function initAuth(): Promise<boolean> {
       redirectUri: callbackUri(),
     })
     .then((authenticated) => {
-      setAuthStatus(authenticated ? 'authenticated' : 'anonymous');
+      if (authenticated) acceptIdentity();
+      else loseIdentity();
       return authenticated;
     })
     .catch((error: unknown) => {
+      setAuditIdentity(undefined);
       setAuthError(error instanceof Error ? error.message : 'Sign-in failed.');
       setAuthStatus('error');
       throw error;
@@ -76,7 +115,8 @@ export function initAuth(): Promise<boolean> {
 export async function getAccessToken(forceRefresh = false): Promise<string> {
   if (!keycloak) return '';
   await initAuth();
-  if (!keycloak.authenticated) return '';
+  if (!keycloak.authenticated || authStatus() !== 'authenticated') return '';
+  const generation = auditGeneration();
 
   if (!refreshPromise) {
     refreshPromise = keycloak
@@ -86,18 +126,22 @@ export async function getAccessToken(forceRefresh = false): Promise<string> {
         refreshPromise = undefined;
       });
   }
-  return refreshPromise;
+  const token = await refreshPromise;
+  if (generation !== auditGeneration())
+    throw new DOMException('Identity changed', 'AbortError');
+  return token;
 }
 
 export async function login(): Promise<void> {
   if (!keycloak) return;
   captureCurrentReturnPath();
   await initAuth();
-  if (keycloak.authenticated) return;
+  if (keycloak.authenticated && authStatus() === 'authenticated') return;
   await keycloak.login({ redirectUri: callbackUri() });
 }
 
 export async function logout(): Promise<void> {
+  loseIdentity();
   if (!keycloak) return;
   await keycloak.logout({ redirectUri: logoutUri() });
 }
