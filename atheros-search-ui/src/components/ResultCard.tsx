@@ -6,6 +6,7 @@ import type { SearchResult } from '~/api/types';
 import { domId } from '~/utils/domId';
 import { formatDateTime } from '~/utils/formatDateTime';
 import { tagClass } from '~/utils/tagClass';
+import { serviceForHost } from '~/utils/serviceMetadata';
 import { BoostBadge } from './BoostBadge';
 import { JsonViewer } from './JsonViewer';
 import { KindBadge } from './KindBadge';
@@ -68,6 +69,8 @@ export function ResultCard(props: {
   const safeId = () => domId(sourceKey());
   const detailId = () => `detail-${safeId()}`;
   const titleId = () => `card-title-${safeId()}`;
+  const service = () =>
+    props.result.host ? serviceForHost(props.result.host) : undefined;
 
   return (
     <article
@@ -121,6 +124,10 @@ export function ResultCard(props: {
         <Show when={props.result.host}>
           <dt class="sr-only">Host</dt>
           <dd class="mono caption">{props.result.host}</dd>
+        </Show>
+        <Show when={service()}>
+          <dt class="sr-only">Service</dt>
+          <dd class="caption">{service()}</dd>
         </Show>
         <Show when={props.result.proxy_device_id}>
           <dt class="sr-only">Proxy device</dt>
