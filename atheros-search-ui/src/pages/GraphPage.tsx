@@ -12,6 +12,7 @@ import {
 import { AlertTriangle } from 'lucide-solid';
 import { useSearchParams } from '@solidjs/router';
 import { GraphControls } from '~/components/graph/GraphControls';
+import { WirelessTopology } from '~/components/graph/WirelessTopology';
 import { NetworkReport } from '~/components/graph/NetworkReport';
 import { GraphLegend } from '~/components/graph/GraphLegend';
 import { GraphNodePanel } from '~/components/graph/GraphNodePanel';
@@ -51,6 +52,7 @@ export default function GraphPage() {
   });
   return (
     <main id="main-content" class="graph-page" tabIndex={-1}>
+      <WirelessTopology />
       <NetworkReport />
       <details class="report-controls">
         <summary>Advanced projection explorer</summary>

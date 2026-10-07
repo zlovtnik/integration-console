@@ -34,6 +34,7 @@ const (
 )
 
 type Config struct {
+	WirelessProjection            bool
 	PostgresDSN                   string
 	PostgresTLSCAFile             string
 	PostgresTLSCertFile           string
@@ -86,6 +87,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg := Config{
+		WirelessProjection:            envBool("ATHSEARCH_WIRELESS_PROJECTION", false),
 		PostgresDSN:                   postgresDSN,
 		PostgresTLSCAFile:             postgresTLSCAFile,
 		PostgresTLSCertFile:           strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CERT_FILE")),

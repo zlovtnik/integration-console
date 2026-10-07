@@ -21,12 +21,20 @@ var supportedSearchKinds = map[string]struct{}{
 	"device":                    {},
 	"proxy_event":               {},
 	"proxy_blocked_host_window": {},
+	"device_profile":            {},
+	"ap_profile":                {},
+	"identity_summary":          {},
+	"observation_window":        {},
 }
 
 func embeddingKindForSourceKind(kind string) string {
 	switch kind {
 	case "proxy_event", "proxy_blocked_host_window":
 		return "event"
+	case "device_profile", "ap_profile", "identity_summary":
+		return "device"
+	case "observation_window":
+		return "behaviour"
 	default:
 		return kind
 	}

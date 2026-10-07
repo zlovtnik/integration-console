@@ -550,6 +550,8 @@ export interface GraphNode {
 }
 
 export type NodeKind =
+  | 'location'
+  | 'sensor'
   | 'device'
   | 'cluster'
   | 'ap'
@@ -561,6 +563,22 @@ export type NodeKind =
   | 'aggregate_group';
 
 export interface GraphEdge {
+  evidence_start?: string;
+  evidence_end?: string;
+  expires_at?: string;
+  projection_watermark?: string;
+  projected_at?: string;
+  range?: {
+    meters: number;
+    error_meters: number;
+    lower_meters: number;
+    upper_meters: number;
+    confidence: string;
+    calibration_version: string;
+    sample_count: number;
+    observed_at: string;
+    valid_until: string;
+  };
   id: string;
   source: string;
   target: string;
@@ -571,6 +589,10 @@ export interface GraphEdge {
 }
 
 export type EdgeKind =
+  | 'containment'
+  | 'observed_association'
+  | 'identity_membership'
+  | 'calibrated_range'
   | 'association'
   | 'probe'
   | 'cluster_member'
@@ -617,6 +639,8 @@ export interface ReportMetadata {
 }
 
 export interface GraphFilters {
+  projection?: 'legacy' | 'stream';
+  include_identity?: boolean;
   location_ids?: string[];
   sensor_ids?: string[];
   source_mac?: string;

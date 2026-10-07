@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 )
@@ -54,7 +55,7 @@ func graphFocusNodeIDs(ctx context.Context, tx *sql.Tx, filters GraphFilters) ([
 	var anchor string
 	err := tx.QueryRowContext(ctx, `
 SELECT n.node_id
-FROM atheros_search.graph_nodes n
+FROM `+graphNodesTable(filters)+` n
 WHERE (`+nodeWhere+`)
   AND (n.node_id = $`+fmt.Sprint(anchorPlaceholder)+`
        OR lower(COALESCE(n.normalized_mac, '')) = $`+fmt.Sprint(anchorPlaceholder+1)+`)
@@ -107,7 +108,7 @@ func graphNeighborIDs(ctx context.Context, tx *sql.Tx, filters GraphFilters, fro
 	// #nosec G202 -- clauses and placeholders are built from fixed SQL; all request values are passed in args.
 	rows, err := tx.QueryContext(ctx, `
 WITH filtered_nodes AS (
-  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+  SELECT n.node_id FROM `+graphNodesTable(filters)+` n WHERE `+nodeWhere+`
 )
 SELECT DISTINCT step.neighbor
 FROM (
@@ -115,7 +116,7 @@ FROM (
            WHEN e.source_node_id IN (`+frontierPlaceholders+`) THEN e.target_node_id
            ELSE e.source_node_id
          END AS neighbor
-  FROM atheros_search.graph_edges e
+  FROM `+graphEdgesTable(filters)+` e
   JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
   JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
   WHERE (e.source_node_id IN (`+frontierPlaceholders+`)
@@ -155,10 +156,10 @@ func countGraphPageEdges(ctx context.Context, tx *sql.Tx, nodeWhere string, node
 	var count int
 	err := tx.QueryRowContext(ctx, `
 WITH filtered_nodes AS (
-  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+  SELECT n.node_id FROM `+graphNodesTable(filters)+` n WHERE `+nodeWhere+`
 )
 SELECT COUNT(*)
-FROM atheros_search.graph_edges e
+FROM `+graphEdgesTable(filters)+` e
 JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
 JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
 WHERE `+edgeWhere, args...).Scan(&count)
@@ -178,10 +179,10 @@ func fetchGraphEdgePage(ctx context.Context, tx *sql.Tx, nodeWhere string, nodeA
 	// #nosec G202 -- clauses and placeholders are built from fixed SQL; all request values are passed in args.
 	rows, err := tx.QueryContext(ctx, `
 WITH filtered_nodes AS (
-  SELECT n.node_id FROM atheros_search.graph_nodes n WHERE `+nodeWhere+`
+  SELECT n.node_id FROM `+graphNodesTable(filters)+` n WHERE `+nodeWhere+`
 )
-SELECT e.edge_id, e.source_node_id, e.target_node_id, e.edge_kind, e.weight, e.weight_basis, e.label, e.observed_at
-FROM atheros_search.graph_edges e
+SELECT e.edge_id, e.source_node_id, e.target_node_id, e.edge_kind, e.weight, e.weight_basis, e.label, e.observed_at, e.evidence::text
+FROM `+graphEdgesTable(filters)+` e
 JOIN filtered_nodes source_node ON source_node.node_id = e.source_node_id
 JOIN filtered_nodes target_node ON target_node.node_id = e.target_node_id
 WHERE `+edgeWhere+`
@@ -194,10 +195,10 @@ LIMIT $`+fmt.Sprint(len(args)), args...)
 	edges := make([]GraphEdge, 0, filters.PageSize+1)
 	for rows.Next() {
 		var row graphEdgeRow
-		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt); err != nil {
+		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt, &row.Evidence); err != nil {
 			return nil, false, err
 		}
-		edges = append(edges, GraphEdge{ID: row.EdgeID, Source: row.SourceID, Target: row.TargetID, Kind: mapGraphEdgeKind(row.EdgeKind), Weight: &row.Weight, WeightBasis: row.WeightBasis.String, Label: row.Label.String})
+		edges = append(edges, graphEdgeFromRow(row, time.Now()))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
@@ -254,7 +255,7 @@ func fetchGraphNodes(ctx context.Context, tx *sql.Tx, filters GraphFilters) ([]G
 SELECT node_id, node_kind, label, COALESCE(node_payload::text, '{}'),
        location_id, sensor_id, normalized_mac, normalized_ssid,
        is_threat, observed_at
-FROM atheros_search.graph_nodes
+FROM `+graphNodesTable(filters)+` AS graph_nodes
 WHERE `+strings.Join(clauses, " AND ")+`
 ORDER BY observed_at DESC NULLS LAST, node_id
 LIMIT $`+fmt.Sprint(len(args)), args...)
@@ -319,8 +320,8 @@ func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, node
 	}
 	// #nosec G202 -- clauses and placeholders are built from fixed SQL; all request values are passed in args.
 	rows, err := tx.QueryContext(ctx, `
-SELECT edge_id, source_node_id, target_node_id, edge_kind, weight, weight_basis, label, observed_at
-FROM atheros_search.graph_edges
+SELECT edge_id, source_node_id, target_node_id, edge_kind, weight, weight_basis, label, observed_at, evidence::text
+FROM `+graphEdgesTable(filters)+` AS graph_edges
 WHERE `+where+`
 ORDER BY observed_at DESC NULLS LAST, edge_id
 LIMIT $`+fmt.Sprint(len(args)), args...)
@@ -332,21 +333,10 @@ LIMIT $`+fmt.Sprint(len(args)), args...)
 	edges := make([]GraphEdge, 0, len(nodes))
 	for rows.Next() {
 		var row graphEdgeRow
-		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt); err != nil {
+		if err := rows.Scan(&row.EdgeID, &row.SourceID, &row.TargetID, &row.EdgeKind, &row.Weight, &row.WeightBasis, &row.Label, &row.ObservedAt, &row.Evidence); err != nil {
 			return nil, err
 		}
-		edge := GraphEdge{
-			ID:          row.EdgeID,
-			Source:      row.SourceID,
-			Target:      row.TargetID,
-			Kind:        mapGraphEdgeKind(row.EdgeKind),
-			Weight:      &row.Weight,
-			WeightBasis: row.WeightBasis.String,
-		}
-		if row.Label.Valid {
-			edge.Label = row.Label.String
-		}
-		edges = append(edges, edge)
+		edges = append(edges, graphEdgeFromRow(row, time.Now()))
 	}
 	return edges, rows.Err()
 }

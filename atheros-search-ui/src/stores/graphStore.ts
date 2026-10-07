@@ -10,6 +10,8 @@ import type {
 } from '~/api/types';
 
 export const GRAPH_NODE_KINDS: NodeKind[] = [
+	'location',
+	'sensor',
   'device',
   'cluster',
   'ap',
@@ -19,6 +21,10 @@ export const GRAPH_NODE_KINDS: NodeKind[] = [
 ];
 
 export const GRAPH_EDGE_KINDS: EdgeKind[] = [
+	'containment',
+	'observed_association',
+	'identity_membership',
+	'calibrated_range',
   'association',
   'cluster_member',
   'roaming',

@@ -8,6 +8,23 @@ import (
 )
 
 func NormalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
+	if filters.Projection != "" && filters.Projection != "legacy" && filters.Projection != "stream" {
+		return filters, apperror.Validationf("unsupported graph projection")
+	}
+	if filters.Projection == "stream" {
+		if len(filters.Kinds) == 0 {
+			filters.Kinds = []string{"device", "ap", "location", "sensor"}
+			if filters.IncludeIdentity {
+				filters.Kinds = append(filters.Kinds, "cluster")
+			}
+		}
+		if len(filters.EdgeKinds) == 0 {
+			filters.EdgeKinds = []string{"containment", "observed_association", "calibrated_range"}
+			if filters.IncludeIdentity {
+				filters.EdgeKinds = append(filters.EdgeKinds, "identity_membership")
+			}
+		}
+	}
 	filters.Scope = strings.TrimSpace(filters.Scope)
 	if filters.Scope != "" && filters.Scope != "all" {
 		return filters, apperror.Validationf("unsupported scope %q", filters.Scope)

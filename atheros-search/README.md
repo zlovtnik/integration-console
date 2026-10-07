@@ -49,6 +49,7 @@ In particular, `DATABASE_URL` and `SYNC_DATABASE_URL` are not fallbacks for
 | `ATHSEARCH_POSTGRES_TLS_KEY_FILE` | None | Optional PEM client private key; must be supplied with the certificate |
 | `ATHSEARCH_POSTGRES_TLS_SERVER_NAME` | None | Required certificate identity when a CA is configured |
 | `ATHSEARCH_SCHEMA_MANIFEST_SHA256` | None | Exact 64-character canonical manifest checksum |
+| `ATHSEARCH_WIRELESS_PROJECTION` | `false` | Selects the compact wireless topology graph by default when the stream projector is enabled |
 
 Startup verifies the selected database, UTC/strict SQL session, Postgres version,
 manifest checksum and vector readiness. Pool/search controls include:

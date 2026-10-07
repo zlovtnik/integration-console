@@ -320,6 +320,8 @@ export { createSimNodes };
 
 function nodeLaneX(node: GraphNode, width: number): number {
   const lanes: Record<NodeKind, number> = {
+    location: 0,
+    sensor: 1,
     cluster: 0.3,
     device: 0.34,
     client: 0.52,

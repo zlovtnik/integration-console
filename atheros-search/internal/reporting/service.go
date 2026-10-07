@@ -7,6 +7,7 @@ import (
 )
 
 type Service struct {
-	Pool    *sql.DB
-	Metrics *metrics.Metrics
+	WirelessProjection bool
+	Pool               *sql.DB
+	Metrics            *metrics.Metrics
 }

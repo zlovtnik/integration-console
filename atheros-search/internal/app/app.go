@@ -198,7 +198,7 @@ func Run() error {
 		return fmt.Errorf("start grpc server: %w", err)
 	}
 	defer grpcServer.Stop()
-	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
+	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m, WirelessProjection: cfg.WirelessProjection}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
 	if err != nil {
 		return fmt.Errorf("start http gateway: %w", err)
 	}

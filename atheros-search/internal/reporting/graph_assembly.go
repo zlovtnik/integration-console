@@ -14,6 +14,9 @@ import (
 
 // Graph queries projected identity-graph rows for the Integration Console.
 func (s *Service) Graph(ctx context.Context, filters GraphFilters) (response *GraphResponse, err error) {
+	if filters.Projection == "" && s.WirelessProjection {
+		filters.Projection = "stream"
+	}
 	filters, err = NormalizeGraphFilters(filters)
 	if err != nil {
 		return nil, err
@@ -149,7 +152,7 @@ func (s *Service) graphPage(ctx context.Context, filters GraphFilters) (*GraphRe
 		return &GraphResponse{Nodes: []GraphNode{}, Edges: []GraphEdge{}, GeneratedAt: time.Now().UTC(), TotalNodeCount: &zero, TotalEdgeCount: &zero, FocusReason: "Identifier not found in the selected projection scope."}, nil
 	}
 	var totalNodes int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM atheros_search.graph_nodes n WHERE `+nodeWhere, nodeArgs...).Scan(&totalNodes); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+graphNodesTable(filters)+` n WHERE `+nodeWhere, nodeArgs...).Scan(&totalNodes); err != nil {
 		return nil, err
 	}
 	totalEdges, err := countGraphPageEdges(ctx, tx, nodeWhere, nodeArgs, filters)
@@ -172,7 +175,7 @@ func (s *Service) graphPage(ctx context.Context, filters GraphFilters) (*GraphRe
 SELECT n.node_id, n.node_kind, n.label, COALESCE(n.node_payload::text, '{}'),
        n.location_id, n.sensor_id, n.normalized_mac, n.normalized_ssid,
        n.is_threat, n.observed_at
-FROM atheros_search.graph_nodes n
+FROM `+graphNodesTable(filters)+` n
 WHERE `+pageWhere+`
 ORDER BY n.node_id
 LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)

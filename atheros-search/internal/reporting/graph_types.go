@@ -14,20 +14,22 @@ const (
 )
 
 type GraphFilters struct {
-	LocationIDs    []string   `json:"location_ids,omitempty"`
-	SensorIDs      []string   `json:"sensor_ids,omitempty"`
-	SourceMAC      string     `json:"source_mac,omitempty"`
-	SSID           string     `json:"ssid,omitempty"`
-	Kinds          []string   `json:"kinds,omitempty"`
-	EdgeKinds      []string   `json:"edge_kinds,omitempty"`
-	ThreatOnly     bool       `json:"threat_only,omitempty"`
-	ObservedAfter  *time.Time `json:"observed_after,omitempty"`
-	ObservedBefore *time.Time `json:"observed_before,omitempty"`
-	Hops           int        `json:"hops,omitempty"`
-	Limit          int        `json:"limit,omitempty"`
-	Scope          string     `json:"scope,omitempty"`
-	PageCursor     string     `json:"page_cursor,omitempty"`
-	PageSize       int        `json:"page_size,omitempty"`
+	Projection      string     `json:"projection,omitempty"`
+	IncludeIdentity bool       `json:"include_identity,omitempty"`
+	LocationIDs     []string   `json:"location_ids,omitempty"`
+	SensorIDs       []string   `json:"sensor_ids,omitempty"`
+	SourceMAC       string     `json:"source_mac,omitempty"`
+	SSID            string     `json:"ssid,omitempty"`
+	Kinds           []string   `json:"kinds,omitempty"`
+	EdgeKinds       []string   `json:"edge_kinds,omitempty"`
+	ThreatOnly      bool       `json:"threat_only,omitempty"`
+	ObservedAfter   *time.Time `json:"observed_after,omitempty"`
+	ObservedBefore  *time.Time `json:"observed_before,omitempty"`
+	Hops            int        `json:"hops,omitempty"`
+	Limit           int        `json:"limit,omitempty"`
+	Scope           string     `json:"scope,omitempty"`
+	PageCursor      string     `json:"page_cursor,omitempty"`
+	PageSize        int        `json:"page_size,omitempty"`
 }
 
 type GraphNode struct {
@@ -57,13 +59,19 @@ type GraphNode struct {
 }
 
 type GraphEdge struct {
-	ID          string   `json:"id"`
-	Source      string   `json:"source"`
-	Target      string   `json:"target"`
-	Kind        string   `json:"kind"`
-	Weight      *float64 `json:"weight,omitempty"`
-	WeightBasis string   `json:"weight_basis,omitempty"`
-	Label       string   `json:"label,omitempty"`
+	EvidenceStart       *time.Time  `json:"evidence_start,omitempty"`
+	EvidenceEnd         *time.Time  `json:"evidence_end,omitempty"`
+	ExpiresAt           *time.Time  `json:"expires_at,omitempty"`
+	ProjectionWatermark *time.Time  `json:"projection_watermark,omitempty"`
+	ProjectedAt         *time.Time  `json:"projected_at,omitempty"`
+	Range               *GraphRange `json:"range,omitempty"`
+	ID                  string      `json:"id"`
+	Source              string      `json:"source"`
+	Target              string      `json:"target"`
+	Kind                string      `json:"kind"`
+	Weight              *float64    `json:"weight,omitempty"`
+	WeightBasis         string      `json:"weight_basis,omitempty"`
+	Label               string      `json:"label,omitempty"`
 }
 
 type GraphResponse struct {
@@ -93,6 +101,7 @@ type graphNodeRow struct {
 }
 
 type graphEdgeRow struct {
+	Evidence    string
 	EdgeID      string
 	SourceID    string
 	TargetID    string

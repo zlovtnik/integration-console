@@ -27,9 +27,9 @@ func TestGraphLoadsEdgesForProjectedNodes(t *testing.T) {
 	mock.ExpectQuery(`(?s)WHERE \(source_node_id IN \(\$1,\$2\).*OR target_node_id IN \(\$1,\$2\)\).*LIMIT \$3`).
 		WithArgs("device:aa:bb:cc:dd:ee:ff", "ap:11:22:33:44:55:66", 200).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at",
+			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at", "evidence",
 		}).AddRow("observed:1", "device:aa:bb:cc:dd:ee:ff", "ap:11:22:33:44:55:66",
-			"observed_at", 1.0, "frame_count", "wireless observation", now))
+			"observed_at", 1.0, "frame_count", "wireless observation", now, "{}"))
 	mock.ExpectCommit()
 
 	graph, err := (&Service{Pool: database}).Graph(context.Background(), GraphFilters{})
@@ -63,10 +63,10 @@ func TestGraphAllScopeReturnsBoundedDeterministicPage(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT e.edge_id.*ORDER BY e.edge_id.*LIMIT \$1`).
 		WithArgs(3).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at",
-		}).AddRow("edge:1", "node:1", "node:2", "observed_at", 1.0, nil, nil, now).
-			AddRow("edge:2", "node:1", "node:3", "observed_at", 1.0, nil, nil, now).
-			AddRow("edge:3", "node:2", "node:3", "observed_at", 1.0, nil, nil, now))
+			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at", "evidence",
+		}).AddRow("edge:1", "node:1", "node:2", "observed_at", 1.0, nil, nil, now, "{}").
+			AddRow("edge:2", "node:1", "node:3", "observed_at", 1.0, nil, nil, now, "{}").
+			AddRow("edge:3", "node:2", "node:3", "observed_at", 1.0, nil, nil, now, "{}"))
 	mock.ExpectCommit()
 
 	page, err := (&Service{Pool: database}).Graph(context.Background(), GraphFilters{Scope: "all", PageSize: 2})
@@ -160,8 +160,8 @@ func TestGraphAllScopeRestrictsPagesToSourceMACNeighborhood(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT e\.edge_id.*ORDER BY e\.edge_id.*LIMIT \$3`).
 		WithArgs(anchor, neighbor, 501).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at",
-		}).AddRow("observed:1", anchor, neighbor, "observed_at", 1.0, "frame_count", "wireless observation", now))
+			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at", "evidence",
+		}).AddRow("observed:1", anchor, neighbor, "observed_at", 1.0, "frame_count", "wireless observation", now, "{}"))
 	mock.ExpectCommit()
 
 	page, err := (&Service{Pool: database}).Graph(context.Background(), GraphFilters{
