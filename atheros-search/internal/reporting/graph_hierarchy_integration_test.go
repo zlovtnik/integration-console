@@ -144,15 +144,21 @@ func TestReportingHierarchyIncludesDisconnectedApNeighborhoods(t *testing.T) {
 		[]string{"ap:10:20:30:40:50:60", "ap:10:20:30:40:50:61", "device:orphan"},
 		result.Hierarchy.RootIDs)
 	assertClosedHierarchy(t, result)
-	// Walk nodes stay ahead of disconnected neighborhoods under the cap.
-	capped, err := svc.Graph(ctx, GraphFilters{Hierarchy: true, LocationIDs: []string{"lab"}, Limit: 3})
-	require.NoError(t, err)
-	require.Len(t, capped.Nodes, 3)
-	require.True(t, capped.Hierarchy.Truncated)
-	require.Equal(t, 6, *capped.TotalNodeCount)
-	walkIDs := map[string]bool{"ap:10:20:30:40:50:60": true, "client:a": true}
-	for _, node := range capped.Nodes[:2] {
-		require.True(t, walkIDs[node.ID], "expected walk node first, got %s", node.ID)
+	// The cap selects walk nodes before disconnected neighborhoods; the response
+	// then sorts the selected nodes by ID rather than selection priority.
+	selectionIDs := []string{"ap:10:20:30:40:50:60", "client:a", "ap:10:20:30:40:50:61"}
+	for _, limit := range []int{1, 2, 3} {
+		capped, err := svc.Graph(ctx, GraphFilters{Hierarchy: true, LocationIDs: []string{"lab"}, Limit: limit})
+		require.NoError(t, err)
+		require.Len(t, capped.Nodes, limit)
+		require.True(t, capped.Hierarchy.Truncated)
+		require.Equal(t, 6, *capped.TotalNodeCount)
+		selectedIDs := make([]string, 0, len(capped.Nodes))
+		for _, node := range capped.Nodes {
+			selectedIDs = append(selectedIDs, node.ID)
+		}
+		require.ElementsMatch(t, selectionIDs[:limit], selectedIDs, "node limit %d", limit)
+		assertClosedHierarchy(t, capped)
 	}
 }
 
