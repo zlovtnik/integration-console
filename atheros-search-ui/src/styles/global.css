@@ -89,7 +89,7 @@ body.filter-drawer-open {
 }
 
 .logo {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-weight: 600;
   min-width: 0;
 }

@@ -758,7 +758,7 @@
 .graph-derived-device-list .graph-derived-note {
   display: block;
   color: var(--graph-edge-color);
-  font-size: var(--font-size-xs);
+  font-size: 0.75rem;
   margin-bottom: 2px;
 }
 .graph-derived-device-list li {
