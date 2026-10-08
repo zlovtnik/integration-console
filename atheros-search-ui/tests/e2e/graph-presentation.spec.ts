@@ -180,11 +180,11 @@ for (const path of ['/graph', '/inventory']) {
       path: testInfo.outputPath('dark.png'),
       fullPage: true,
     });
-    await page.evaluate(() =>
-      document.documentElement.setAttribute('data-theme', 'light'),
-    );
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(9, 9, 9)');
     await page.screenshot({
-      path: testInfo.outputPath('light.png'),
+      path: testInfo.outputPath('dark-with-light-system-preference.png'),
       fullPage: true,
     });
     await expect(page.locator('.graph-canvas')).toHaveCSS(

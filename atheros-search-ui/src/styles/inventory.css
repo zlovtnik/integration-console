@@ -95,8 +95,10 @@
 
 .inventory-node.inactive:not(.selected):not(.related):not(.highlighted):not(
     .dimmed
-  ) {
-  opacity: 0.34;
+) .graph-node-body {
+  fill-opacity: 0.65;
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
 }
 
 .inventory-node.aggregate .graph-node-label {

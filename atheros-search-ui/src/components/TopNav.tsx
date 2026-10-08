@@ -10,7 +10,6 @@ import {
 import { logout } from '~/auth/session';
 import { ApiStatus } from './ApiStatus';
 import { ShortcutsModal } from './ShortcutsModal';
-import { ThemeToggle } from './ThemeToggle';
 import { shortcutsOpen, setShortcutsOpen } from '~/stores/uiStore';
 import { reportLink } from '~/utils/reportNavigation';
 
@@ -77,7 +76,6 @@ export function TopNav() {
           >
             <Keyboard size={18} aria-hidden="true" />
           </button>
-          <ThemeToggle />
           <button
             type="button"
             class="icon-btn"

@@ -482,5 +482,7 @@ export function edgeOpacity(kind: string): number {
     shadow: 0.72,
     alert_ref: 0.62,
   };
-  return values[kind] ?? 0.3;
+  // Keep even secondary relationships above 3:1 against the dark canvas.
+  // The existing dash patterns and labels continue to distinguish their kind.
+  return Math.max(0.6, values[kind] ?? 1);
 }

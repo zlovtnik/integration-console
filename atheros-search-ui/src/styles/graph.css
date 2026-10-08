@@ -1,33 +1,20 @@
 .graph-page {
-  --graph-device: #94a3b8;
-  --graph-cluster: #a78bfa;
-  --graph-danger: #f87171;
-  --graph-warn: #fbbf24;
-  --graph-bg: #080b0e;
-  --graph-dot: #1a2129;
-  --graph-symbol: #080b0e;
-  --graph-info: #60a5fa;
-  --graph-ok: #34d399;
-  --graph-accent: #2dd4bf;
+  --graph-device: var(--color-text-secondary);
+  --graph-cluster: var(--score-dense);
+  --graph-danger: var(--color-danger);
+  --graph-warn: var(--color-warn);
+  --graph-bg: var(--color-bg);
+  --graph-dot: var(--color-surface-2);
+  --graph-symbol: var(--color-accent-ink);
+  --graph-info: var(--color-info);
+  --graph-ok: var(--color-ok);
+  --graph-accent: var(--color-accent);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: calc(100vh - var(--nav-height));
   min-width: 0;
   overflow: hidden;
   background: var(--color-bg);
-}
-
-[data-theme='light'] .graph-page {
-  --graph-device: #526579;
-  --graph-cluster: #7c3aed;
-  --graph-danger: #dc2626;
-  --graph-warn: #b45309;
-  --graph-bg: var(--color-bg);
-  --graph-dot: #c5ced7;
-  --graph-symbol: #ffffff;
-  --graph-info: #2563eb;
-  --graph-ok: #15803d;
-  --graph-accent: #0f766e;
 }
 
 .graph-controls {
@@ -104,7 +91,7 @@
   display: inline-flex;
   gap: var(--space-2);
   align-items: center;
-  min-height: 30px;
+  min-height: 44px;
   padding: 0 var(--space-2);
   color: var(--color-text-secondary);
   font-size: 12px;
@@ -123,9 +110,9 @@
 }
 
 .graph-kind-chip[aria-pressed='true'] {
-  color: var(--color-text-primary);
+  color: var(--color-accent);
   background: var(--color-surface-2);
-  border-color: var(--color-border-strong);
+  border-color: var(--color-accent);
 }
 
 .graph-kind-chip[aria-pressed='false'] {
@@ -362,6 +349,7 @@
 }
 
 .graph-node.selected .graph-node-ring {
+  stroke: var(--color-accent);
   stroke-dasharray: 3 2.5;
 }
 
@@ -370,8 +358,10 @@
 }
 
 .graph-node:focus-visible .graph-node-ring {
+  stroke: var(--color-accent);
+  stroke-dasharray: none;
   stroke-opacity: 1;
-  stroke-width: 2;
+  stroke-width: 3;
 }
 
 .graph-node-glow,
@@ -470,7 +460,7 @@
 }
 
 .graph-node.dimmed {
-  opacity: 0.22;
+  opacity: 1;
 }
 
 .graph-link {
@@ -486,7 +476,7 @@
 }
 
 .graph-link.dimmed {
-  stroke-opacity: calc(var(--edge-opacity, 0.3) * 0.08);
+  stroke-opacity: 0.6;
 }
 
 .graph-legend {
@@ -544,7 +534,7 @@
   display: flex;
   gap: var(--space-2);
   align-items: center;
-  min-height: 28px;
+  min-height: 44px;
   padding: 0;
   color: var(--color-text-secondary);
   font: inherit;
@@ -556,7 +546,7 @@
 }
 
 .graph-legend-item.hidden {
-  opacity: 0.35;
+  text-decoration: line-through;
 }
 
 .graph-legend-dot {
@@ -722,6 +712,40 @@
   color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
+}
+
+@media (forced-colors: active) {
+  .graph-canvas {
+    background: Canvas;
+  }
+
+  .graph-node-body,
+  .graph-link,
+  .graph-node-ring {
+    stroke: CanvasText;
+    stroke-opacity: 1;
+  }
+
+  .graph-node-body {
+    fill: Canvas;
+    stroke-width: 2;
+  }
+
+  .graph-node-label,
+  .graph-node-symbol {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
+
+  .graph-node-icon {
+    color: CanvasText;
+  }
+
+  .graph-node:focus-visible .graph-node-ring,
+  .graph-node.selected .graph-node-ring {
+    stroke: Highlight;
+    forced-color-adjust: none;
+  }
 }
 
 .graph-derived-device-list {
