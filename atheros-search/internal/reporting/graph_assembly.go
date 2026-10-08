@@ -2,6 +2,7 @@ package reporting
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -28,6 +29,9 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (response *Gr
 			response.Report = reportmeta.New(scope, "projected graph entity", "graph nodes (mixed entity kinds), not a physical asset count", "latest graph timestamps and cumulative edge evidence; historical interval absence cannot be established", len(response.Nodes), response.TotalNodeCount)
 		}
 	}()
+	if filters.Hierarchy {
+		return s.graphHierarchy(ctx, filters)
+	}
 	if filters.Scope == "all" {
 		return s.graphPage(ctx, filters)
 	}
@@ -130,7 +134,7 @@ func (s *Service) graphPage(ctx context.Context, filters GraphFilters) (*GraphRe
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.Pool.BeginTx(ctx, nil)
+	tx, err := s.Pool.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +211,16 @@ LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)
 	if err != nil {
 		return nil, err
 	}
+	// Save the node-page position before adding the edge page's endpoints. Those
+	// additions close this payload without advancing the independent node cursor.
+	nodeAfter := cursor.NodeAfter
+	if len(nodes) > 0 {
+		nodeAfter = nodes[len(nodes)-1].ID
+	}
+	nodes, err = completeGraphEdgeEndpoints(ctx, tx, filters, nodes, edges)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -215,9 +229,7 @@ LIMIT $`+fmt.Sprint(len(pageArgs)), pageArgs...)
 	if nodesMore || edgesMore {
 		cursor.NodesDone = !nodesMore
 		cursor.EdgesDone = !edgesMore
-		if len(nodes) > 0 {
-			cursor.NodeAfter = nodes[len(nodes)-1].ID
-		}
+		cursor.NodeAfter = nodeAfter
 		if len(edges) > 0 {
 			cursor.EdgeAfter = edges[len(edges)-1].ID
 		}

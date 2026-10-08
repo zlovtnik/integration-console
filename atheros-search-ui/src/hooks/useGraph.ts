@@ -27,7 +27,11 @@ export function useGraph() {
 
     try {
       const filters = { ...graphFilters };
-      if (filters.scope === GRAPH_SCOPE_ALL) {
+      if (!filters.hierarchy) {
+        delete filters.root_bssid;
+        delete filters.root_node_id;
+      }
+      if (filters.scope === GRAPH_SCOPE_ALL && !filters.hierarchy) {
         const outcome = await loadAllGraphPages(
           filters,
           signal,
@@ -58,16 +62,23 @@ export function useGraph() {
           complete: outcome.complete,
         });
       } else {
+        // Hierarchy responses contain a complete, closed root neighborhood.
+        // A raw node cursor would lose parents and cannot be accumulated here.
+        if (filters.hierarchy) {
+          delete filters.page_cursor;
+          delete filters.page_size;
+        }
         const res = await api.graph(filters, signal);
+        if (requestId !== activeRequestId || signal.aborted) return;
         batch(() => {
           setGraphNodes(res.nodes);
           setGraphEdges(res.edges);
-          setGraphMeta({
-            generated_at: res.generated_at,
-            node_count: res.node_count,
-            edge_count: res.edge_count,
-          });
-          setGraphCoverage(null);
+          setGraphMeta(res);
+          setGraphCoverage(res.hierarchy || res.report?.incomplete_coverage ? {
+            loadedNodes: res.nodes.length,
+            totalNodes: res.total_node_count ?? res.report?.total_rows ?? res.nodes.length,
+            complete: res.hierarchy ? !res.hierarchy.truncated : !res.report?.incomplete_coverage,
+          } : null);
         });
       }
     } catch (err) {

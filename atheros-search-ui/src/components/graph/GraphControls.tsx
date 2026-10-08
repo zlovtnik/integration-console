@@ -3,6 +3,7 @@ import {
   Show,
   createEffect,
   createSignal,
+  batch,
   onCleanup,
   onMount,
 } from 'solid-js';
@@ -24,11 +25,15 @@ import {
   graphCoverage,
   graphFilters,
   graphLoading,
+  graphLayoutMode,
   graphMeta,
   loadGraphSavedViews,
   saveCurrentGraphView,
   setGraphEdgeKindVisibility,
   setGraphFilters,
+  setGraphLayoutMode,
+  setShowSecondaryGraphEdges,
+  showSecondaryGraphEdges,
   setGraphKindVisibility,
   visibleGraphEdgeKinds,
   visibleGraphKinds,
@@ -256,6 +261,7 @@ export function GraphControls(props: {
           <label class="field graph-field">
             <span>SSID</span>
             <input
+              aria-label="SSID"
               value={graphFilters.ssid ?? ''}
               list="graph-ssid-suggestions"
               placeholder="corp-wifi"
@@ -314,6 +320,33 @@ export function GraphControls(props: {
         </div>
 
         <div class="graph-view-row">
+          <label class="field graph-field">
+            <span>Layout</span>
+            <select aria-label="Layout" value={graphLayoutMode()} onChange={(event) => {
+              const mode = event.currentTarget.value;
+              if (mode !== 'hierarchy' && mode !== 'overview' && mode !== 'groups') return;
+              batch(() => {
+                setGraphLayoutMode(mode);
+                setGraphFilters('hierarchy', mode === 'hierarchy');
+              });
+            }}>
+              <option value="hierarchy">Hierarchy</option>
+              <option value="overview">Overview</option>
+              <option value="groups">Groups</option>
+            </select>
+          </label>
+          <Show when={graphLayoutMode() === 'hierarchy'}>
+            <label class="field graph-field">
+              <span>Root BSSID</span>
+              <input aria-label="Root BSSID" value={graphFilters.root_bssid ?? ''} placeholder="Default authorized AP" onInput={(event) =>
+                setGraphFilters('root_bssid', event.currentTarget.value.trim() || undefined)} />
+            </label>
+            <label class="switch-inline">
+              <input type="checkbox" checked={showSecondaryGraphEdges()} onChange={(event) =>
+                setShowSecondaryGraphEdges(event.currentTarget.checked)} />
+              <span>Secondary relationships</span>
+            </label>
+          </Show>
           <div class="graph-chip-row" role="group" aria-label="Node types">
             <For each={GRAPH_NODE_KINDS}>
               {(kind) => <NodeKindChip kind={kind} />}
@@ -348,6 +381,7 @@ export function GraphControls(props: {
             </Show>
           </div>
 
+          <Show when={graphLayoutMode() !== 'hierarchy'}>
           <fieldset
             class="segmented-control graph-hops"
             role="radiogroup"
@@ -373,6 +407,7 @@ export function GraphControls(props: {
               <span>2 hop</span>
             </label>
           </fieldset>
+          </Show>
 
           <label class="switch-inline">
             <input
@@ -390,7 +425,9 @@ export function GraphControls(props: {
 
           <label class="field graph-limit-field">
             <span>
-              {graphFilters.scope === GRAPH_SCOPE_ALL
+              {graphLayoutMode() === 'hierarchy'
+                ? `Neighborhood cap ${graphFilters.limit ?? 1000}`
+                : graphFilters.scope === GRAPH_SCOPE_ALL
                 ? 'Devices All'
                 : `Limit ${graphFilters.limit ?? 200}`}
             </span>
@@ -400,7 +437,7 @@ export function GraphControls(props: {
               max={String(GRAPH_LIMITS.length)}
               step="1"
               value={
-                graphFilters.scope === GRAPH_SCOPE_ALL
+                graphFilters.scope === GRAPH_SCOPE_ALL || (graphLayoutMode() === 'hierarchy' && !graphFilters.limit)
                   ? String(GRAPH_LIMITS.length)
                   : limitIndex()
               }
@@ -408,7 +445,7 @@ export function GraphControls(props: {
                 const index = Number(event.currentTarget.value);
                 if (index >= GRAPH_LIMITS.length) {
                   setGraphFilters('limit', undefined);
-                  setGraphFilters('scope', GRAPH_SCOPE_ALL);
+                  setGraphFilters('scope', graphLayoutMode() === 'hierarchy' ? undefined : GRAPH_SCOPE_ALL);
                 } else {
                   setGraphFilters('scope', undefined);
                   setGraphFilters('limit', GRAPH_LIMITS[index] ?? 200);

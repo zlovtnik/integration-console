@@ -42,6 +42,10 @@ export const GRAPH_LIMITS = [50, 100, 200, 500] as const;
 export const GRAPH_SCOPE_ALL = 'all' as const;
 
 export type GraphLimit = (typeof GRAPH_LIMITS)[number] | typeof GRAPH_SCOPE_ALL;
+export type GraphLayoutMode = 'hierarchy' | 'overview' | 'groups';
+export const [graphLayoutMode, setGraphLayoutMode] =
+  createSignal<GraphLayoutMode>('hierarchy');
+export const [showSecondaryGraphEdges, setShowSecondaryGraphEdges] = createSignal(false);
 
 function defaultVisibleKinds(): Set<NodeKind> {
   return new Set(GRAPH_NODE_KINDS);
@@ -75,8 +79,7 @@ export const [graphCoverage, setGraphCoverage] = createSignal<{
   complete: boolean;
 } | null>(null);
 export const [graphFilters, setGraphFilters] = createStore<GraphFilters>({
-  limit: 200,
-  edge_kinds: ['association'],
+  hierarchy: true,
 });
 export const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(
   null,
@@ -125,7 +128,9 @@ export function setGraphEdgeKindVisibility(kind: EdgeKind, visible?: boolean) {
 }
 
 export function resetGraphFilters() {
-  setGraphFilters(reconcile({ limit: 200, edge_kinds: ['association'] }));
+  setGraphFilters(reconcile({ hierarchy: true }));
+  setGraphLayoutMode('hierarchy');
+  setShowSecondaryGraphEdges(false);
   setVisibleGraphKinds(defaultVisibleKinds());
   setVisibleGraphEdgeKinds(defaultVisibleEdgeKinds());
 }
@@ -138,6 +143,8 @@ export interface GraphSavedView {
   filters: GraphFilters;
   visible_kinds: NodeKind[];
   visible_edge_kinds: EdgeKind[];
+  layout_mode?: GraphLayoutMode;
+  show_secondary?: boolean;
 }
 
 function sanitizeKindList(
@@ -168,6 +175,9 @@ export function loadGraphSavedViews(): GraphSavedView[] {
         return {
           name: record.name,
           filters: record.filters as GraphFilters,
+          layout_mode: record.layout_mode === 'overview' || record.layout_mode === 'groups'
+            ? record.layout_mode : 'hierarchy',
+          show_secondary: record.show_secondary === true,
           visible_kinds: sanitizeKindList(
             record.visible_kinds,
             GRAPH_NODE_KINDS,
@@ -199,6 +209,8 @@ export function saveCurrentGraphView(name: string): GraphSavedView[] {
   const view: GraphSavedView = {
     name: trimmed,
     filters: { ...graphFilters },
+    layout_mode: graphLayoutMode(),
+    show_secondary: showSecondaryGraphEdges(),
     visible_kinds: GRAPH_NODE_KINDS.filter((kind) =>
       visibleGraphKinds().has(kind),
     ),
@@ -224,6 +236,10 @@ export function deleteGraphSavedView(name: string): GraphSavedView[] {
 
 export function applyGraphSavedView(view: GraphSavedView) {
   const filters: GraphFilters = { ...view.filters };
+  const mode = view.layout_mode ?? 'hierarchy';
+  filters.hierarchy = mode === 'hierarchy';
+  setGraphLayoutMode(mode);
+  setShowSecondaryGraphEdges(view.show_secondary ?? false);
   if (!filters.limit && !filters.scope) {
     filters.scope = GRAPH_SCOPE_ALL;
   }

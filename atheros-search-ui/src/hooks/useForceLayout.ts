@@ -23,6 +23,137 @@ export interface ForceLayoutOptions {
   maxFitScale?: number;
 }
 
+export interface GraphScale {
+  charge: number;
+  linkDistance: (base: number) => number;
+  collidePad: number;
+  siblingGap: number;
+  depthGap: number;
+  fitPadding: number;
+  zoomScaleExtent: [number, number];
+}
+
+export function scaleFor(n: number, width: number, height: number): GraphScale {
+  const count = Math.max(1, Number.isFinite(n) ? n : 1);
+  const viewportWidth = Math.max(320, Number.isFinite(width) ? width : 320);
+  const viewportHeight = Math.max(240, Number.isFinite(height) ? height : 240);
+  const viewportScale = clamp(Math.hypot(viewportWidth, viewportHeight) / 1200, 0.7, 1.8);
+  // Keep short links readable in small graphs; larger graphs need more room.
+  const densityScale = clamp(Math.cbrt(count / 50), 0.85, 2.2);
+  return {
+    charge: -(60 + 12 * Math.sqrt(count)),
+    linkDistance: (base) => base * densityScale * viewportScale,
+    collidePad: 10 + 4 * Math.sqrt(count / 50),
+    siblingGap: clamp(900 / count, 24, 80),
+    depthGap: 110,
+    fitPadding: 48 + 2 * Math.sqrt(count),
+    zoomScaleExtent: [Math.min(0.05, 40 / Math.max(viewportWidth, viewportHeight)), 6],
+  };
+}
+
+export interface GroupCentroid {
+  x: number;
+  y: number;
+}
+
+export function groupCentroids<T>(
+  nodes: T[],
+  groupId: (node: T) => string,
+  width: number,
+  height: number,
+): Map<string, GroupCentroid> {
+  const counts = new Map<string, number>();
+  for (const node of nodes) {
+    const id = groupId(node);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const ids = Array.from(counts.keys()).sort();
+  const columns = Math.max(1, Math.min(ids.length, Math.ceil(Math.sqrt(ids.length * width / Math.max(height, 1)))));
+  const rows = Math.ceil(ids.length / columns);
+  const largestGroup = Math.max(1, ...counts.values());
+  const spacing = Math.max(240, Math.sqrt(largestGroup) * 70);
+  return new Map(ids.map((id, index) => [id, {
+    x: width / 2 + (index % columns - (columns - 1) / 2) * spacing,
+    y: height / 2 + (Math.floor(index / columns) - (rows - 1) / 2) * spacing,
+  }]));
+}
+
+export function seedGroupPositions<T extends ForceLayoutNode>(
+  nodes: SimNodeDatum<T>[],
+  groupId: (node: T) => string,
+  centers: Map<string, GroupCentroid>,
+) {
+  for (const node of nodes) {
+    if (hasFinitePosition(node)) continue;
+    const center = centers.get(groupId(node));
+    if (!center) continue;
+    const angle = stableUnitValue(node.id) * Math.PI * 2;
+    const radius = 24 + stableUnitValue(`${node.id}:radius`) * 72;
+    node.x = center.x + Math.cos(angle) * radius;
+    node.y = center.y + Math.sin(angle) * radius;
+  }
+}
+
+export function partitionGraphEdges<
+  T extends ForceLayoutNode,
+  E extends { source: string; target: string },
+>(nodes: T[], edges: E[]): { edges: E[]; hiddenRelationshipCount: number } {
+  const ids = new Set(nodes.map((node) => node.id));
+  const resolved = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
+  return { edges: resolved, hiddenRelationshipCount: edges.length - resolved.length };
+}
+
+export function countHiddenRelationships<
+  T extends ForceLayoutNode,
+  E extends { source: string; target: string },
+>(
+  nodes: T[],
+  edges: E[],
+  nodeVisible: (node: T) => boolean = () => true,
+  edgeVisible: (edge: E) => boolean = () => true,
+  alreadyHidden = 0,
+): number {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  let missing = 0;
+  let filtered = 0;
+  for (const edge of edges) {
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    if (!source || !target) missing += 1;
+    else if (!nodeVisible(source) || !nodeVisible(target) || !edgeVisible(edge)) filtered += 1;
+  }
+  return Math.max(missing, alreadyHidden) + filtered;
+}
+
+export function fitGraphTransform(
+  positions: { x: number; y: number }[],
+  width: number,
+  height: number,
+  padding: number,
+  maxScale = 2,
+): d3.ZoomTransform | null {
+  if (positions.length === 0) return null;
+  const minX = d3.min(positions, (node) => node.x) ?? 0;
+  const maxX = d3.max(positions, (node) => node.x) ?? 0;
+  const minY = d3.min(positions, (node) => node.y) ?? 0;
+  const maxY = d3.max(positions, (node) => node.y) ?? 0;
+  const graphWidth = Math.max(maxX - minX, 1);
+  const graphHeight = Math.max(maxY - minY, 1);
+  const inset = Math.min(padding, Math.min(width, height) / 3);
+  const scale = Math.max(Number.EPSILON, Math.min(
+    maxScale,
+    (width - inset * 2) / graphWidth,
+    (height - inset * 2) / graphHeight,
+  ));
+  return d3.zoomIdentity
+    .translate(width / 2 - (minX + graphWidth / 2) * scale, height / 2 - (minY + graphHeight / 2) * scale)
+    .scale(scale);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 export function useForceLayout<
   T extends ForceLayoutNode,
   L extends d3.SimulationLinkDatum<SimNodeDatum<T>>,
@@ -57,8 +188,9 @@ export function useForceLayout<
       .attr('transform', zoomTransform.toString());
     zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
+      .extent([[0, 0], [width, height]])
       .clickDistance(4)
-      .scaleExtent([0.05, 6])
+      .scaleExtent(scaleFor(simNodes.length, width, height).zoomScaleExtent)
       .on('zoom', (event) => container.attr('transform', event.transform));
     svg.call(zoomBehavior);
 
@@ -116,7 +248,7 @@ export function useForceLayout<
     );
   }
 
-  function fitToGraph(nodeIds?: Set<string>, padding = 56): boolean {
+  function fitToGraph(nodeIds?: Set<string>, padding?: number): boolean {
     const el = svgRef();
     if (!el || !zoomBehavior || nodeById.size === 0) return false;
     const positioned = Array.from(nodeById.values()).filter(
@@ -130,25 +262,21 @@ export function useForceLayout<
     const bounds = el.getBoundingClientRect();
     const width = Math.max(bounds.width || el.clientWidth, 320);
     const height = Math.max(bounds.height || el.clientHeight, 240);
-    const minX = d3.min(positioned, (node) => node.x ?? 0) ?? 0;
-    const maxX = d3.max(positioned, (node) => node.x ?? 0) ?? 0;
-    const minY = d3.min(positioned, (node) => node.y ?? 0) ?? 0;
-    const maxY = d3.max(positioned, (node) => node.y ?? 0) ?? 0;
-    const graphWidth = Math.max(maxX - minX, 1);
-    const graphHeight = Math.max(maxY - minY, 1);
-    const scale = Math.max(
-      0.12,
-      Math.min(
-        options.maxFitScale ?? 2,
-        (width - padding * 2) / graphWidth,
-        (height - padding * 2) / graphHeight,
-      ),
+    const calibration = scaleFor(positioned.length, width, height);
+    const transform = fitGraphTransform(
+      positioned.map((node) => ({ x: node.x!, y: node.y! })),
+      width,
+      height,
+      padding ?? calibration.fitPadding,
+      options.maxFitScale,
     );
-    const centerX = minX + graphWidth / 2;
-    const centerY = minY + graphHeight / 2;
-    const transform = d3.zoomIdentity
-      .translate(width / 2 - centerX * scale, height / 2 - centerY * scale)
-      .scale(scale);
+    if (!transform) return false;
+    // A large, closed graph must remain fully reachable even when its fit
+    // scale is smaller than the usual manual zoom minimum.
+    zoomBehavior.scaleExtent([
+      Math.min(transform.k, calibration.zoomScaleExtent[0]),
+      calibration.zoomScaleExtent[1],
+    ]);
 
     d3.select<SVGSVGElement, unknown>(el).call(
       zoomBehavior.transform,

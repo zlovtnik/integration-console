@@ -7,9 +7,10 @@ const graph: GraphResponse = {
   generated_at: '2026-09-26T12:00:00Z',
   node_count: 6,
   edge_count: 3,
+  hierarchy: { root_id: 'anchor', root_ids: ['anchor', 'threat', 'alert', 'cluster', 'isolated'], truncated: false },
   nodes: [
     { id: 'anchor', kind: 'ap', label: 'Lab access point' },
-    { id: 'client', kind: 'client', label: 'Lab laptop' },
+    { id: 'client', kind: 'client', label: 'Lab laptop', parent_id: 'anchor', depth: 1 },
     { id: 'threat', kind: 'shadow_alert', label: 'Shadow AP' },
     { id: 'alert', kind: 'alert', label: 'Probe sweep' },
     {
@@ -26,9 +27,10 @@ const graph: GraphResponse = {
       source: 'anchor',
       target: 'client',
       kind: 'association',
+      tree_role: 'tree',
     },
-    { id: 'shadow', source: 'anchor', target: 'threat', kind: 'shadow' },
-    { id: 'probe', source: 'alert', target: 'client', kind: 'probe' },
+    { id: 'shadow', source: 'anchor', target: 'threat', kind: 'shadow', tree_role: 'secondary' },
+    { id: 'probe', source: 'alert', target: 'client', kind: 'probe', tree_role: 'secondary' },
   ],
 };
 
@@ -89,6 +91,7 @@ async function openGraph(page: Page, path: string) {
       .getByRole('button', { name: 'Open projection explorer' })
       .click();
     await expect(page.locator('.graph-node')).toHaveCount(6);
+    await page.getByLabel('Secondary relationships').check();
     const previousViewport = await page
       .locator('.graph-viewport')
       .elementHandle();
@@ -316,6 +319,7 @@ for (const path of ['/graph', '/inventory']) {
       await page
         .getByRole('button', { name: 'Open projection explorer' })
         .click();
+      await page.getByLabel('Layout', { exact: true }).selectOption('groups');
     }
     const aggregate = page.locator('.graph-node[data-kind="aggregate_group"]');
     await expect(aggregate.locator('circle.graph-node-body')).toHaveCount(1);

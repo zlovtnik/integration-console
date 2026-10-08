@@ -1,17 +1,23 @@
 import * as d3 from 'd3';
-import { createEffect, on, onMount } from 'solid-js';
+import { createEffect, createMemo, on, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import type { EdgeKind, GraphEdge, GraphNode, NodeKind } from '~/api/types';
 import {
   createSimNodes,
+  countHiddenRelationships,
   finiteCoord,
+  groupCentroids,
+  partitionGraphEdges,
+  scaleFor,
+  seedGroupPositions,
   stableUnitValue,
   useForceLayout,
   type SimNodeDatum,
 } from './useForceLayout';
 import { useGraphPresentation } from './graphPresentation';
+import type { GraphRenderNode } from './useGraphAggregate';
 
-export type SimNode = SimNodeDatum<GraphNode>;
+export type SimNode = SimNodeDatum<GraphRenderNode>;
 
 export interface SimEdge extends d3.SimulationLinkDatum<SimNode> {
   id: string;
@@ -20,6 +26,7 @@ export interface SimEdge extends d3.SimulationLinkDatum<SimNode> {
   kind: GraphEdge['kind'];
   weight?: number;
   label?: string;
+  tree_role?: NonNullable<GraphEdge['tree_role']>;
 }
 
 export interface ForceGraphOptions {
@@ -28,17 +35,19 @@ export interface ForceGraphOptions {
   pinnedNodeIds?: Accessor<Set<string>>;
   visibleKinds?: Accessor<Set<NodeKind>>;
   visibleEdgeKinds?: Accessor<Set<EdgeKind>>;
+  layoutMode?: Accessor<'overview' | 'groups'>;
+  hiddenRelationshipCount?: Accessor<number>;
   onNodeClick?: (node: SimNode) => void;
   onNodeHover?: (node: SimNode | null) => void;
 }
 
 export function useForceGraph(
   svgRef: () => SVGSVGElement | undefined,
-  nodes: () => GraphNode[],
+  nodes: () => GraphRenderNode[],
   edges: () => GraphEdge[],
   options: ForceGraphOptions = {},
 ) {
-  const layout = useForceLayout<GraphNode, SimEdge>(svgRef, {
+  const layout = useForceLayout<GraphRenderNode, SimEdge>(svgRef, {
     pinnedNodeIds: options.pinnedNodeIds,
   });
   const presentation = useGraphPresentation<SimNode>(
@@ -46,6 +55,16 @@ export function useForceGraph(
     () => options.selectedNodeId?.() ?? null,
     () => options.onClearSelection?.(),
   );
+  const hiddenRelationshipCount = createMemo(() => {
+    const visibleKinds = options.visibleKinds?.();
+    const visibleEdges = options.visibleEdgeKinds?.();
+    return countHiddenRelationships(
+      nodes(), edges(),
+      (node) => node.kind === 'aggregate_group' || !visibleKinds || visibleKinds.has(node.kind),
+      (edge) => !visibleEdges || visibleEdges.has(edge.kind),
+      options.hiddenRelationshipCount?.() ?? 0,
+    );
+  });
   let visibilityEffectReady = false;
 
   function build() {
@@ -53,17 +72,21 @@ export function useForceGraph(
     const prepared = layout.prepare(nodes());
     if (!prepared) return;
     const { svg, container, width, height, simNodes, nodeById } = prepared;
-    const simEdges: SimEdge[] = edges()
-      .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
+    const closed = partitionGraphEdges(simNodes, edges());
+    if (import.meta.env.DEV && closed.hiddenRelationshipCount > 0) {
+      console.assert(false, `${closed.hiddenRelationshipCount} graph relationships have missing endpoints`);
+    }
+    const simEdges: SimEdge[] = closed.edges
       .map((edge) => {
         const next: SimEdge = {
           id: edge.id,
-          source: edge.source,
-          target: edge.target,
+          source: nodeById.get(edge.source)!,
+          target: nodeById.get(edge.target)!,
           kind: edge.kind,
         };
         if (edge.weight !== undefined) next.weight = edge.weight;
         if (edge.label !== undefined) next.label = edge.label;
+        if (edge.tree_role !== undefined) next.tree_role = edge.tree_role;
         return next;
       });
 
@@ -101,6 +124,7 @@ export function useForceGraph(
       .join('line')
       .attr('class', 'graph-link')
       .attr('data-edge-kind', (edge) => edge.kind)
+      .attr('data-tree-role', (edge) => edge.tree_role ?? (groupLayoutEdge(edge) ? 'tree' : 'secondary'))
       .attr('data-source-kind', (edge) => endpointKind(edge.source))
       .attr('data-target-kind', (edge) => endpointKind(edge.target))
       .attr('stroke', (edge) => edgeColor(edge.kind))
@@ -174,32 +198,46 @@ export function useForceGraph(
       )
       .attr('stroke-opacity', 0.65);
 
+    const calibration = scaleFor(simNodes.length, width, height);
+    const grouped = options.layoutMode?.() === 'groups';
+    const centers = groupCentroids(simNodes, graphGroupId, width, height);
+    if (grouped) {
+      seedGroupPositions(simNodes, graphGroupId, centers);
+      simNodes.sort((a, b) => a.id.localeCompare(b.id));
+    } else {
+      for (const [index, item] of simNodes.entries()) {
+        if (Number.isFinite(item.x) && Number.isFinite(item.y)) continue;
+        item.x = nodeLaneX(item, width);
+        item.y = nodeLaneY(item, index, height);
+      }
+    }
+    const centroid = (item: SimNode) => centers.get(graphGroupId(item)) ?? { x: width / 2, y: height / 2 };
     let fitOnSimulationEnd = true;
     const simulation = d3
       .forceSimulation<SimNode>(simNodes)
       .force(
         'link',
         d3
-          .forceLink<SimNode, SimEdge>(simEdges)
+          .forceLink<SimNode, SimEdge>(grouped ? simEdges.filter(groupLayoutEdge) : simEdges)
           .id((item) => item.id)
-          .distance((edge) => linkDistance(edge.kind))
-          .strength(0.4),
+          .distance((edge) => calibration.linkDistance(linkDistance(edge.kind)))
+          .strength(grouped ? 0.35 : 0.4),
       )
-      .force('charge', d3.forceManyBody().strength(-210))
+      .force('charge', d3.forceManyBody().strength(calibration.charge))
       .force(
         'x',
-        d3.forceX<SimNode>((item) => nodeLaneX(item, width)).strength(0.16),
+        d3.forceX<SimNode>((item) => grouped ? centroid(item).x : nodeLaneX(item, width)).strength(grouped ? 0.35 : 0.16),
       )
       .force(
         'y',
         d3
-          .forceY<SimNode>((item, index) => nodeLaneY(item, index, height))
-          .strength(0.08),
+          .forceY<SimNode>((item, index) => grouped ? centroid(item).y : nodeLaneY(item, index, height))
+          .strength(grouped ? 0.35 : 0.08),
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collide',
-        d3.forceCollide<SimNode>((item) => nodeRadius(item) + 14),
+        d3.forceCollide<SimNode>((item) => nodeRadius(item) + calibration.collidePad).iterations(3),
       )
       .on('tick', () => {
         link
@@ -233,15 +271,13 @@ export function useForceGraph(
   ) {
     const el = svgRef();
     if (!el) return;
-    if (!visible) return;
-    const visibleKinds = visible;
 
     d3.select(el)
       .selectAll<SVGGElement, SimNode>('.graph-node')
       .style('display', (item) => (kindIsVisible(item.kind) ? null : 'none'));
 
     function kindIsVisible(kind: NodeKind): boolean {
-      return kind === 'aggregate_group' || visibleKinds.has(kind);
+      return kind === 'aggregate_group' || !visible || visible.has(kind);
     }
 
     function edgeIsVisible(edge: SimEdge): boolean {
@@ -313,10 +349,20 @@ export function useForceGraph(
   createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
   createEffect(on(() => options.pinnedNodeIds?.(), applyPinned));
 
-  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop };
+  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop, hiddenRelationshipCount };
 }
 
 export { createSimNodes };
+
+export function graphGroupId(node: GraphRenderNode): string {
+  if (node.aggregate_group_id) return node.aggregate_group_id;
+  if (node.location_id) return `location:${node.location_id}`;
+  return `kind:${node.kind}`;
+}
+
+export function groupLayoutEdge(edge: Pick<GraphEdge, 'kind' | 'tree_role'>): boolean {
+  return edge.tree_role !== 'secondary' && !['rf_proximity', 'calibrated_range', 'vendor_link', 'same_channel', 'roaming', 'probe'].includes(edge.kind);
+}
 
 function nodeLaneX(node: GraphNode, width: number): number {
   const lanes: Record<NodeKind, number> = {

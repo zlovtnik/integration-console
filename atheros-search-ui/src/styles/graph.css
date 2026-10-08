@@ -863,3 +863,20 @@
     grid-template-columns: 1fr;
   }
 }
+.graph-coverage-notices {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.graph-coverage-warning {
+  padding: 0.5rem 0;
+  color: var(--graph-warn);
+  font-size: 0.8125rem;
+}
+
+.graph-hierarchy-group {
+  fill: var(--color-text-secondary);
+  font-size: 12px;
+  text-anchor: middle;
+}

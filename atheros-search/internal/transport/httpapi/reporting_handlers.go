@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,10 +147,10 @@ func registerReportingRoutes(mux *runtime.ServeMux, tokenAuth *auth.TokenAuth, s
 	}); err != nil {
 		return err
 	}
-	if err := registerJSON(mux, "POST", "/v1/graph", tokenAuth, func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+	graphHandler := func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		start := time.Now()
 		reqID := requestID()
-		log := loggerWithTrace(logger.With().Str("endpoint", "/v1/graph").Str("method", "POST").Str("req_id", reqID).Logger(), r.Context())
+		log := loggerWithTrace(logger.With().Str("endpoint", "/v1/graph").Str("method", r.Method).Str("req_id", reqID).Logger(), r.Context())
 		log.Info().Msg("graph request started")
 
 		body, ok := readRequestBody(w, r)
@@ -163,6 +165,10 @@ func registerReportingRoutes(mux *runtime.ServeMux, tokenAuth *auth.TokenAuth, s
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
+		}
+		if err := applyGraphQueryFilters(&filters, r.URL.Query()); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid graph query filters.")
+			return
 		}
 		log = log.With().
 			Int("location_ids", len(filters.LocationIDs)).
@@ -186,8 +192,42 @@ func registerReportingRoutes(mux *runtime.ServeMux, tokenAuth *auth.TokenAuth, s
 			Int("edges", len(resp.Edges)).
 			Msg("graph completed")
 		writeJSON(w, http.StatusOK, resp)
-	}); err != nil {
-		return err
+	}
+	for _, method := range []string{http.MethodPost, http.MethodGet} {
+		if err := registerJSON(mux, method, "/v1/graph", tokenAuth, graphHandler); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyGraphQueryFilters(filters *reporting.GraphFilters, query url.Values) error {
+	if query.Has("hierarchy") {
+		value, err := strconv.ParseBool(query.Get("hierarchy"))
+		if err != nil {
+			return err
+		}
+		filters.Hierarchy = value
+	}
+	for key, target := range map[string]*string{
+		"root_bssid": &filters.RootBSSID, "root_node_id": &filters.RootNodeID,
+		"source_mac": &filters.SourceMAC, "projection": &filters.Projection,
+		"scope": &filters.Scope, "page_cursor": &filters.PageCursor,
+	} {
+		if query.Has(key) {
+			*target = query.Get(key)
+		}
+	}
+	for key, target := range map[string]*int{
+		"limit": &filters.Limit, "hops": &filters.Hops, "page_size": &filters.PageSize,
+	} {
+		if query.Has(key) {
+			value, err := strconv.Atoi(query.Get(key))
+			if err != nil {
+				return err
+			}
+			*target = value
+		}
 	}
 	return nil
 }

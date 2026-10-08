@@ -40,6 +40,7 @@ export async function loadAllGraphPages(
   let generatedAt = '';
   let pages = 0;
   let cursor: string | undefined;
+  const cursors = new Set<string>();
 
   for (;;) {
     if (signal.aborted) {
@@ -58,18 +59,15 @@ export async function loadAllGraphPages(
     );
     pages += 1;
 
-    let added = false;
     for (const node of response.nodes) {
       if (nodeIds.has(node.id)) continue;
       nodeIds.add(node.id);
       nodes.push(node);
-      added = true;
     }
     for (const edge of response.edges) {
       if (edgeIds.has(edge.id)) continue;
       edgeIds.add(edge.id);
       edges.push(edge);
-      added = true;
     }
     if (response.total_node_count !== undefined) totalNodes = response.total_node_count;
     if (response.total_edge_count !== undefined) totalEdges = response.total_edge_count;
@@ -100,9 +98,9 @@ export async function loadAllGraphPages(
         `Graph pagination did not complete after ${MAX_PAGES} pages.`,
       );
     }
-    if (!added && pages > 1) {
-      // Defensive: a cursor that yields no new rows should have ended the
-      // sequence. Treat it as incomplete rather than looping forever.
+    if (cursors.has(cursor)) {
+      // A closed edge page may prefetch every node of a later raw node page.
+      // Only a repeated cursor proves that pagination has stopped progressing.
       return {
         complete: false,
         pages,
@@ -111,5 +109,6 @@ export async function loadAllGraphPages(
         totalEdges,
       };
     }
+    cursors.add(cursor);
   }
 }

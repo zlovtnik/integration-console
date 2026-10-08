@@ -314,7 +314,7 @@ func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, node
 		args = append(args, mapped...)
 	}
 	args = append(args, filters.Limit)
-	where := "(" + strings.Join(clauses[:2], " OR ") + ")"
+	where := "(" + strings.Join(clauses[:2], " AND ") + ")"
 	if len(clauses) > 2 {
 		where += " AND " + strings.Join(clauses[2:], " AND ")
 	}

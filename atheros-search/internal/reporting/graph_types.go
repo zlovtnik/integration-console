@@ -14,6 +14,9 @@ const (
 )
 
 type GraphFilters struct {
+	Hierarchy       bool       `json:"hierarchy,omitempty"`
+	RootBSSID       string     `json:"root_bssid,omitempty"`
+	RootNodeID      string     `json:"root_node_id,omitempty"`
 	Projection      string     `json:"projection,omitempty"`
 	IncludeIdentity bool       `json:"include_identity,omitempty"`
 	LocationIDs     []string   `json:"location_ids,omitempty"`
@@ -33,6 +36,9 @@ type GraphFilters struct {
 }
 
 type GraphNode struct {
+	ParentID         *string    `json:"parent_id,omitempty"`
+	Depth            *int       `json:"depth,omitempty"`
+	Role             string     `json:"role,omitempty"`
 	ID               string     `json:"id"`
 	Kind             string     `json:"kind"`
 	Label            string     `json:"label"`
@@ -72,9 +78,20 @@ type GraphEdge struct {
 	Weight              *float64    `json:"weight,omitempty"`
 	WeightBasis         string      `json:"weight_basis,omitempty"`
 	Label               string      `json:"label,omitempty"`
+	TreeRole            string      `json:"tree_role,omitempty"`
+}
+
+// GraphHierarchy describes a presentation forest; no parent relation is stored
+// in PostgreSQL. Edge source/target retain their original evidence direction.
+type GraphHierarchy struct {
+	RootID    string   `json:"root_id"`
+	RootIDs   []string `json:"root_ids"`
+	Truncated bool     `json:"truncated"`
+	Reason    string   `json:"reason,omitempty"`
 }
 
 type GraphResponse struct {
+	Hierarchy      *GraphHierarchy      `json:"hierarchy,omitempty"`
 	Report         *reportmeta.Metadata `json:"report,omitempty"`
 	Nodes          []GraphNode          `json:"nodes"`
 	Edges          []GraphEdge          `json:"edges"`

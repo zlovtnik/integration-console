@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { createEffect, on, onMount } from 'solid-js';
+import { createEffect, createMemo, on, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import type {
   InventoryEdge,
@@ -9,6 +9,11 @@ import type {
 } from '~/api/types';
 import {
   finiteCoord,
+  countHiddenRelationships,
+  groupCentroids,
+  partitionGraphEdges,
+  scaleFor,
+  seedGroupPositions,
   useForceLayout,
   type SimNodeDatum,
 } from './useForceLayout';
@@ -49,6 +54,7 @@ interface RenderModel {
   nodes: InventoryRenderNode[];
   edges: InventoryEdge[];
   aggregated: boolean;
+  hiddenRelationshipCount: number;
 }
 
 export function useInventoryGraph(
@@ -66,6 +72,10 @@ export function useInventoryGraph(
     () => options.selectedNodeId?.() ?? null,
     () => options.onClearSelection?.(),
   );
+  const hiddenRelationshipCount = createMemo(() => {
+    const visible = options.visibleKinds?.();
+    return countHiddenRelationships(nodes(), edges(), (node) => node.kind === 'aggregate_group' || !visible || visible.has(node.kind));
+  });
   let visibilityEffectReady = false;
 
   function build() {
@@ -80,14 +90,15 @@ export function useInventoryGraph(
     const prepared = layout.prepare(model.nodes);
     if (!prepared) return;
     const { svg, container, width, height, simNodes, nodeById } = prepared;
-    const renderedEdges = model.edges.filter(
-      (edge) => nodeById.has(edge.source) && nodeById.has(edge.target),
-    );
-    const simEdges = renderedEdges.map((edge): InventorySimEdge => {
+    const closed = partitionGraphEdges(simNodes, model.edges);
+    if (import.meta.env.DEV && model.hiddenRelationshipCount > 0) {
+      console.assert(false, `${model.hiddenRelationshipCount} inventory relationships have missing endpoints`);
+    }
+    const simEdges = closed.edges.map((edge): InventorySimEdge => {
       const next: InventorySimEdge = {
         id: edge.id,
-        source: edge.source,
-        target: edge.target,
+        source: nodeById.get(edge.source)!,
+        target: nodeById.get(edge.target)!,
         kind: edge.kind,
       };
       if (edge.weight !== undefined) next.weight = edge.weight;
@@ -125,9 +136,11 @@ export function useInventoryGraph(
       .join('line')
       .attr('class', 'graph-link inventory-link')
       .attr('data-edge-kind', (edge) => edge.kind)
+      .attr('data-tree-role', (edge) => inventoryLayoutEdge(edge) ? 'tree' : 'secondary')
       .attr('stroke', (edge) => inventoryEdgeColor(edge.kind))
       .attr('stroke-width', (edge) => Math.max(0.7, (edge.weight ?? 1) * 1.1))
       .attr('stroke-opacity', 0.65)
+      .attr('stroke-dasharray', (edge) => inventoryLayoutEdge(edge) ? null : '4 4')
       .style('--edge-opacity', '0.65')
       .attr(
         'marker-end',
@@ -185,33 +198,39 @@ export function useInventoryGraph(
         ['owner', 'location_asset', 'aggregate_group'].includes(item.kind),
     });
 
+    const calibration = scaleFor(simNodes.length, width, height);
+    const grouping = options.grouping?.() ?? 'registry';
+    const groupId = (item: InventoryRenderNode) => inventoryGroupId(item, grouping);
+    const centers = groupCentroids(simNodes, groupId, width, height);
+    seedGroupPositions(simNodes, groupId, centers);
+    const centroid = (item: InventorySimNode) => centers.get(groupId(item)) ?? { x: width / 2, y: height / 2 };
+    simNodes.sort((a, b) => a.id.localeCompare(b.id));
     let fitOnSimulationEnd = true;
     const simulation = d3
       .forceSimulation<InventorySimNode>(simNodes)
       .force(
         'link',
         d3
-          .forceLink<InventorySimNode, InventorySimEdge>(simEdges)
+          .forceLink<InventorySimNode, InventorySimEdge>(simEdges.filter(inventoryLayoutEdge))
           .id((item) => item.id)
-          .distance((edge) => inventoryLinkDistance(edge.kind))
-          .strength(0.34),
+          .distance((edge) => calibration.linkDistance(inventoryLinkDistance(edge.kind)))
+          .strength(0.35),
       )
-      .force('charge', d3.forceManyBody().strength(-180))
+      .force('charge', d3.forceManyBody().strength(calibration.charge))
       .force(
-        'group',
-        forceInventoryGroups(
-          simNodes,
-          options.grouping?.() ?? 'registry',
-          width,
-          height,
-        ),
+        'x',
+        d3.forceX<InventorySimNode>((item) => centroid(item).x).strength(0.35),
+      )
+      .force(
+        'y',
+        d3.forceY<InventorySimNode>((item) => centroid(item).y).strength(0.35),
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collide',
         d3
           .forceCollide<InventorySimNode>(
-            (item) => inventoryNodeRadius(item) + 28,
+            (item) => inventoryNodeRadius(item) + calibration.collidePad,
           )
           .iterations(3),
       )
@@ -344,7 +363,7 @@ export function useInventoryGraph(
   createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
   createEffect(on(() => options.pinnedNodeIds?.(), applyPinned));
 
-  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop };
+  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop, hiddenRelationshipCount };
 }
 
 export function buildInventoryRenderModel(
@@ -354,15 +373,16 @@ export function buildInventoryRenderModel(
   expandedGroupIds: Set<string>,
   aggregateThreshold = DEFAULT_AGGREGATE_THRESHOLD,
 ): RenderModel {
+  const closed = partitionGraphEdges(nodes, edges);
   if (nodes.length <= aggregateThreshold) {
-    return { nodes, edges, aggregated: false };
+    return { nodes, edges, aggregated: false, hiddenRelationshipCount: closed.hiddenRelationshipCount };
   }
 
   const sourceById = new Map(nodes.map((node) => [node.id, node]));
   // Keep relationship endpoints individual. Collapsing both ends of a pair
   // into one summary silently erased similarity and ownership evidence.
   const connected = new Set(
-    edges.flatMap((edge) => [edge.source, edge.target]),
+    closed.edges.flatMap((edge) => [edge.source, edge.target]),
   );
   const groups = new Map<string, InventoryNode[]>();
   const renderedNodes: InventoryRenderNode[] = [];
@@ -404,11 +424,13 @@ export function buildInventoryRenderModel(
 
   const renderedIds = new Set(renderedNodes.map((node) => node.id));
   const remappedEdges = new Map<string, InventoryEdge>();
-  for (const edge of edges) {
+  for (const edge of closed.edges) {
     const source = nodeIdMap.get(edge.source) ?? edge.source;
     const target = nodeIdMap.get(edge.target) ?? edge.target;
     if (source === target) continue;
-    if (!renderedIds.has(source) || !renderedIds.has(target)) continue;
+    if (!renderedIds.has(source) || !renderedIds.has(target)) {
+      throw new Error(`Inventory aggregation lost a relationship endpoint: ${edge.id}`);
+    }
     const id = `${edge.kind}:${source}:${target}`;
     if (remappedEdges.has(id)) continue;
     remappedEdges.set(id, { ...edge, id, source, target });
@@ -418,6 +440,7 @@ export function buildInventoryRenderModel(
     nodes: renderedNodes,
     edges: Array.from(remappedEdges.values()),
     aggregated: true,
+    hiddenRelationshipCount: closed.hiddenRelationshipCount,
   };
 }
 
@@ -466,52 +489,8 @@ function inventoryGroupLabel(
   return groupId;
 }
 
-function forceInventoryGroups(
-  nodes: InventorySimNode[],
-  grouping: InventoryGrouping,
-  width: number,
-  height: number,
-): d3.Force<InventorySimNode, InventorySimEdge> {
-  const groupIds = Array.from(
-    new Set(nodes.map((node) => inventoryGroupId(node, grouping))),
-  ).sort();
-  const centers = new Map<string, { x: number; y: number }>();
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const columns = Math.max(
-    1,
-    Math.ceil(Math.sqrt((groupIds.length * width) / height)),
-  );
-  const rows = Math.ceil(groupIds.length / columns);
-  const spacing = Math.max(
-    240,
-    Math.sqrt(nodes.length / Math.max(1, groupIds.length)) * 70,
-  );
-
-  groupIds.forEach((groupId, index) => {
-    centers.set(groupId, {
-      x: centerX + ((index % columns) - (columns - 1) / 2) * spacing,
-      y: centerY + (Math.floor(index / columns) - (rows - 1) / 2) * spacing,
-    });
-  });
-
-  let simulationNodes = nodes;
-  const force = (alpha: number) => {
-    for (const node of simulationNodes) {
-      const center = centers.get(inventoryGroupId(node, grouping)) ?? {
-        x: centerX,
-        y: centerY,
-      };
-      node.vx =
-        (node.vx ?? 0) + (center.x - (node.x ?? center.x)) * alpha * 0.08;
-      node.vy =
-        (node.vy ?? 0) + (center.y - (node.y ?? center.y)) * alpha * 0.08;
-    }
-  };
-  force.initialize = (nextNodes: InventorySimNode[]) => {
-    simulationNodes = nextNodes;
-  };
-  return force;
+export function inventoryLayoutEdge(edge: Pick<InventoryEdge, 'kind'>): boolean {
+  return ['owns', 'located_at', 'cluster_member'].includes(edge.kind);
 }
 
 export function inventoryNodeRadius(node: InventoryRenderNode): number {

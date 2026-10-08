@@ -61,7 +61,7 @@ test('SSID filter scopes visible graph topology', async ({ page }) => {
   await page.goto('/graph');
   await page.getByText('Advanced projection explorer', { exact: true }).click();
   await page.getByRole('button', { name: 'Open projection explorer' }).click();
-  await page.getByLabel('SSID').fill('lab-net');
+  await page.getByLabel('SSID', { exact: true }).fill('lab-net');
 
   await expect(
     page.locator('.graph-node[data-node-id="cluster:lab"]'),
@@ -159,7 +159,7 @@ test('cluster search events preserves the active graph SSID scope', async ({
   await page.goto('/graph');
   await page.getByText('Advanced projection explorer', { exact: true }).click();
   await page.getByRole('button', { name: 'Open projection explorer' }).click();
-  await page.getByLabel('SSID').fill('lab-net');
+  await page.getByLabel('SSID', { exact: true }).fill('lab-net');
   await expect
     .poll(() =>
       graphRequests.some(

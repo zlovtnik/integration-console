@@ -8,6 +8,14 @@ import (
 )
 
 func NormalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
+	filters.RootBSSID = strings.ToLower(strings.TrimSpace(filters.RootBSSID))
+	filters.RootNodeID = strings.TrimSpace(filters.RootNodeID)
+	if filters.RootBSSID != "" || filters.RootNodeID != "" {
+		filters.Hierarchy = true
+	}
+	if filters.Hierarchy && filters.PageCursor != "" {
+		return filters, apperror.Validationf("page_cursor is not supported for hierarchy graphs")
+	}
 	if filters.Projection != "" && filters.Projection != "legacy" && filters.Projection != "stream" {
 		return filters, apperror.Validationf("unsupported graph projection")
 	}
@@ -37,6 +45,9 @@ func NormalizeGraphFilters(filters GraphFilters) (GraphFilters, error) {
 	}
 	if filters.Limit <= 0 {
 		filters.Limit = graphDefaultLimit
+		if filters.Hierarchy {
+			filters.Limit = GraphMaxLimit
+		}
 	}
 	if filters.Limit > GraphMaxLimit {
 		filters.Limit = GraphMaxLimit

@@ -7,7 +7,6 @@ import {
   onCleanup,
   onMount,
   Show,
-  startTransition,
 } from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
 import { useSearchParams } from '@solidjs/router';
@@ -24,6 +23,7 @@ import {
 } from '~/stores/graphStore';
 import type { EdgeKind, NodeKind } from '~/api/types';
 import { useForceGraph } from '~/hooks/useForceGraph';
+import { useHierarchyLayout } from '~/hooks/useHierarchyLayout';
 import {
   buildGraphRenderModel,
   GRAPH_AGGREGATE_THRESHOLD,
@@ -35,13 +35,17 @@ import {
   graphError,
   graphFilters,
   graphLoading,
+  graphLayoutMode,
+  graphMeta,
   graphNodes,
   pinnedNodeIds,
   selectedNodeId,
   setGraphFilters,
+  setGraphLayoutMode,
   setSelectedNodeId,
   visibleGraphEdgeKinds,
   visibleGraphKinds,
+  showSecondaryGraphEdges,
 } from '~/stores/graphStore';
 import '~/styles/graph.css';
 
@@ -65,8 +69,6 @@ export default function GraphPage() {
           type="button"
           class="btn btn-secondary"
           onClick={() => {
-            setGraphFilters('scope', undefined);
-            setGraphFilters('limit', 200);
             setExplore((value) => !value);
           }}
         >
@@ -83,45 +85,16 @@ export default function GraphPage() {
 function ProjectionGraph() {
   const [urlParams, setUrlParams] = useSearchParams();
   const [urlReady, setUrlReady] = createSignal(false);
-  let svgRef: SVGSVGElement | undefined;
   let filterReloadTimer: number | undefined;
-  let rebuildQueued = false;
+  let resetView = () => {};
+  const [hiddenRelationships, setHiddenRelationships] = createSignal(0);
+  const [layoutIssues, setLayoutIssues] = createSignal<string[]>([]);
   const { load } = useGraph();
   const [expandedAPIds, setExpandedAPIds] = createSignal<Set<string>>(
     new Set(),
   );
 
   useSuggest();
-
-  const renderModel = createMemo(() =>
-    buildGraphRenderModel(
-      graphNodes(),
-      graphEdges(),
-      expandedAPIds(),
-      GRAPH_AGGREGATE_THRESHOLD,
-    ),
-  );
-
-  const graph = useForceGraph(
-    () => svgRef,
-    () => renderModel().nodes,
-    () => renderModel().edges,
-    {
-      selectedNodeId,
-      onClearSelection: () => setSelectedNodeId(null),
-      pinnedNodeIds,
-      visibleKinds: visibleGraphKinds,
-      visibleEdgeKinds: visibleGraphEdgeKinds,
-      onNodeClick: (node) => {
-        if (node.id.startsWith('aggregate:')) {
-          const apID = node.id.replace('aggregate:', '');
-          setExpandedAPIds((prev) => new Set([...prev, apID]));
-          return;
-        }
-        setSelectedNodeId((current) => (current === node.id ? null : node.id));
-      },
-    },
-  );
 
   const selected = createMemo(
     () => graphNodes().find((node) => node.id === selectedNodeId()) ?? null,
@@ -140,6 +113,9 @@ function ProjectionGraph() {
       hops: graphFilters.hops ?? 1,
       scope: graphFilters.scope ?? '',
       limit: graphFilters.limit ?? 0,
+      hierarchy: graphFilters.hierarchy ?? false,
+      root_bssid: graphFilters.root_bssid ?? '',
+      root_node_id: graphFilters.root_node_id ?? '',
     }),
   );
 
@@ -151,6 +127,8 @@ function ProjectionGraph() {
     const anchor = sourceMac?.trim();
     const storedHops = Number(urlParams.g_hops);
     const storedLimit = Number(urlParams.g_limit);
+    const mode = urlParams.g_layout === 'overview' || urlParams.g_layout === 'groups'
+      ? urlParams.g_layout : 'hierarchy';
     const edgeKinds =
       typeof urlParams.g_edges === 'string'
         ? urlParams.g_edges
@@ -168,6 +146,9 @@ function ProjectionGraph() {
             )
         : [];
     batch(() => {
+      setGraphLayoutMode(mode);
+      setGraphFilters('hierarchy', mode === 'hierarchy');
+      setGraphFilters('root_bssid', typeof urlParams.g_root === 'string' ? urlParams.g_root : undefined);
       setGraphFilters('source_mac', anchor || undefined);
       setGraphFilters(
         'hops',
@@ -175,7 +156,7 @@ function ProjectionGraph() {
       );
       setGraphFilters(
         'limit',
-        Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : 200,
+        Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : undefined,
       );
       setGraphFilters(
         'ssid',
@@ -185,7 +166,7 @@ function ProjectionGraph() {
       setGraphFilters('scope', urlParams.g_scope === 'all' ? 'all' : undefined);
       setGraphFilters(
         'edge_kinds',
-        edgeKinds.length ? edgeKinds : ['association'],
+        edgeKinds.length ? edgeKinds : undefined,
       );
       setVisibleGraphEdgeKinds(
         new Set(edgeKinds.length ? edgeKinds : ['association']),
@@ -215,7 +196,7 @@ function ProjectionGraph() {
       if (event.key === 'Escape') {
         setSelectedNodeId(null);
       } else if (event.key.toLowerCase() === 'r') {
-        graph.resetZoom();
+        resetView();
       }
     }
 
@@ -235,7 +216,9 @@ function ProjectionGraph() {
           ssid: graphFilters.ssid,
           g_mac: graphFilters.source_mac,
           g_hops: String(graphFilters.hops ?? 1),
-          g_limit: String(graphFilters.limit ?? 200),
+          g_limit: graphFilters.limit ? String(graphFilters.limit) : undefined,
+          g_layout: graphLayoutMode(),
+          g_root: graphFilters.root_bssid,
           g_threat: graphFilters.threat_only ? '1' : undefined,
           g_scope: graphFilters.scope === 'all' ? 'all' : undefined,
           g_edges: graphFilters.edge_kinds?.join(',') || undefined,
@@ -245,8 +228,6 @@ function ProjectionGraph() {
       );
     }),
   );
-
-  createEffect(on(renderModel, queueGraphRebuild));
 
   createEffect(
     on(
@@ -263,24 +244,31 @@ function ProjectionGraph() {
 
   onCleanup(() => window.clearTimeout(filterReloadTimer));
 
-  function queueGraphRebuild() {
-    if (rebuildQueued) return;
-    rebuildQueued = true;
-
-    queueMicrotask(() => {
-      rebuildQueued = false;
-      void startTransition(() => {
-        batch(() => graph.rebuild());
-      });
-    });
-  }
-
   return (
     <section class="graph-page" aria-label="Advanced graph projection">
       <GraphControls
         onRefresh={() => void load()}
-        onResetView={() => graph.resetZoom()}
+        onResetView={() => resetView()}
       />
+
+      <div class="graph-coverage-notices" aria-live="polite">
+        <Show when={graphMeta.hierarchy?.truncated}>
+          <span class="graph-coverage-warning" role="status">
+            Partial graph: {graphMeta.hierarchy?.reason || graphMeta.focus_reason || 'the returned neighborhood is incomplete'}.
+          </span>
+        </Show>
+        <Show when={graphMeta.report?.incomplete_coverage}>
+          <span class="graph-coverage-warning" role="status">Observation coverage is unverified.</span>
+        </Show>
+        <Show when={hiddenRelationships() > 0}>
+          <span class="graph-coverage-warning" role="status">{hiddenRelationships()} relationships hidden</span>
+        </Show>
+        <Show when={layoutIssues().length > 0}>
+          <span class="graph-coverage-warning" role="status" title={layoutIssues().join('; ')}>
+            {layoutIssues().length} topology issues; affected nodes are shown as unattached.
+          </span>
+        </Show>
+      </div>
 
       <div class="graph-canvas-wrap">
         <Show when={graphLoading()}>
@@ -301,11 +289,20 @@ function ProjectionGraph() {
             </button>
           </div>
         </Show>
-        <svg
-          ref={svgRef}
-          class="graph-canvas"
-          aria-label="Device network graph"
-        />
+        <Show when={graphLayoutMode() === 'hierarchy'} fallback={
+          <ForceCanvas
+            expandedAPIds={expandedAPIds()}
+            onExpand={(id) => setExpandedAPIds((prev) => new Set([...prev, id]))}
+            onReady={(reset) => { resetView = reset; setLayoutIssues([]); }}
+            onHidden={setHiddenRelationships}
+          />
+        }>
+          <HierarchyCanvas
+            onReady={(reset) => { resetView = reset; }}
+            onHidden={setHiddenRelationships}
+            onIssues={setLayoutIssues}
+          />
+        </Show>
         <GraphLegend />
       </div>
 
@@ -319,4 +316,52 @@ function ProjectionGraph() {
       </Show>
     </section>
   );
+}
+
+function HierarchyCanvas(props: {
+  onReady: (reset: () => void) => void;
+  onHidden: (count: number) => void;
+  onIssues: (issues: string[]) => void;
+}) {
+  let svgRef: SVGSVGElement | undefined;
+  const graph = useHierarchyLayout(() => svgRef, graphNodes, graphEdges, {
+    hierarchy: () => graphMeta.hierarchy,
+    selectedNodeId, pinnedNodeIds,
+    visibleKinds: visibleGraphKinds, visibleEdgeKinds: visibleGraphEdgeKinds,
+    showSecondary: showSecondaryGraphEdges,
+    onClearSelection: () => setSelectedNodeId(null),
+    onNodeClick: (node) => setSelectedNodeId((current) => current === node.id ? null : node.id),
+  });
+  onMount(() => props.onReady(graph.resetZoom));
+  createEffect(on(graph.hiddenRelationshipCount, props.onHidden));
+  createEffect(on(graph.issues, props.onIssues));
+  return <svg ref={svgRef} class="graph-canvas" aria-label="Device network graph" />;
+}
+
+function ForceCanvas(props: {
+  expandedAPIds: Set<string>;
+  onExpand: (id: string) => void;
+  onReady: (reset: () => void) => void;
+  onHidden: (count: number) => void;
+}) {
+  let svgRef: SVGSVGElement | undefined;
+  const renderModel = createMemo(() => buildGraphRenderModel(
+    graphNodes(), graphEdges(), props.expandedAPIds,
+    graphLayoutMode() === 'groups' ? GRAPH_AGGREGATE_THRESHOLD : Number.POSITIVE_INFINITY,
+  ));
+  const graph = useForceGraph(() => svgRef, () => renderModel().nodes, () => renderModel().edges, {
+    selectedNodeId, pinnedNodeIds,
+    visibleKinds: visibleGraphKinds, visibleEdgeKinds: visibleGraphEdgeKinds,
+    layoutMode: () => graphLayoutMode() === 'groups' ? 'groups' : 'overview',
+    hiddenRelationshipCount: () => renderModel().hiddenRelationshipCount,
+    onClearSelection: () => setSelectedNodeId(null),
+    onNodeClick: (node) => {
+      if (node.id.startsWith('aggregate:')) props.onExpand(node.id.replace('aggregate:', ''));
+      else setSelectedNodeId((current) => current === node.id ? null : node.id);
+    },
+  });
+  onMount(() => props.onReady(graph.resetZoom));
+  createEffect(on(renderModel, graph.rebuild, { defer: true }));
+  createEffect(on(graph.hiddenRelationshipCount, props.onHidden));
+  return <svg ref={svgRef} class="graph-canvas" data-layout={graphLayoutMode()} aria-label="Device network graph" />;
 }

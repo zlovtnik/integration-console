@@ -28,6 +28,6 @@ test('hit test summary', async ({ page }) => {
   await summary.focus();
   await page.keyboard.press('Enter');
   await page.waitForTimeout(300);
-  console.log('details open', await page.locator('details.report-controls').evaluate(d => d.open));
+  console.log('details open', await page.locator('details.report-controls').evaluate((d: HTMLDetailsElement) => d.open));
   expect(true).toBe(true);
 });

@@ -516,6 +516,10 @@ export interface GraphNode {
   id: string;
   kind: NodeKind;
   label: string;
+  /** Presentation parent; never a persisted identity relationship. */
+  parent_id?: string | null;
+  depth?: number;
+  role?: string;
   mac?: string;
   display_name?: string;
   username?: string;
@@ -563,6 +567,7 @@ export type NodeKind =
   | 'aggregate_group';
 
 export interface GraphEdge {
+  tree_role?: 'tree' | 'secondary';
   evidence_start?: string;
   evidence_end?: string;
   expires_at?: string;
@@ -606,6 +611,7 @@ export type EdgeKind =
 export interface GraphResponse {
   report?: ReportMetadata;
   focus_reason?: string;
+  hierarchy?: GraphHierarchy;
   nodes: GraphNode[];
   edges: GraphEdge[];
   generated_at: string;
@@ -619,6 +625,13 @@ export interface GraphResponse {
   /** Present only for scope: "all" requests. */
   total_node_count?: number;
   total_edge_count?: number;
+}
+
+export interface GraphHierarchy {
+  root_id: string;
+  root_ids: string[];
+  truncated: boolean;
+  reason?: string;
 }
 
 export interface ReportMetadata {
@@ -639,6 +652,9 @@ export interface ReportMetadata {
 }
 
 export interface GraphFilters {
+  hierarchy?: boolean;
+  root_bssid?: string;
+  root_node_id?: string;
   projection?: 'legacy' | 'stream';
   include_identity?: boolean;
   location_ids?: string[];

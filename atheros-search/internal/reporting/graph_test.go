@@ -24,7 +24,7 @@ func TestGraphLoadsEdgesForProjectedNodes(t *testing.T) {
 			"aa:bb:cc:dd:ee:ff", nil, false, now).
 			AddRow("ap:11:22:33:44:55:66", "access_point", "ap", "{}", nil, nil,
 				"11:22:33:44:55:66", nil, false, now))
-	mock.ExpectQuery(`(?s)WHERE \(source_node_id IN \(\$1,\$2\).*OR target_node_id IN \(\$1,\$2\)\).*LIMIT \$3`).
+	mock.ExpectQuery(`(?s)WHERE \(source_node_id IN \(\$1,\$2\).*AND target_node_id IN \(\$1,\$2\)\).*LIMIT \$3`).
 		WithArgs("device:aa:bb:cc:dd:ee:ff", "ap:11:22:33:44:55:66", 200).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"edge_id", "source_node_id", "target_node_id", "edge_kind", "weight", "weight_basis", "label", "observed_at", "evidence",
@@ -67,13 +67,27 @@ func TestGraphAllScopeReturnsBoundedDeterministicPage(t *testing.T) {
 		}).AddRow("edge:1", "node:1", "node:2", "observed_at", 1.0, nil, nil, now, "{}").
 			AddRow("edge:2", "node:1", "node:3", "observed_at", 1.0, nil, nil, now, "{}").
 			AddRow("edge:3", "node:2", "node:3", "observed_at", 1.0, nil, nil, now, "{}"))
+	mock.ExpectQuery(`(?s)FROM atheros_search.graph_nodes n WHERE n.node_id IN \(\$1\)`).
+		WithArgs("node:3").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"node_id", "node_kind", "label", "node_payload", "location_id", "sensor_id",
+			"normalized_mac", "normalized_ssid", "is_threat", "observed_at",
+		}).AddRow("node:3", "device", "three", "{}", nil, nil, nil, nil, false, now))
 	mock.ExpectCommit()
 
 	page, err := (&Service{Pool: database}).Graph(context.Background(), GraphFilters{Scope: "all", PageSize: 2})
 	require.NoError(t, err)
-	require.Equal(t, []string{"node:1", "node:2"}, []string{page.Nodes[0].ID, page.Nodes[1].ID})
+	require.Equal(t, []string{"node:1", "node:2", "node:3"}, []string{page.Nodes[0].ID, page.Nodes[1].ID, page.Nodes[2].ID})
 	require.Equal(t, []string{"edge:1", "edge:2"}, []string{page.Edges[0].ID, page.Edges[1].ID})
 	require.NotEmpty(t, page.NextPageCursor)
+	fingerprintFilters, err := NormalizeGraphFilters(GraphFilters{Scope: "all"})
+	require.NoError(t, err)
+	fingerprintFilters.PageSize, fingerprintFilters.Limit = 0, 0
+	fingerprint, err := pageFingerprint(fingerprintFilters)
+	require.NoError(t, err)
+	cursor, err := decodePageCursor(page.NextPageCursor, "graph", fingerprint)
+	require.NoError(t, err)
+	require.Equal(t, "node:2", cursor.NodeAfter)
 	require.Equal(t, 3, *page.TotalNodeCount)
 	require.Equal(t, 3, *page.TotalEdgeCount)
 	require.NoError(t, mock.ExpectationsWereMet())
