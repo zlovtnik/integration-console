@@ -58,7 +58,9 @@ func (s *Service) Graph(ctx context.Context, filters GraphFilters) (response *Gr
 		}
 		nodes = append(anchor, nodes...)
 	}
-	edges, err := fetchGraphEdges(ctx, tx, filters, nodes)
+	// This path never completes off-page endpoints, so only edges fully
+	// inside the node page are safe to return.
+	edges, err := fetchGraphEdges(ctx, tx, filters, nodes, false)
 	if err != nil {
 		return nil, err
 	}

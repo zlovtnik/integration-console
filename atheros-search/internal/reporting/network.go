@@ -230,7 +230,9 @@ func (s *Service) Network(ctx context.Context, filters NetworkFilters) (*Network
 				response.Edges = append(response.Edges, GraphEdge{ID: "observed:" + member.MAC + ":" + filters.APBSSID, Source: nodeID, Target: apID, Kind: "association", Weight: &weight, WeightBasis: "searchable_record_count", Label: "Observed AP context"})
 			}
 			if filters.IncludeHints {
-				hints, err := fetchGraphEdges(ctx, tx, GraphFilters{Limit: 200, EdgeKinds: []string{"cluster_member", "rf_proximity", "roaming", "same_channel", "vendor_link"}}, response.Nodes)
+				// Hints must reach past the roster page so off-page cluster
+				// nodes are discovered and attached below.
+				hints, err := fetchGraphEdges(ctx, tx, GraphFilters{Limit: 200, EdgeKinds: []string{"cluster_member", "rf_proximity", "roaming", "same_channel", "vendor_link"}}, response.Nodes, true)
 				if err != nil {
 					return nil, err
 				}

@@ -112,6 +112,50 @@ func TestReportingHierarchyCompleteFanoutCyclesCapsAndOrphans(t *testing.T) {
 	assertClosedHierarchy(t, orphans)
 }
 
+func TestReportingHierarchyIncludesDisconnectedApNeighborhoods(t *testing.T) {
+	db := testdb.Provision(t)
+	runtimeDB := testdb.Runtime(t)
+	ctx := context.Background()
+	_, err := db.Exec(`TRUNCATE atheros_search.graph_nodes, atheros_search.graph_edges, atheros_search.ap_catalog;
+  INSERT INTO atheros_search.ap_catalog(bssid,authorized,first_observed_at,last_observed_at)
+  VALUES ('10:20:30:40:50:60',true,'2026-09-01','2026-09-02'),
+  ('10:20:30:40:50:61',false,'2026-09-01','2026-09-03');
+  INSERT INTO atheros_search.graph_nodes(node_id,node_kind,normalized_mac,location_id,observed_at,projection_run_id)
+  VALUES
+  ('ap:10:20:30:40:50:60','access_point','10:20:30:40:50:60','lab','2026-09-02','test'),
+  ('ap:10:20:30:40:50:61','access_point','10:20:30:40:50:61','lab','2026-09-03','test'),
+  ('client:a','device','aa:bb:cc:dd:ee:01','lab','2026-09-02','test'),
+  ('client:x','device','aa:bb:cc:dd:ee:02','lab','2026-09-03','test'),
+  ('client:y','device','aa:bb:cc:dd:ee:03','lab','2026-09-03','test'),
+  ('device:orphan','device','00:00:00:00:00:00','lab','2026-09-02','test');
+  INSERT INTO atheros_search.graph_edges(edge_id,source_node_id,target_node_id,edge_kind,weight,projection_run_id)
+  VALUES
+  ('main-a','client:a','ap:10:20:30:40:50:60','observed_at',1,'test'),
+  ('iso-x','client:x','ap:10:20:30:40:50:61','observed_at',1,'test'),
+  ('iso-y','client:y','ap:10:20:30:40:50:61','observed_at',1,'test')`)
+	require.NoError(t, err)
+	svc := &Service{Pool: runtimeDB}
+	result, err := svc.Graph(ctx, GraphFilters{Hierarchy: true, LocationIDs: []string{"lab"}})
+	require.NoError(t, err)
+	require.Equal(t, "ap:10:20:30:40:50:60", result.Hierarchy.RootID)
+	require.Len(t, result.Nodes, 6)
+	require.Equal(t, 6, *result.TotalNodeCount)
+	require.ElementsMatch(t,
+		[]string{"ap:10:20:30:40:50:60", "ap:10:20:30:40:50:61", "device:orphan"},
+		result.Hierarchy.RootIDs)
+	assertClosedHierarchy(t, result)
+	// Walk nodes stay ahead of disconnected neighborhoods under the cap.
+	capped, err := svc.Graph(ctx, GraphFilters{Hierarchy: true, LocationIDs: []string{"lab"}, Limit: 3})
+	require.NoError(t, err)
+	require.Len(t, capped.Nodes, 3)
+	require.True(t, capped.Hierarchy.Truncated)
+	require.Equal(t, 6, *capped.TotalNodeCount)
+	walkIDs := map[string]bool{"ap:10:20:30:40:50:60": true, "client:a": true}
+	for _, node := range capped.Nodes[:2] {
+		require.True(t, walkIDs[node.ID], "expected walk node first, got %s", node.ID)
+	}
+}
+
 func assertClosedHierarchy(t *testing.T, result *GraphResponse) {
 	t.Helper()
 	assertClosedGraph(t, result)

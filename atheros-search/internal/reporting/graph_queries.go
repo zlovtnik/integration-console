@@ -290,7 +290,11 @@ func graphNodeKindToDB(kind string) string {
 	}
 }
 
-func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, nodes []GraphNode) ([]GraphEdge, error) {
+// eitherEndpoint matches edges touching the node set even when the opposite
+// endpoint is outside it; callers using it must complete those endpoints
+// before returning. Otherwise both endpoints must be inside the set so the
+// response never references nodes it does not carry.
+func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, nodes []GraphNode, eitherEndpoint bool) ([]GraphEdge, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
@@ -314,7 +318,11 @@ func fetchGraphEdges(ctx context.Context, tx *sql.Tx, filters GraphFilters, node
 		args = append(args, mapped...)
 	}
 	args = append(args, filters.Limit)
-	where := "(" + strings.Join(clauses[:2], " AND ") + ")"
+	endpointJoin := " AND "
+	if eitherEndpoint {
+		endpointJoin = " OR "
+	}
+	where := "(" + strings.Join(clauses[:2], endpointJoin) + ")"
 	if len(clauses) > 2 {
 		where += " AND " + strings.Join(clauses[2:], " AND ")
 	}
