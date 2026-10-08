@@ -43,7 +43,7 @@ export function JsonViewer(props: { json: string }) {
           <span>{copied() ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
-      <pre class="json-code mono">
+      <pre class="json-code mono" tabIndex={0} aria-label="JSON payload">
         {/* syntaxHighlight escapes all user-visible content before adding spans. */}
         {/* eslint-disable-next-line solid/no-innerhtml */}
         <code innerHTML={syntaxHighlight(formatted())} />

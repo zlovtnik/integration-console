@@ -365,6 +365,14 @@ export default function ExplainPage() {
                 </section>
               </Show>
 
+              <Show when={(explain()?.boost_reasons ?? []).length > 0}>
+                <div class="badge-row">
+                  <For each={explain()?.boost_reasons ?? []}>
+                    {(reason) => <BoostBadge reason={reason} />}
+                  </For>
+                </div>
+              </Show>
+
               <Show
                 when={scoresAvailable()}
                 fallback={
@@ -394,13 +402,6 @@ export default function ExplainPage() {
                   <summary class="heading-1">Ranking factors</summary>
                   <div class="explain-section-body">
                     <ScoreChart explain={explain()!} />
-                    <Show when={(explain()?.boost_reasons ?? []).length > 0}>
-                      <div class="badge-row">
-                        <For each={explain()?.boost_reasons ?? []}>
-                          {(reason) => <BoostBadge reason={reason} />}
-                        </For>
-                      </div>
-                    </Show>
                   </div>
                 </details>
               </Show>

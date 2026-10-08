@@ -446,7 +446,7 @@
 
 .graph-node.selected .graph-node-ring,
 .graph-node.pinned .graph-node-ring {
-  stroke-opacity: 0.85;
+  stroke-opacity: 1;
   stroke-width: 1.5;
 }
 

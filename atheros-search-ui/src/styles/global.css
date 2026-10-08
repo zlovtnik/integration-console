@@ -1429,12 +1429,15 @@ body.filter-drawer-open {
 
   .nav-links {
     display: flex;
+    flex-wrap: wrap;
     grid-column: 1 / -1;
     grid-row: 2;
     justify-content: space-around;
     gap: 0;
     margin: 0;
     padding: 0 0 var(--space-2);
+    min-width: 0;
+    overflow-x: auto;
   }
 
   .logo {
