@@ -17,6 +17,7 @@ there is no Rails Search console.
 - query analytics using hashed query/session/result identifiers
 - readiness and ETL health/stream APIs
 - token-and-fence lease claiming of `embedding_jobs`, committed before external I/O
+- claim-time cancellation of jobs whose document is missing or not `active`
 - mixed-kind batched embedding calls outside database transactions
 - atomic `search_vectors_*` writes and fenced job completion/failure
 - periodic renewal of long-running leases and continuous bounded expired-lease recovery

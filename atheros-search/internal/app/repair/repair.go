@@ -23,10 +23,10 @@ func Run() error {
 	tlsKey := flag.String("tls-key", envOr("ATHSEARCH_POSTGRES_TLS_KEY_FILE", ""), "Postgres TLS key file")
 	tlsServer := flag.String("tls-server", envOr("ATHSEARCH_POSTGRES_TLS_SERVER_NAME", ""), "Postgres TLS server name")
 	schemaManifestSHA256 := flag.String("schema-manifest-sha256", envOr("ATHSEARCH_SCHEMA_MANIFEST_SHA256", ""), "Expected schema manifest SHA-256 (required)")
-	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only), cancel-superseded")
+	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only), cancel-superseded (non-active documents), cancel-orphaned (missing documents)")
 	staleMinutes := flag.Int("stale-minutes", 60, "Minutes after which a leased job is considered stale")
-	cancelLimit := flag.Int("limit", 5000, "Maximum rows for cancel-superseded per invocation")
-	dryRun := flag.Bool("dry-run", false, "Count affected rows without writing (cancel-superseded)")
+	cancelLimit := flag.Int("limit", 5000, "Maximum rows for cancel-superseded and cancel-orphaned per invocation")
+	dryRun := flag.Bool("dry-run", false, "Count affected rows without writing (cancel-superseded, cancel-orphaned)")
 	flag.Parse()
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
@@ -76,6 +76,12 @@ func Run() error {
 			err = fmt.Errorf("limit must be greater than zero")
 		} else {
 			err = cancelSupersededJobs(ctx, db, logger, *cancelLimit, *dryRun)
+		}
+	case "cancel-orphaned":
+		if *cancelLimit <= 0 {
+			err = fmt.Errorf("limit must be greater than zero")
+		} else {
+			err = cancelOrphanedJobs(ctx, db, logger, *cancelLimit, *dryRun)
 		}
 	default:
 		return fmt.Errorf("unknown action %q", *action)
@@ -280,7 +286,8 @@ WHERE status = 'failed'
 // (SearchPreparationSql.cancelSupersededEmbeddingJobs), but jobs superseded
 // before that path shipped are still claimable: the vector would describe
 // content the index has already replaced, and the worker spends a scarce
-// backend slot on it. This mirrors that statement's status transition and
+// backend slot on it. Non-active statuses (deleted, failed) are the same
+// durable dead work. This mirrors that statement's status transition and
 // lease clearing, driven by a join instead of an explicit id list.
 func cancelSupersededJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, limit int, dryRun bool) error {
 	if dryRun {
@@ -289,15 +296,15 @@ func cancelSupersededJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger
 SELECT COUNT(*)
 FROM atheros_search.embedding_jobs AS job
 JOIN atheros_search.search_documents AS document USING (document_id)
-WHERE document.status = 'superseded'
+WHERE document.status <> 'active'
   AND job.status IN ('pending', 'leased')
 `).Scan(&matched); err != nil {
-			return fmt.Errorf("count superseded embedding jobs: %w", err)
+			return fmt.Errorf("count non-active embedding jobs: %w", err)
 		}
 		logger.Info().
 			Int64("matching", matched).
 			Int("limit", limit).
-			Msg("dry run: pending embedding jobs on superseded documents; no rows written")
+			Msg("dry run: pending embedding jobs on non-active documents; no rows written")
 		return nil
 	}
 
@@ -309,7 +316,7 @@ WITH targets AS (
   SELECT job.job_id
   FROM atheros_search.embedding_jobs AS job
   JOIN atheros_search.search_documents AS document USING (document_id)
-  WHERE document.status = 'superseded'
+  WHERE document.status <> 'active'
     AND job.status IN ('pending', 'leased')
   ORDER BY job.job_id
   LIMIT $1
@@ -319,19 +326,83 @@ SET status = 'cancelled',
     owner_id = NULL,
     lease_token = NULL,
     lease_expires_at = NULL,
+    last_error = 'document not active; embedding job cancelled',
     next_attempt_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
 FROM targets
 WHERE job.job_id = targets.job_id
 `, limit)
 	if err != nil {
-		return fmt.Errorf("cancel superseded embedding jobs: %w", err)
+		return fmt.Errorf("cancel non-active embedding jobs: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
-	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("embedding jobs on superseded documents cancelled")
+	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("embedding jobs on non-active documents cancelled")
+	if affected < int64(limit) {
+		logger.Info().Int64("cancelled", affected).Msg("fewer rows matched than the limit; nothing left to cancel")
+	}
+	return nil
+}
+
+// cancelOrphanedJobs retires pending work whose search document row is gone.
+// There is no FK from embedding_jobs to search_documents, so producer races and
+// historical leaks can leave claimable jobs that will never find text. The
+// worker claim path cancels these one batch at a time; this drains a backlog
+// without waiting for the poll loop.
+func cancelOrphanedJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, limit int, dryRun bool) error {
+	if dryRun {
+		var matched int64
+		if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM atheros_search.embedding_jobs AS job
+WHERE job.status IN ('pending', 'leased')
+  AND NOT EXISTS (
+    SELECT 1 FROM atheros_search.search_documents document
+    WHERE document.document_id = job.document_id
+  )
+`).Scan(&matched); err != nil {
+			return fmt.Errorf("count orphaned embedding jobs: %w", err)
+		}
+		logger.Info().
+			Int64("matching", matched).
+			Int("limit", limit).
+			Msg("dry run: pending embedding jobs with missing documents; no rows written")
+		return nil
+	}
+
+	result, err := db.ExecContext(ctx, `
+WITH targets AS (
+  SELECT job.job_id
+  FROM atheros_search.embedding_jobs AS job
+  WHERE job.status IN ('pending', 'leased')
+    AND NOT EXISTS (
+      SELECT 1 FROM atheros_search.search_documents document
+      WHERE document.document_id = job.document_id
+    )
+  ORDER BY job.job_id
+  LIMIT $1
+)
+UPDATE atheros_search.embedding_jobs AS job
+SET status = 'cancelled',
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = 'document missing; embedding job cancelled',
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+FROM targets
+WHERE job.job_id = targets.job_id
+`, limit)
+	if err != nil {
+		return fmt.Errorf("cancel orphaned embedding jobs: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	logger.Info().Int64("cancelled", affected).Int("limit", limit).Msg("orphaned embedding jobs cancelled")
 	if affected < int64(limit) {
 		logger.Info().Int64("cancelled", affected).Msg("fewer rows matched than the limit; nothing left to cancel")
 	}

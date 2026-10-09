@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-func claimJobs(ctx context.Context, tx *sql.Tx, ownerID string, limit int, leaseExpiresAt time.Time) ([]Job, error) {
+// claimJobs leases pending jobs and attaches active document text. Jobs whose
+// document is missing or no longer active are cancelled in the same
+// transaction so one orphan cannot poison the batch or loop forever.
+func claimJobs(ctx context.Context, tx *sql.Tx, ownerID string, limit int, leaseExpiresAt time.Time) ([]Job, int, error) {
 	rows, err := tx.QueryContext(ctx, `
 WITH candidates AS (
   SELECT job_id
@@ -35,7 +38,7 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
           jobs.content_sha256, jobs.priority, jobs.lease_token, jobs.lease_fence
 `, ownerID, leaseExpiresAt, limit)
 	if err != nil {
-		return nil, fmt.Errorf("claim embedding jobs: %w", err)
+		return nil, 0, fmt.Errorf("claim embedding jobs: %w", err)
 	}
 	defer func() { _ = rows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 
@@ -43,15 +46,15 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 	for rows.Next() {
 		var j Job
 		if err := rows.Scan(&j.JobID, &j.DocumentID, &j.EmbeddingKind, &j.EmbeddingModel, &j.ContentSHA256, &j.Priority, &j.LeaseToken, &j.LeaseFence); err != nil {
-			return nil, fmt.Errorf("scan claimed job: %w", err)
+			return nil, 0, fmt.Errorf("scan claimed job: %w", err)
 		}
 		jobs = append(jobs, j)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate claimed jobs: %w", err)
+		return nil, 0, fmt.Errorf("iterate claimed jobs: %w", err)
 	}
 	if len(jobs) == 0 {
-		return jobs, nil
+		return jobs, 0, nil
 	}
 
 	placeholders := make([]string, 0, len(jobs))
@@ -66,33 +69,84 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 		args = append(args, job.DocumentID)
 	}
 	textRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-SELECT document_id, normalized_text FROM atheros_search.search_documents
+SELECT document_id, normalized_text, status FROM atheros_search.search_documents
 WHERE document_id IN (%s)
 `, strings.Join(placeholders, ", ")), args...)
 	if err != nil {
-		return nil, fmt.Errorf("fetch document text: %w", err)
+		return nil, 0, fmt.Errorf("fetch document text: %w", err)
 	}
 	defer func() { _ = textRows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
-	textByDocument := make(map[string]string, len(seen))
+	type documentText struct {
+		text   string
+		status string
+	}
+	docByDocument := make(map[string]documentText, len(seen))
 	for textRows.Next() {
-		var documentID, normalizedText string
-		if err := textRows.Scan(&documentID, &normalizedText); err != nil {
-			return nil, fmt.Errorf("scan document text: %w", err)
+		var documentID, normalizedText, status string
+		if err := textRows.Scan(&documentID, &normalizedText, &status); err != nil {
+			return nil, 0, fmt.Errorf("scan document text: %w", err)
 		}
-		textByDocument[documentID] = normalizedText
+		docByDocument[documentID] = documentText{text: normalizedText, status: status}
 	}
 	if err := textRows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate document text: %w", err)
-	}
-	for i := range jobs {
-		text, ok := textByDocument[jobs[i].DocumentID]
-		if !ok {
-			return nil, fmt.Errorf("fetch document text for %s: no matching document", jobs[i].DocumentID)
-		}
-		jobs[i].NormalizedText = text
+		return nil, 0, fmt.Errorf("iterate document text: %w", err)
 	}
 
-	return jobs, nil
+	cancelled := 0
+	ready := make([]Job, 0, len(jobs))
+	for _, job := range jobs {
+		doc, ok := docByDocument[job.DocumentID]
+		if !ok {
+			if err := cancelJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence, "document missing; embedding job cancelled"); err != nil {
+				return nil, 0, err
+			}
+			cancelled++
+			continue
+		}
+		if doc.status != "active" {
+			if err := cancelJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence, fmt.Sprintf("document status %s; embedding job cancelled", doc.status)); err != nil {
+				return nil, 0, err
+			}
+			cancelled++
+			continue
+		}
+		job.NormalizedText = doc.text
+		ready = append(ready, job)
+	}
+
+	return ready, cancelled, nil
+}
+
+// cancelJob parks a claimed job as durable dead work. Missing and non-active
+// documents will not become embeddable without a new job, so this is terminal
+// and must not use failJob (retry-failed would resurrect cancelled rows).
+func cancelJob(ctx context.Context, tx *sql.Tx, jobID, leaseToken string, leaseFence int64, errMsg string) error {
+	result, err := tx.ExecContext(ctx, `
+UPDATE atheros_search.embedding_jobs
+SET status = 'cancelled',
+    last_error = $1,
+    owner_id = NULL,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE job_id = $2
+  AND status = 'leased'
+  AND lease_token = $3
+  AND lease_fence = $4
+  AND lease_expires_at > CURRENT_TIMESTAMP
+`, errMsg, jobID, leaseToken, leaseFence)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("lease lost for job %s: no matching lease token or lease expired", jobID)
+	}
+	return nil
 }
 
 func completeJob(ctx context.Context, tx *sql.Tx, jobID, leaseToken string, leaseFence int64) error {

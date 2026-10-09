@@ -32,9 +32,10 @@ func claimOne(t *testing.T, database *sql.DB, owner string) Job {
 	t.Helper()
 	tx, err := database.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
-	jobs, err := claimJobs(t.Context(), tx, owner, 1, time.Now().Add(time.Minute))
+	jobs, cancelled, err := claimJobs(t.Context(), tx, owner, 1, time.Now().Add(time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
+	require.Zero(t, cancelled)
 	require.Len(t, jobs, 1)
 	return jobs[0]
 }
@@ -44,8 +45,9 @@ func TestDatabaseClaimContentionSkipsLockedRows(t *testing.T) {
 	first, err := database.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = first.Rollback() }) // Cleanup after assertion failure; Commit is checked below.
-	jobs, err := claimJobs(t.Context(), first, "first", 1, time.Now().Add(time.Minute))
+	jobs, cancelled, err := claimJobs(t.Context(), first, "first", 1, time.Now().Add(time.Minute))
 	require.NoError(t, err)
+	require.Zero(t, cancelled)
 	require.Len(t, jobs, 1)
 	second := claimOne(t, database, "second")
 	require.NotEqual(t, jobs[0].JobID, second.JobID)
@@ -103,4 +105,50 @@ func TestDatabaseRetriesExhaustAndAllEmbeddingKindsPersist(t *testing.T) {
 	var count int
 	require.NoError(t, database.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embeddings`).Scan(&count))
 	require.Equal(t, 4, count)
+}
+
+func TestDatabaseClaimCancelsMissingAndNonActiveDocuments(t *testing.T) {
+	provision, database := seedJobs(t, 1)
+	goodID := "00000000-0000-0000-0000-000000000001"
+	orphanID := "00000000-0000-0000-0000-000000000002"
+	nonActiveID := "00000000-0000-0000-0000-000000000003"
+
+	_, err := provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, orphanID, strings.Repeat("a", 64))
+	require.NoError(t, err)
+	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status) VALUES($1,$1,$1,'wireless_frames','event','stale',$2,'superseded')`, nonActiveID, strings.Repeat("a", 64))
+	require.NoError(t, err)
+	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, nonActiveID, strings.Repeat("a", 64))
+	require.NoError(t, err)
+
+	tx, err := database.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	jobs, cancelled, err := claimJobs(t.Context(), tx, "worker", 10, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	require.Equal(t, 2, cancelled)
+	require.Len(t, jobs, 1)
+	require.Equal(t, goodID, jobs[0].DocumentID)
+
+	for _, id := range []string{orphanID, nonActiveID} {
+		var status, lastError string
+		var owner, token sql.NullString
+		var expiresAt sql.NullTime
+		require.NoError(t, database.QueryRowContext(t.Context(),
+			`SELECT status, last_error, owner_id, lease_token, lease_expires_at FROM atheros_search.embedding_jobs WHERE document_id = $1`,
+			id,
+		).Scan(&status, &lastError, &owner, &token, &expiresAt))
+		require.Equal(t, "cancelled", status)
+		require.NotEmpty(t, lastError)
+		require.False(t, owner.Valid)
+		require.False(t, token.Valid)
+		require.False(t, expiresAt.Valid)
+	}
+
+	tx2, err := database.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	again, cancelledAgain, err := claimJobs(t.Context(), tx2, "worker", 10, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, tx2.Commit())
+	require.Zero(t, cancelledAgain)
+	require.Zero(t, len(again))
 }

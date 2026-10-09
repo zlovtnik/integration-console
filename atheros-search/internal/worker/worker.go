@@ -143,10 +143,13 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 
 	leaseDeadline := time.Now().Add(time.Duration(p.cfg.LeaseSeconds) * time.Second)
 
-	jobs, err := claimJobs(ctx, tx, workerID, p.cfg.BatchSize, leaseDeadline)
+	jobs, cancelled, err := claimJobs(ctx, tx, workerID, p.cfg.BatchSize, leaseDeadline)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to claim jobs")
 		return
+	}
+	if cancelled > 0 {
+		logger.Info().Int("cancelled", cancelled).Msg("cancelled embedding jobs with missing or non-active documents")
 	}
 	if len(jobs) == 0 {
 		if err := tx.Commit(); err != nil {
