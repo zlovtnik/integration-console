@@ -92,19 +92,43 @@ func TestSchedulerReportsSlotWaitsToObserver(t *testing.T) {
 
 	release, err := scheduler.Acquire(context.Background(), LaneWorker)
 	require.NoError(t, err)
+	defer release()
 
-	waitingCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	waitingCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, err = scheduler.Acquire(waitingCtx, LaneInteractive)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	release()
+	waitingErr := make(chan error, 1)
+	go func() {
+		releaseWaiting, acquireErr := scheduler.Acquire(waitingCtx, LaneInteractive)
+		if releaseWaiting != nil {
+			releaseWaiting()
+		}
+		waitingErr <- acquireErr
+	}()
+
+	// Start measuring only once Acquire has entered the queue. A context
+	// deadline created before Acquire can include time spent scheduling it.
+	require.Eventually(t, func() bool {
+		return scheduler.Waiting(LaneInteractive) == 1
+	}, time.Second, time.Millisecond)
+	waitStarted := time.Now()
+	time.Sleep(20 * time.Millisecond)
+	minimumWait := time.Since(waitStarted)
+	cancel()
+	select {
+	case err = <-waitingErr:
+	case <-time.After(time.Second):
+		t.Fatal("queued acquisition did not return after cancellation")
+	}
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, scheduler.Waiting(LaneInteractive))
+	require.Zero(t, scheduler.InUse(LaneInteractive))
 
 	require.Len(t, events, 2)
 	require.Equal(t, LaneWorker, events[0].lane)
 	require.False(t, events[0].canceled)
 	require.Equal(t, LaneInteractive, events[1].lane)
 	require.True(t, events[1].canceled)
-	require.GreaterOrEqual(t, events[1].waited, 20*time.Millisecond)
+	require.GreaterOrEqual(t, events[1].waited, minimumWait)
 }
 
 func TestSchedulerClampsMisconfiguredReservations(t *testing.T) {
