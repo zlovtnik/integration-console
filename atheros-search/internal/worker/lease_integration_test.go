@@ -115,7 +115,7 @@ func TestDatabaseClaimCancelsMissingAndNonActiveDocuments(t *testing.T) {
 
 	_, err := provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, orphanID, strings.Repeat("a", 64))
 	require.NoError(t, err)
-	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status) VALUES($1,$1,$1,'wireless_frames','event','stale',$2,'superseded')`, nonActiveID, strings.Repeat("a", 64))
+	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status) VALUES($1,$2,$2,'wireless_frames','event','stale',$3,'superseded')`, nonActiveID, nonActiveID, strings.Repeat("a", 64))
 	require.NoError(t, err)
 	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, nonActiveID, strings.Repeat("a", 64))
 	require.NoError(t, err)
