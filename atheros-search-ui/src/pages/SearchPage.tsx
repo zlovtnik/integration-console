@@ -306,7 +306,7 @@ export default function SearchPage() {
                 Search
               </h1>
               <p class="caption">
-                wireless events, devices, behaviours, sequences
+                wireless events, devices, proxy events and blocked hosts
               </p>
             </div>
             <button

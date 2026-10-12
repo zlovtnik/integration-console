@@ -31,6 +31,15 @@ describe('search store request construction', () => {
     expect(isWildcardAllQuery('* probe_request')).toBe(false);
   });
 
+  it('searches all sources by default while preserving explicit wireless scope', () => {
+    resetSearchControlsFromUrlDefaults();
+    setQuery('*');
+    expect(buildSearchRequest().kind).toBe('SEARCH_KIND_CROSS');
+
+    setKind('SEARCH_KIND_EVENT');
+    expect(buildSearchRequest().kind).toBe('SEARCH_KIND_EVENT');
+  });
+
   it('sends wildcard-only searches as sparse requests', () => {
     setQuery('*');
     setMode('SEARCH_MODE_HYBRID');
@@ -104,7 +113,7 @@ describe('search store request construction', () => {
 
     expect(buildSearchRequest()).toMatchObject({
       query: '*',
-      kind: 'SEARCH_KIND_EVENT',
+      kind: 'SEARCH_KIND_CROSS',
       mode: 'SEARCH_MODE_SPARSE',
       top_k: 20,
     });

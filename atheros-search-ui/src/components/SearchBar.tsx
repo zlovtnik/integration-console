@@ -62,7 +62,7 @@ export function SearchBar(props: { onSubmit: () => void }) {
   return (
     <div class="search-bar-wrap" role="search">
       <label for="search-input" class="sr-only">
-        Search wireless events
+        Search wireless and proxy records
       </label>
       <Search class="search-icon" size={18} aria-hidden="true" />
       <input
@@ -89,7 +89,7 @@ export function SearchBar(props: { onSubmit: () => void }) {
         onKeyDown={handleKeyDown}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-        placeholder="search events, devices, sequences"
+        placeholder="search wireless events, devices, proxy records"
       />
       <Show when={query()}>
         <button

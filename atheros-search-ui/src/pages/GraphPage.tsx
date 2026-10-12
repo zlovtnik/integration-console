@@ -258,7 +258,10 @@ function ProjectionGraph() {
           </span>
         </Show>
         <Show when={graphMeta.report?.incomplete_coverage}>
-          <span class="graph-coverage-warning" role="status">Observation coverage is unverified.</span>
+          <span class="graph-coverage-warning" role="status">
+            Observation coverage is unverified. This graph uses wireless
+            observations; proxy search results do not populate it.
+          </span>
         </Show>
         <Show when={hiddenRelationships() > 0}>
           <span class="graph-coverage-warning" role="status">{hiddenRelationships()} relationships hidden</span>
@@ -288,6 +291,12 @@ function ProjectionGraph() {
               Retry
             </button>
           </div>
+        </Show>
+        <Show when={!graphLoading() && !graphError() && graphNodes().length === 0}>
+          <p class="graph-coverage-warning" role="status">
+            No wireless graph records are available in this scope. Check the
+            location and time filters, then sensor capture and ingestion.
+          </p>
         </Show>
         <Show when={graphLayoutMode() === 'hierarchy'} fallback={
           <ForceCanvas

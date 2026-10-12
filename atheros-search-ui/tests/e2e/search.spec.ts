@@ -19,7 +19,7 @@ test('submits a streaming search and renders an expandable result', async ({
 
   await page.goto('/');
   await page
-    .getByRole('combobox', { name: 'Search wireless events' })
+    .getByRole('combobox', { name: 'Search wireless and proxy records' })
     .fill('probe_request');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
 
@@ -130,7 +130,7 @@ test('streaming renders the first result before the next chunk arrives', async (
 
   await page.goto('/');
   await page
-    .getByRole('combobox', { name: 'Search wireless events' })
+    .getByRole('combobox', { name: 'Search wireless and proxy records' })
     .fill('probe_request');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
 
@@ -154,7 +154,7 @@ test('opens explain page from a result', async ({ page }) => {
 
   await page.goto('/');
   await page
-    .getByRole('combobox', { name: 'Search wireless events' })
+    .getByRole('combobox', { name: 'Search wireless and proxy records' })
     .fill('probe_request');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await page.getByRole('link', { name: 'Explain' }).click();
@@ -183,7 +183,7 @@ test('renders a degraded-search banner keyed on fallback_code', async ({
   await page.goto('/');
   await page.getByLabel('Live stream').uncheck();
   await page
-    .getByRole('combobox', { name: 'Search wireless events' })
+    .getByRole('combobox', { name: 'Search wireless and proxy records' })
     .fill('probe_request');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
 
