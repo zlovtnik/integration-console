@@ -112,3 +112,29 @@ test('hundreds of disconnected nodes do not generate extreme coordinates', async
     expect(Math.abs(y!)).toBeLessThan(3000);
   }
 });
+
+test('resize preserves an explored view and refresh restores automatic fitting', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Desktop resize exercises the shared ResizeObserver.');
+  let requests = 0;
+  await mockApi(page, { graph: denseGraph(24), onGraphRequest: () => { requests += 1; } });
+  await page.goto('/graph');
+  const canvas = page.locator('.graph-workspace .graph-canvas');
+  const viewport = canvas.locator('.graph-viewport');
+  await expect(canvas.locator('.graph-node')).toHaveCount(28);
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await page.getByRole('button', { name: 'Pan right', exact: true }).click();
+  const explored = await viewport.getAttribute('transform');
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(viewport).toHaveAttribute('transform', explored!);
+
+  const oldViewport = await viewport.elementHandle();
+  const previousRequests = requests;
+  await page.getByRole('button', { name: 'Refresh graph', exact: true }).click();
+  await expect.poll(() => requests).toBeGreaterThan(previousRequests);
+  await expect.poll(() => oldViewport?.evaluate((element) => element.isConnected)).toBe(false);
+  await expect(canvas.locator('.graph-node')).toHaveCount(28);
+  const refreshed = await viewport.getAttribute('transform');
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await expect(viewport).not.toHaveAttribute('transform', refreshed!);
+});

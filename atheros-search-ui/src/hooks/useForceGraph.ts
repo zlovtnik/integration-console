@@ -104,6 +104,7 @@ export function useForceGraph(
         .attr('refY', 0)
         .attr('markerWidth', 4)
         .attr('markerHeight', 4)
+        .attr('markerUnits', 'userSpaceOnUse')
         .attr('orient', 'auto')
         .append('path')
         .attr('d', 'M0,-4L8,0L0,4')

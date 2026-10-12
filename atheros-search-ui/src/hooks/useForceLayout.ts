@@ -168,6 +168,12 @@ export function useForceLayout<
   const [zoomScale, setZoomScale] = createSignal(1);
   let resizeObserver: ResizeObserver | undefined;
   let resizeFrame: number | undefined;
+  let interacted = false;
+
+  function markInteraction() {
+    interacted = true;
+    options.onInteraction?.();
+  }
 
   function viewport(el: SVGSVGElement) {
     const bounds = el.getBoundingClientRect();
@@ -178,6 +184,7 @@ export function useForceLayout<
     const el = svgRef();
     stop();
     if (!el) return null;
+    interacted = false;
 
     const zoomTransform = d3.zoomTransform(el);
     d3.select(el).selectAll('*').remove();
@@ -204,7 +211,7 @@ export function useForceLayout<
         container.attr('transform', event.transform);
         setZoomScale(event.transform.k);
         options.onZoom?.(event.transform.k);
-        if (event.sourceEvent) options.onInteraction?.();
+        if (event.sourceEvent) markInteraction();
       });
     svg.call(zoomBehavior);
 
@@ -223,7 +230,7 @@ export function useForceLayout<
       .drag<SVGGElement, SimNodeDatum<T>>()
       .clickDistance(4)
       .on('start', (event, node) => {
-        options.onInteraction?.();
+        markInteraction();
         if (!event.active) sim?.alphaTarget(0.3).restart();
         node.fx = node.x;
         node.fy = node.y;
@@ -307,14 +314,14 @@ export function useForceLayout<
   function zoomBy(factor: number) {
     const el = svgRef();
     if (!el || !zoomBehavior) return;
-    options.onInteraction?.();
+    markInteraction();
     d3.select(el).call(zoomBehavior.scaleBy, factor);
   }
 
   function panBy(x: number, y: number) {
     const el = svgRef();
     if (!el || !zoomBehavior) return;
-    options.onInteraction?.();
+    markInteraction();
     const scale = d3.zoomTransform(el).k;
     d3.select(el).call(zoomBehavior.translateBy, x / scale, y / scale);
   }
@@ -327,8 +334,13 @@ export function useForceLayout<
       const next = viewport(el);
       if (next.width === width && next.height === height) return;
       ({ width, height } = next);
+      zoomBehavior?.extent([[0, 0], [width, height]]);
       if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
-      resizeFrame = requestAnimationFrame(() => fitToGraph());
+      if (!interacted) {
+        resizeFrame = requestAnimationFrame(() => {
+          if (!interacted) fitToGraph();
+        });
+      }
     });
     resizeObserver.observe(el);
   });

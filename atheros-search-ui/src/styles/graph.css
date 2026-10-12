@@ -1038,7 +1038,14 @@
 
   .graph-navigation {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .graph-pan-controls {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
   }
 
   .graph-key .graph-legend--grouped {
