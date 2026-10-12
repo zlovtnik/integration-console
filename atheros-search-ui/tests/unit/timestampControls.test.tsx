@@ -56,7 +56,7 @@ describe('timestamp filter controls', () => {
   it('stores graph datetime-local input as RFC 3339', () => {
     const rawLocal = '2026-06-16T23:51';
     const { getByLabelText } = render(() => (
-      <GraphControls onRefresh={() => undefined} onResetView={() => undefined} />
+      <GraphControls onRefresh={() => undefined} />
     ));
 
     fireEvent.input(getByLabelText('After'), {

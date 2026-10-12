@@ -85,13 +85,9 @@ async function openGraph(page: Page, path: string) {
   );
   if (path === '/graph') {
     await page
-      .getByText('Advanced projection explorer', { exact: true })
-      .click();
-    await page
-      .getByRole('button', { name: 'Open projection explorer' })
+      .getByText('Filters and layout', { exact: true })
       .click();
     await expect(page.locator('.graph-node')).toHaveCount(6);
-    await page.getByLabel('Secondary relationships').check();
     const previousViewport = await page
       .locator('.graph-viewport')
       .elementHandle();
@@ -314,10 +310,7 @@ for (const path of ['/graph', '/inventory']) {
     );
     if (path === '/graph') {
       await page
-        .getByText('Advanced projection explorer', { exact: true })
-        .click();
-      await page
-        .getByRole('button', { name: 'Open projection explorer' })
+        .getByText('Filters and layout', { exact: true })
         .click();
       await page.getByLabel('Layout', { exact: true }).selectOption('groups');
     }

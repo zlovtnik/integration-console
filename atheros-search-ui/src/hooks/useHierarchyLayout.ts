@@ -159,6 +159,7 @@ export function useHierarchyLayout(
 ) {
   const [hiddenRelationshipCount, setHiddenRelationshipCount] = createSignal(0);
   const [issues, setIssues] = createSignal<string[]>([]);
+  const [zoomScale, setZoomScale] = createSignal(1);
   const presentation = useGraphPresentation<HierarchyNode>(svgRef, options.selectedNodeId, options.onClearSelection);
   let layout: HierarchyLayout | null = null;
   let zoom: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
@@ -225,7 +226,10 @@ export function useHierarchyLayout(
       .extent([[0, 0], [width, height]])
       .clickDistance(4)
       .scaleExtent([Math.min(0.001, initial.k), 6])
-      .on('zoom', (event) => container.attr('transform', event.transform));
+      .on('zoom', (event) => {
+        container.attr('transform', event.transform);
+        setZoomScale(event.transform.k);
+      });
     svg.call(zoom);
     const byId = new Map(layout.nodes.map((node) => [node.id, node]));
     const links = container.append('g').attr('class', 'graph-links');
@@ -300,6 +304,18 @@ export function useHierarchyLayout(
     if (frame !== undefined) cancelAnimationFrame(frame);
   }
 
+  function zoomBy(factor: number) {
+    const el = svgRef();
+    if (el && zoom) d3.select(el).call(zoom.scaleBy, factor);
+  }
+
+  function panBy(x: number, y: number) {
+    const el = svgRef();
+    if (!el || !zoom) return;
+    const scale = d3.zoomTransform(el).k;
+    d3.select(el).call(zoom.translateBy, x / scale, y / scale);
+  }
+
   onMount(() => {
     rebuild();
     if (typeof ResizeObserver !== 'undefined' && svgRef()) {
@@ -315,5 +331,5 @@ export function useHierarchyLayout(
   createEffect(on(options.selectedNodeId, () => { presentation.paint(); }));
   createEffect(on(options.pinnedNodeIds, applyPins));
   onCleanup(stop);
-  return { rebuild, resetZoom, stop, hiddenRelationshipCount, issues };
+  return { rebuild, resetZoom, zoomBy, panBy, zoomScale, stop, hiddenRelationshipCount, issues };
 }

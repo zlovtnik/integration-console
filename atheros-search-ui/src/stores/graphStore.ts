@@ -44,7 +44,7 @@ export const GRAPH_SCOPE_ALL = 'all' as const;
 export type GraphLimit = (typeof GRAPH_LIMITS)[number] | typeof GRAPH_SCOPE_ALL;
 export type GraphLayoutMode = 'hierarchy' | 'overview' | 'groups';
 export const [graphLayoutMode, setGraphLayoutMode] =
-  createSignal<GraphLayoutMode>('hierarchy');
+  createSignal<GraphLayoutMode>('groups');
 export const [showSecondaryGraphEdges, setShowSecondaryGraphEdges] = createSignal(false);
 
 function defaultVisibleKinds(): Set<NodeKind> {
@@ -79,7 +79,7 @@ export const [graphCoverage, setGraphCoverage] = createSignal<{
   complete: boolean;
 } | null>(null);
 export const [graphFilters, setGraphFilters] = createStore<GraphFilters>({
-  hierarchy: true,
+  hierarchy: false,
 });
 export const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(
   null,
@@ -128,8 +128,8 @@ export function setGraphEdgeKindVisibility(kind: EdgeKind, visible?: boolean) {
 }
 
 export function resetGraphFilters() {
-  setGraphFilters(reconcile({ hierarchy: true }));
-  setGraphLayoutMode('hierarchy');
+  setGraphFilters(reconcile({ hierarchy: false }));
+  setGraphLayoutMode('groups');
   setShowSecondaryGraphEdges(false);
   setVisibleGraphKinds(defaultVisibleKinds());
   setVisibleGraphEdgeKinds(defaultVisibleEdgeKinds());

@@ -58,8 +58,7 @@ function fanoutGraph(childCount: number, options?: { truncated?: boolean }): Gra
 async function openHierarchy(page: Page, graph: GraphResponse) {
   await mockApi(page, { graph });
   await page.goto('/graph?g_layout=hierarchy');
-  await page.getByText('Advanced projection explorer', { exact: true }).click();
-  await page.getByRole('button', { name: 'Open projection explorer' }).click();
+  await page.getByText('Filters and layout', { exact: true }).click();
   await expect(page.locator('svg.graph-canvas')).toHaveAttribute(
     'data-layout',
     'hierarchy',

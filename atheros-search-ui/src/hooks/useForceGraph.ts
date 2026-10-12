@@ -47,8 +47,12 @@ export function useForceGraph(
   edges: () => GraphEdge[],
   options: ForceGraphOptions = {},
 ) {
+  let fitOnSimulationEnd = false;
   const layout = useForceLayout<GraphRenderNode, SimEdge>(svgRef, {
     pinnedNodeIds: options.pinnedNodeIds,
+    maxFitScale: 1,
+    onZoom: paintLabels,
+    onInteraction: () => { fitOnSimulationEnd = false; },
   });
   const presentation = useGraphPresentation<SimNode>(
     svgRef,
@@ -91,17 +95,7 @@ export function useForceGraph(
       });
 
     const defs = presentation.prepare(svg);
-    [
-      'association',
-      'probe',
-      'cluster_member',
-      'shadow',
-      'alert_ref',
-      'rf_proximity',
-      'roaming',
-      'same_channel',
-      'vendor_link',
-    ].forEach((kind) => {
+    new Set(simEdges.map((edge) => edge.kind)).forEach((kind) => {
       defs
         .append('marker')
         .attr('id', `${presentation.prefix}-arrow-${kind}`)
@@ -119,16 +113,18 @@ export function useForceGraph(
     const link = container
       .append('g')
       .attr('class', 'graph-links')
-      .selectAll<SVGLineElement, SimEdge>('line')
+      .selectAll<SVGPathElement, SimEdge>('path')
       .data(simEdges, (edge) => edge.id)
-      .join('line')
+      .join('path')
       .attr('class', 'graph-link')
       .attr('data-edge-kind', (edge) => edge.kind)
       .attr('data-tree-role', (edge) => edge.tree_role ?? (groupLayoutEdge(edge) ? 'tree' : 'secondary'))
       .attr('data-source-kind', (edge) => endpointKind(edge.source))
       .attr('data-target-kind', (edge) => endpointKind(edge.target))
       .attr('stroke', (edge) => edgeColor(edge.kind))
-      .attr('stroke-width', (edge) => Math.max(0.5, edge.weight ?? 1))
+      .attr('fill', 'none')
+      .attr('stroke-width', (edge) => Math.min(2.5, Math.max(0.75, edge.weight ?? 1)))
+      .attr('vector-effect', 'non-scaling-stroke')
       .attr('stroke-opacity', (edge) => edgeOpacity(edge.kind))
       .attr('stroke-dasharray', (edge) => edgeDash(edge.kind))
       .style('--edge-opacity', (edge) => edgeOpacity(edge.kind))
@@ -200,19 +196,42 @@ export function useForceGraph(
 
     const calibration = scaleFor(simNodes.length, width, height);
     const grouped = options.layoutMode?.() === 'groups';
-    const centers = groupCentroids(simNodes, graphGroupId, width, height);
-    if (grouped) {
-      seedGroupPositions(simNodes, graphGroupId, centers);
-      simNodes.sort((a, b) => a.id.localeCompare(b.id));
-    } else {
-      for (const [index, item] of simNodes.entries()) {
-        if (Number.isFinite(item.x) && Number.isFinite(item.y)) continue;
-        item.x = nodeLaneX(item, width);
-        item.y = nodeLaneY(item, index, height);
+    // Layout groups follow evidence edges, never node kind or a hierarchy's depth.
+    const groups = relationshipGroups(simNodes, closed.edges.filter(groupLayoutEdge));
+    const groupId = (item: SimNode) => groups.get(item.id) ?? item.id;
+    const centers = groupCentroids(simNodes, groupId, width, height);
+    // A grid of many disconnected components must not grow by 240px per row.
+    // Keep component centers proportional to the viewport and node density.
+    const centerPoints = [...centers.values()];
+    const spanX = (d3.max(centerPoints, (point) => point.x) ?? 0) - (d3.min(centerPoints, (point) => point.x) ?? 0);
+    const spanY = (d3.max(centerPoints, (point) => point.y) ?? 0) - (d3.min(centerPoints, (point) => point.y) ?? 0);
+    const density = Math.max(1, Math.sqrt(simNodes.length / 120));
+    const compactScale = Math.min(1, Math.max(320, width - 160) * density / Math.max(1, spanX), Math.max(240, height - 160) * density / Math.max(1, spanY));
+    for (const center of centerPoints) {
+      center.x = width / 2 + (center.x - width / 2) * compactScale;
+      center.y = height / 2 + (center.y - height / 2) * compactScale;
+    }
+    simNodes.sort((a, b) => a.id.localeCompare(b.id));
+    for (const item of simNodes) {
+      const center = centers.get(groupId(item))!;
+      if (item.fx != null || item.fy != null) continue;
+      if (Math.abs(finiteCoord(item.x) - center.x) > width * 2 || Math.abs(finiteCoord(item.y) - center.y) > height * 2) {
+        delete item.x;
+        delete item.y;
+        item.vx = 0;
+        item.vy = 0;
       }
     }
-    const centroid = (item: SimNode) => centers.get(graphGroupId(item)) ?? { x: width / 2, y: height / 2 };
-    let fitOnSimulationEnd = true;
+    seedGroupPositions(simNodes, groupId, centers);
+    const centroid = (item: SimNode) => centers.get(groupId(item)) ?? { x: width / 2, y: height / 2 };
+    fitOnSimulationEnd = true;
+
+    function paint() {
+      link.attr('d', graphLinkPath);
+      node.attr('transform', (item) => `translate(${finiteCoord(item.x)},${finiteCoord(item.y)})`);
+      paintLabels(layout.zoomScale());
+    }
+
     const simulation = d3
       .forceSimulation<SimNode>(simNodes)
       .force(
@@ -223,33 +242,23 @@ export function useForceGraph(
           .distance((edge) => calibration.linkDistance(linkDistance(edge.kind)))
           .strength(grouped ? 0.35 : 0.4),
       )
-      .force('charge', d3.forceManyBody().strength(calibration.charge))
+      .force('charge', d3.forceManyBody().strength(calibration.charge).distanceMax(320))
       .force(
         'x',
-        d3.forceX<SimNode>((item) => grouped ? centroid(item).x : nodeLaneX(item, width)).strength(grouped ? 0.35 : 0.16),
+        d3.forceX<SimNode>((item) => grouped ? centroid(item).x : width / 2).strength(grouped ? 0.18 : 0.08),
       )
       .force(
         'y',
         d3
-          .forceY<SimNode>((item, index) => grouped ? centroid(item).y : nodeLaneY(item, index, height))
-          .strength(grouped ? 0.35 : 0.08),
+          .forceY<SimNode>((item) => grouped ? centroid(item).y : height / 2)
+          .strength(grouped ? 0.18 : 0.08),
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collide',
-        d3.forceCollide<SimNode>((item) => nodeRadius(item) + calibration.collidePad).iterations(3),
+        d3.forceCollide<SimNode>((item) => nodeRadius(item) + Math.min(20, calibration.collidePad)).iterations(3),
       )
-      .on('tick', () => {
-        link
-          .attr('x1', (edge) => finiteCoord((edge.source as SimNode).x))
-          .attr('y1', (edge) => finiteCoord((edge.source as SimNode).y))
-          .attr('x2', (edge) => finiteCoord((edge.target as SimNode).x))
-          .attr('y2', (edge) => finiteCoord((edge.target as SimNode).y));
-        node.attr(
-          'transform',
-          (item) => `translate(${finiteCoord(item.x)},${finiteCoord(item.y)})`,
-        );
-      })
+      .on('tick', paint)
       .on('end', () => {
         if (!fitOnSimulationEnd) return;
         fitOnSimulationEnd = false;
@@ -257,6 +266,11 @@ export function useForceGraph(
       });
 
     layout.setSimulation(simulation);
+    // Paint a settled starting frame before fitting; tick() does not emit tick events.
+    simulation.stop().tick(60);
+    paint();
+    layout.fitToGraph();
+    simulation.restart();
 
     applyVisibility(false);
     applySelection();
@@ -289,7 +303,7 @@ export function useForceGraph(
     }
 
     d3.select(el)
-      .selectAll<SVGLineElement, SimEdge>('.graph-link')
+      .selectAll<SVGPathElement, SimEdge>('.graph-link')
       .style('display', (edge) => (edgeIsVisible(edge) ? null : 'none'))
       .attr('marker-end', (edge) =>
         edgeIsVisible(edge)
@@ -301,10 +315,33 @@ export function useForceGraph(
     if (restartSimulation) layout.restart();
   }
 
+  function paintLabels(scale: number) {
+    const el = svgRef();
+    if (!el) return;
+    const zoom = Math.max(scale, 0.01);
+    const occupied: { x: number; y: number; width: number }[] = [];
+    d3.select(el).selectAll<SVGTextElement, SimNode>('.graph-node-label')
+      .style('font-size', `${12 / zoom}px`)
+      .attr('y', (item) => nodeRadius(item) + 15 / zoom)
+      .classed('graph-node-label--suppressed', function (item) {
+        if (this.parentElement?.style.display === 'none') return true;
+        const x = finiteCoord(item.x) * zoom;
+        const y = finiteCoord(item.y) * zoom + nodeRadius(item) * zoom + 15;
+        const width = (this.textContent?.length ?? 0) * 7;
+        const persistent = item.kind === 'ap' || item.kind === 'aggregate_group';
+        if (!persistent && zoom < 0.7) return true;
+        if (occupied.some((box) => Math.abs(box.y - y) < 18 && Math.abs(box.x - x) < (box.width + width) / 2 + 8)) return true;
+        occupied.push({ x, y, width });
+        return false;
+      });
+  }
+
   function applySelection(selected = options.selectedNodeId?.() ?? null) {
     const related = presentation.paint();
-    if (selected && related.size)
+    if (selected && related.size) {
+      fitOnSimulationEnd = false;
       queueMicrotask(() => layout.fitToGraph(related, 80));
+    }
   }
 
   function applyPinned(
@@ -349,42 +386,49 @@ export function useForceGraph(
   createEffect(on(() => options.selectedNodeId?.() ?? null, applySelection));
   createEffect(on(() => options.pinnedNodeIds?.(), applyPinned));
 
-  return { rebuild: build, resetZoom: layout.resetZoom, stop: layout.stop, hiddenRelationshipCount };
+  return { rebuild: build, resetZoom: layout.resetZoom, zoomBy: layout.zoomBy, panBy: layout.panBy, zoomScale: layout.zoomScale, stop: layout.stop, hiddenRelationshipCount };
 }
 
 export { createSimNodes };
-
-export function graphGroupId(node: GraphRenderNode): string {
-  if (node.aggregate_group_id) return node.aggregate_group_id;
-  if (node.location_id) return `location:${node.location_id}`;
-  return `kind:${node.kind}`;
-}
 
 export function groupLayoutEdge(edge: Pick<GraphEdge, 'kind' | 'tree_role'>): boolean {
   return edge.tree_role !== 'secondary' && !['rf_proximity', 'calibrated_range', 'vendor_link', 'same_channel', 'roaming', 'probe'].includes(edge.kind);
 }
 
-function nodeLaneX(node: GraphNode, width: number): number {
-  const lanes: Record<NodeKind, number> = {
-    location: 0,
-    sensor: 1,
-    cluster: 0.3,
-    device: 0.34,
-    client: 0.52,
-    ap: 0.72,
-    shadow_alert: 0.88,
-    alert: 0.88,
-    embedding: 0.5,
-    aggregate_group: 0.62,
-  };
-  return width * (lanes[node.kind] ?? 0.5);
+export function relationshipGroups(nodes: { id: string }[], edges: Pick<GraphEdge, 'source' | 'target'>[]): Map<string, string> {
+  const parents = new Map(nodes.map((item) => [item.id, item.id]));
+  function root(id: string): string {
+    let current = id;
+    while (parents.get(current) !== current) current = parents.get(current)!;
+    while (id !== current) {
+      const next = parents.get(id)!;
+      parents.set(id, current);
+      id = next;
+    }
+    return current;
+  }
+  for (const edge of edges) {
+    if (!parents.has(edge.source) || !parents.has(edge.target)) continue;
+    const a = root(edge.source);
+    const b = root(edge.target);
+    parents.set(a < b ? b : a, a < b ? a : b);
+  }
+  return new Map(nodes.map((item) => [item.id, root(item.id)]));
 }
 
-function nodeLaneY(node: GraphNode, index: number, height: number): number {
-  const band = Math.max(160, height * 0.78);
-  const top = Math.max(32, (height - band) / 2);
-  const spread = stableUnitValue(node.id || `${node.kind}:${index}`);
-  return top + spread * band;
+export function graphLinkPath(edge: SimEdge): string {
+  const source = edge.source as SimNode;
+  const target = edge.target as SimNode;
+  const sx = finiteCoord(source.x);
+  const sy = finiteCoord(source.y);
+  const tx = finiteCoord(target.x);
+  const ty = finiteCoord(target.y);
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) return `M${sx},${sy}C${sx + 24},${sy - 32} ${sx - 24},${sy - 32} ${sx},${sy}`;
+  const bend = Math.min(24, length * 0.12) * (stableUnitValue(edge.id) < 0.5 ? -1 : 1);
+  return `M${sx},${sy}Q${(sx + tx) / 2 - dy / length * bend},${(sy + ty) / 2 + dx / length * bend} ${tx},${ty}`;
 }
 
 export function nodeRadius(node: GraphNode): number {

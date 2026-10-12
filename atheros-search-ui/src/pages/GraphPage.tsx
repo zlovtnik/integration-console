@@ -11,6 +11,7 @@ import {
 import { AlertTriangle } from 'lucide-solid';
 import { useSearchParams } from '@solidjs/router';
 import { GraphControls } from '~/components/graph/GraphControls';
+import { GraphNavigation, type GraphNavigationApi } from '~/components/graph/GraphNavigation';
 import { WirelessTopology } from '~/components/graph/WirelessTopology';
 import { NetworkReport } from '~/components/graph/NetworkReport';
 import { GraphLegend } from '~/components/graph/GraphLegend';
@@ -50,33 +51,20 @@ import {
 import '~/styles/graph.css';
 
 export default function GraphPage() {
-  const [explore, setExplore] = createSignal(false);
+  const [params] = useSearchParams();
   onMount(() => {
     document.title = 'Network map - atheros search';
   });
   return (
-    <main id="main-content" class="graph-page" tabIndex={-1}>
-      <WirelessTopology />
-      <NetworkReport />
+    <main id="main-content" class="graph-page network-graph-page" tabIndex={-1}>
+      <ProjectionGraph />
       <details class="report-controls">
-        <summary>Advanced projection explorer</summary>
-        <p>
-          Technical node/edge controls and hop count apply to the latest bounded
-          projection. Historical absence cannot be inferred here. Node positions
-          do not represent physical distance.
-        </p>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          onClick={() => {
-            setExplore((value) => !value);
-          }}
-        >
-          {explore() ? 'Close projection explorer' : 'Open projection explorer'}
-        </button>
-        <Show when={explore()}>
-          <ProjectionGraph />
-        </Show>
+        <summary>Wireless observation evidence</summary>
+        <WirelessTopology />
+      </details>
+      <details class="report-controls" open={Boolean(params.ap || params.node)}>
+        <summary>Access point report</summary>
+        <NetworkReport />
       </details>
     </main>
   );
@@ -86,7 +74,8 @@ function ProjectionGraph() {
   const [urlParams, setUrlParams] = useSearchParams();
   const [urlReady, setUrlReady] = createSignal(false);
   let filterReloadTimer: number | undefined;
-  let resetView = () => {};
+  const [navigation, setNavigation] = createSignal<GraphNavigationApi | null>(null);
+  const resetView = () => navigation()?.resetZoom();
   const [hiddenRelationships, setHiddenRelationships] = createSignal(0);
   const [layoutIssues, setLayoutIssues] = createSignal<string[]>([]);
   const { load } = useGraph();
@@ -120,15 +109,15 @@ function ProjectionGraph() {
   );
 
   onMount(() => {
-    document.title = 'Network map projection explorer - atheros search';
+    document.title = 'Wireless observations - atheros search';
     const sourceMac =
       new URLSearchParams(window.location.search).get('g_mac') ??
       new URLSearchParams(window.location.search).get('mac');
     const anchor = sourceMac?.trim();
     const storedHops = Number(urlParams.g_hops);
     const storedLimit = Number(urlParams.g_limit);
-    const mode = urlParams.g_layout === 'overview' || urlParams.g_layout === 'groups'
-      ? urlParams.g_layout : 'hierarchy';
+    const mode = urlParams.g_layout === 'overview' || urlParams.g_layout === 'hierarchy'
+      ? urlParams.g_layout : 'groups';
     const edgeKinds =
       typeof urlParams.g_edges === 'string'
         ? urlParams.g_edges
@@ -197,6 +186,18 @@ function ProjectionGraph() {
         setSelectedNodeId(null);
       } else if (event.key.toLowerCase() === 'r') {
         resetView();
+      } else if (target?.classList.contains('graph-canvas')) {
+        const pan: Record<string, [number, number]> = {
+          ArrowLeft: [80, 0], ArrowRight: [-80, 0], ArrowUp: [0, 80], ArrowDown: [0, -80],
+        };
+        const direction = pan[event.key];
+        if (direction) {
+          event.preventDefault();
+          navigation()?.panBy(...direction);
+        } else if (event.key === '+' || event.key === '=' || event.key === '-') {
+          event.preventDefault();
+          navigation()?.zoomBy(event.key === '-' ? 1 / 1.25 : 1.25);
+        }
       }
     }
 
@@ -245,11 +246,18 @@ function ProjectionGraph() {
   onCleanup(() => window.clearTimeout(filterReloadTimer));
 
   return (
-    <section class="graph-page" aria-label="Advanced graph projection">
-      <GraphControls
-        onRefresh={() => void load()}
-        onResetView={() => resetView()}
-      />
+    <section class="graph-workspace" aria-label="Wireless observation graph">
+      <header class="graph-workspace-header">
+        <div>
+          <h1>Wireless observations</h1>
+          <p>Observations do not confirm connections or ownership.</p>
+        </div>
+        <button type="button" class="btn btn-secondary" disabled={graphLoading()} onClick={() => void load()}>Refresh graph</button>
+      </header>
+      <details class="graph-filter-drawer">
+        <summary>Filters and layout</summary>
+        <GraphControls onRefresh={() => void load()} />
+      </details>
 
       <div class="graph-coverage-notices" aria-live="polite">
         <Show when={graphMeta.hierarchy?.truncated}>
@@ -302,18 +310,25 @@ function ProjectionGraph() {
           <ForceCanvas
             expandedAPIds={expandedAPIds()}
             onExpand={(id) => setExpandedAPIds((prev) => new Set([...prev, id]))}
-            onReady={(reset) => { resetView = reset; setLayoutIssues([]); }}
+            onReady={(api) => { setNavigation(api); setLayoutIssues([]); }}
             onHidden={setHiddenRelationships}
           />
         }>
           <HierarchyCanvas
-            onReady={(reset) => { resetView = reset; }}
+            onReady={setNavigation}
             onHidden={setHiddenRelationships}
             onIssues={setLayoutIssues}
           />
         </Show>
-        <GraphLegend />
       </div>
+      <footer class="graph-workspace-footer">
+        <div class="graph-workspace-status">
+          <span><strong>{graphNodes().length}</strong> nodes / <strong>{graphEdges().length}</strong> relationships</span>
+          <span id="graph-navigation-hint">Drag to pan. Scroll or +/- to zoom. Arrow keys to pan. Spacing is not physical distance.</span>
+        </div>
+        <GraphNavigation graph={navigation()} />
+        <details class="graph-key"><summary>Color key</summary><GraphLegend /></details>
+      </footer>
 
       <Show when={selected()}>
         {(node) => (
@@ -328,7 +343,7 @@ function ProjectionGraph() {
 }
 
 function HierarchyCanvas(props: {
-  onReady: (reset: () => void) => void;
+  onReady: (api: GraphNavigationApi) => void;
   onHidden: (count: number) => void;
   onIssues: (issues: string[]) => void;
 }) {
@@ -341,16 +356,16 @@ function HierarchyCanvas(props: {
     onClearSelection: () => setSelectedNodeId(null),
     onNodeClick: (node) => setSelectedNodeId((current) => current === node.id ? null : node.id),
   });
-  onMount(() => props.onReady(graph.resetZoom));
+  onMount(() => props.onReady(graph));
   createEffect(on(graph.hiddenRelationshipCount, (count) => props.onHidden(count)));
   createEffect(on(graph.issues, (issues) => props.onIssues(issues)));
-  return <svg ref={svgRef} class="graph-canvas" aria-label="Device network graph" />;
+  return <svg ref={svgRef} class="graph-canvas" tabIndex={0} aria-describedby="graph-navigation-hint" aria-label="Device network graph" />;
 }
 
 function ForceCanvas(props: {
   expandedAPIds: Set<string>;
   onExpand: (id: string) => void;
-  onReady: (reset: () => void) => void;
+  onReady: (api: GraphNavigationApi) => void;
   onHidden: (count: number) => void;
 }) {
   let svgRef: SVGSVGElement | undefined;
@@ -369,8 +384,8 @@ function ForceCanvas(props: {
       else setSelectedNodeId((current) => current === node.id ? null : node.id);
     },
   });
-  onMount(() => props.onReady(graph.resetZoom));
+  onMount(() => props.onReady(graph));
   createEffect(on(renderModel, graph.rebuild, { defer: true }));
   createEffect(on(graph.hiddenRelationshipCount, (count) => props.onHidden(count)));
-  return <svg ref={svgRef} class="graph-canvas" data-layout={graphLayoutMode()} aria-label="Device network graph" />;
+  return <svg ref={svgRef} class="graph-canvas" tabIndex={0} aria-describedby="graph-navigation-hint" data-layout={graphLayoutMode()} aria-label="Device network graph" />;
 }

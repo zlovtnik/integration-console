@@ -10,7 +10,6 @@ import {
 import { auditGeneration } from '~/auth/auditState';
 import {
   ChevronDown,
-  LocateFixed,
   RefreshCw,
   Star,
   Trash2,
@@ -124,7 +123,6 @@ function EdgeKindChip(props: { kind: EdgeKind }) {
 
 export function GraphControls(props: {
   onRefresh: () => void;
-  onResetView: () => void;
 }) {
   let rootRef: HTMLFormElement | undefined;
   const [savedViews, setSavedViews] = createSignal<GraphSavedView[]>(
@@ -330,9 +328,9 @@ export function GraphControls(props: {
                 setGraphFilters('hierarchy', mode === 'hierarchy');
               });
             }}>
+              <option value="groups">Organic clusters</option>
+              <option value="overview">Force overview</option>
               <option value="hierarchy">Hierarchy</option>
-              <option value="overview">Overview</option>
-              <option value="groups">Groups</option>
             </select>
           </label>
           <Show when={graphLayoutMode() === 'hierarchy'}>
@@ -532,15 +530,6 @@ export function GraphControls(props: {
                 </div>
               </Show>
             </div>
-
-            <button
-              type="button"
-              class="btn btn-ghost"
-              onClick={() => props.onResetView()}
-            >
-              <LocateFixed size={16} aria-hidden="true" />
-              <span>Reset view</span>
-            </button>
 
             <button
               type="submit"

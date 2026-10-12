@@ -336,6 +336,7 @@ test('AP selection, roster member and Search carry the same scope', async ({
   await page.goto(
     '/graph?loc=lab&sensor=sensor-a&after=2026-09-01T00%3A00%3A00Z',
   );
+  await page.getByText('Access point report', { exact: true }).click();
   await page.getByRole('button', { name: 'Lab AP', exact: true }).click();
   await expect(
     page.getByText('1 distinct identifiers; 1 shown.'),
@@ -451,8 +452,6 @@ test('Graph node Explain and return retain investigation scope', async ({
   await page.goto(
     '/graph?loc=lab&sensor=sensor-a&after=2026-09-01T00%3A00%3A00Z',
   );
-  await page.getByText('Advanced projection explorer', { exact: true }).click();
-  await page.getByRole('button', { name: 'Open projection explorer' }).click();
   const focusedNode = page.locator(
     '.graph-node[data-node-id="device:aa:bb:cc:dd:ee:ff"]',
   );
@@ -596,8 +595,9 @@ for (const width of [375, 768, 1024, 1440]) {
         await expect(
           page.getByRole('link', { name: 'Inventory', exact: true }),
         ).toBeVisible();
-        await expect(page.getByRole('table').first()).toBeVisible();
         if (route === '/graph') {
+          await page.getByText('Access point report', { exact: true }).click();
+          await expect(page.getByRole('table', { name: 'Access points ordered by distinct observed identifier count' })).toBeVisible();
           await page
             .getByRole('button', { name: 'Lab AP', exact: true })
             .focus();
@@ -605,6 +605,8 @@ for (const width of [375, 768, 1024, 1440]) {
           await expect(
             page.getByRole('table', { name: /AP roster/ }),
           ).toBeVisible();
+        } else {
+          await expect(page.getByRole('table').first()).toBeVisible();
         }
         const scan = await new AxeBuilder({ page })
           .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])

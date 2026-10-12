@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { onCleanup } from 'solid-js';
+import { createSignal, onCleanup, onMount } from 'solid-js';
 import type { Accessor } from 'solid-js';
 
 export interface ForceLayoutNode {
@@ -21,6 +21,8 @@ export interface ForceLayoutBuild<T extends ForceLayoutNode> {
 export interface ForceLayoutOptions {
   pinnedNodeIds?: Accessor<Set<string>> | undefined;
   maxFitScale?: number;
+  onZoom?: (scale: number) => void;
+  onInteraction?: () => void;
 }
 
 export interface GraphScale {
@@ -132,21 +134,22 @@ export function fitGraphTransform(
   padding: number,
   maxScale = 2,
 ): d3.ZoomTransform | null {
-  if (positions.length === 0) return null;
-  const minX = d3.min(positions, (node) => node.x) ?? 0;
-  const maxX = d3.max(positions, (node) => node.x) ?? 0;
-  const minY = d3.min(positions, (node) => node.y) ?? 0;
-  const maxY = d3.max(positions, (node) => node.y) ?? 0;
+  const finite = positions.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+  if (!finite.length || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const minX = d3.min(finite, (node) => node.x)!;
+  const maxX = d3.max(finite, (node) => node.x)!;
+  const minY = d3.min(finite, (node) => node.y)!;
+  const maxY = d3.max(finite, (node) => node.y)!;
   const graphWidth = Math.max(maxX - minX, 1);
   const graphHeight = Math.max(maxY - minY, 1);
-  const inset = Math.min(padding, Math.min(width, height) / 3);
+  const inset = Math.min(Number.isFinite(padding) ? Math.max(0, padding) : 48, Math.min(width, height) / 3);
   const scale = Math.max(Number.EPSILON, Math.min(
-    maxScale,
+    Number.isFinite(maxScale) && maxScale > 0 ? maxScale : 2,
     (width - inset * 2) / graphWidth,
     (height - inset * 2) / graphHeight,
   ));
   return d3.zoomIdentity
-    .translate(width / 2 - (minX + graphWidth / 2) * scale, height / 2 - (minY + graphHeight / 2) * scale)
+    .translate(width / 2 - (minX + maxX) / 2 * scale, height / 2 - (minY + maxY) / 2 * scale)
     .scale(scale);
 }
 
@@ -162,6 +165,14 @@ export function useForceLayout<
   let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
   let nodeById = new Map<string, SimNodeDatum<T>>();
   let prevNodeById = new Map<string, SimNodeDatum<T>>();
+  const [zoomScale, setZoomScale] = createSignal(1);
+  let resizeObserver: ResizeObserver | undefined;
+  let resizeFrame: number | undefined;
+
+  function viewport(el: SVGSVGElement) {
+    const bounds = el.getBoundingClientRect();
+    return { width: bounds.width || el.clientWidth || 320, height: bounds.height || el.clientHeight || 240 };
+  }
 
   function prepare(sourceNodes: T[]): ForceLayoutBuild<T> | null {
     const el = svgRef();
@@ -171,9 +182,7 @@ export function useForceLayout<
     const zoomTransform = d3.zoomTransform(el);
     d3.select(el).selectAll('*').remove();
 
-    const bounds = el.getBoundingClientRect();
-    const width = Math.max(bounds.width || el.clientWidth, 320);
-    const height = Math.max(bounds.height || el.clientHeight, 240);
+    const { width, height } = viewport(el);
     const simNodes = createSimNodes(
       sourceNodes,
       options.pinnedNodeIds?.() ?? new Set<string>(),
@@ -191,7 +200,12 @@ export function useForceLayout<
       .extent([[0, 0], [width, height]])
       .clickDistance(4)
       .scaleExtent(scaleFor(simNodes.length, width, height).zoomScaleExtent)
-      .on('zoom', (event) => container.attr('transform', event.transform));
+      .on('zoom', (event) => {
+        container.attr('transform', event.transform);
+        setZoomScale(event.transform.k);
+        options.onZoom?.(event.transform.k);
+        if (event.sourceEvent) options.onInteraction?.();
+      });
     svg.call(zoomBehavior);
 
     return {
@@ -209,6 +223,7 @@ export function useForceLayout<
       .drag<SVGGElement, SimNodeDatum<T>>()
       .clickDistance(4)
       .on('start', (event, node) => {
+        options.onInteraction?.();
         if (!event.active) sim?.alphaTarget(0.3).restart();
         node.fx = node.x;
         node.fy = node.y;
@@ -259,9 +274,8 @@ export function useForceLayout<
     );
     if (positioned.length === 0) return false;
 
-    const bounds = el.getBoundingClientRect();
-    const width = Math.max(bounds.width || el.clientWidth, 320);
-    const height = Math.max(bounds.height || el.clientHeight, 240);
+    const { width, height } = viewport(el);
+    zoomBehavior.extent([[0, 0], [width, height]]);
     const calibration = scaleFor(positioned.length, width, height);
     const transform = fitGraphTransform(
       positioned.map((node) => ({ x: node.x!, y: node.y! })),
@@ -290,7 +304,41 @@ export function useForceLayout<
     sim = null;
   }
 
-  onCleanup(stop);
+  function zoomBy(factor: number) {
+    const el = svgRef();
+    if (!el || !zoomBehavior) return;
+    options.onInteraction?.();
+    d3.select(el).call(zoomBehavior.scaleBy, factor);
+  }
+
+  function panBy(x: number, y: number) {
+    const el = svgRef();
+    if (!el || !zoomBehavior) return;
+    options.onInteraction?.();
+    const scale = d3.zoomTransform(el).k;
+    d3.select(el).call(zoomBehavior.translateBy, x / scale, y / scale);
+  }
+
+  onMount(() => {
+    const el = svgRef();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let { width, height } = viewport(el);
+    resizeObserver = new ResizeObserver(() => {
+      const next = viewport(el);
+      if (next.width === width && next.height === height) return;
+      ({ width, height } = next);
+      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => fitToGraph());
+    });
+    resizeObserver.observe(el);
+  });
+  onCleanup(() => {
+    stop();
+    resizeObserver?.disconnect();
+    if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+    const el = svgRef();
+    if (el) d3.select(el).on('.zoom', null);
+  });
 
   return {
     prepare,
@@ -300,6 +348,9 @@ export function useForceLayout<
     markBuilt,
     resetZoom,
     fitToGraph,
+    zoomBy,
+    panBy,
+    zoomScale,
     stop,
     nodeById: () => nodeById,
   };
