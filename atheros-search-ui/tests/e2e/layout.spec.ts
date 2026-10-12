@@ -82,7 +82,7 @@ for (const viewport of viewports) {
     await page.goto('/');
 
     await page
-      .getByRole('combobox', { name: 'Search wireless events' })
+      .getByRole('combobox', { name: 'Search wireless and proxy records' })
       .fill('probe_request');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(page.getByRole('heading', { name: /event:lab:/ })).toBeVisible();
@@ -97,7 +97,7 @@ for (const viewport of viewports) {
     );
     await expectWithinViewport(
       page,
-      page.getByRole('combobox', { name: 'Search wireless events' }),
+      page.getByRole('combobox', { name: 'Search wireless and proxy records' }),
       'search input',
     );
     await expectWithinViewport(

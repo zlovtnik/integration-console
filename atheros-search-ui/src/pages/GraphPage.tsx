@@ -166,7 +166,7 @@ function ProjectionGraph() {
       setGraphFilters('scope', urlParams.g_scope === 'all' ? 'all' : undefined);
       setGraphFilters(
         'edge_kinds',
-        edgeKinds.length ? edgeKinds : undefined,
+        edgeKinds.length ? edgeKinds : ['association'],
       );
       setVisibleGraphEdgeKinds(
         new Set(edgeKinds.length ? edgeKinds : ['association']),
@@ -258,7 +258,10 @@ function ProjectionGraph() {
           </span>
         </Show>
         <Show when={graphMeta.report?.incomplete_coverage}>
-          <span class="graph-coverage-warning" role="status">Observation coverage is unverified.</span>
+          <span class="graph-coverage-warning" role="status">
+            Observation coverage is unverified. This graph uses wireless
+            observations; proxy search results do not populate it.
+          </span>
         </Show>
         <Show when={hiddenRelationships() > 0}>
           <span class="graph-coverage-warning" role="status">{hiddenRelationships()} relationships hidden</span>
@@ -288,6 +291,12 @@ function ProjectionGraph() {
               Retry
             </button>
           </div>
+        </Show>
+        <Show when={!graphLoading() && !graphError() && graphNodes().length === 0}>
+          <p class="graph-coverage-warning" role="status">
+            No wireless graph records are available in this scope. Check the
+            location and time filters, then sensor capture and ingestion.
+          </p>
         </Show>
         <Show when={graphLayoutMode() === 'hierarchy'} fallback={
           <ForceCanvas
@@ -333,8 +342,8 @@ function HierarchyCanvas(props: {
     onNodeClick: (node) => setSelectedNodeId((current) => current === node.id ? null : node.id),
   });
   onMount(() => props.onReady(graph.resetZoom));
-  createEffect(on(graph.hiddenRelationshipCount, props.onHidden));
-  createEffect(on(graph.issues, props.onIssues));
+  createEffect(on(graph.hiddenRelationshipCount, (count) => props.onHidden(count)));
+  createEffect(on(graph.issues, (issues) => props.onIssues(issues)));
   return <svg ref={svgRef} class="graph-canvas" aria-label="Device network graph" />;
 }
 
@@ -362,6 +371,6 @@ function ForceCanvas(props: {
   });
   onMount(() => props.onReady(graph.resetZoom));
   createEffect(on(renderModel, graph.rebuild, { defer: true }));
-  createEffect(on(graph.hiddenRelationshipCount, props.onHidden));
+  createEffect(on(graph.hiddenRelationshipCount, (count) => props.onHidden(count)));
   return <svg ref={svgRef} class="graph-canvas" data-layout={graphLayoutMode()} aria-label="Device network graph" />;
 }

@@ -28,7 +28,7 @@ INSERT INTO atheros_search.search_queries (
   latency_ms, result_count, request_metadata, created_at, expires_at
 ) VALUES (
   $1, $2, $3, $4, $5, $6, $7,
-  jsonb_build_object('has_query', $8),
+  jsonb_build_object('has_query', $8::boolean),
   CURRENT_TIMESTAMP,
   CURRENT_TIMESTAMP + INTERVAL '30 days'
 )

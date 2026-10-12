@@ -14,18 +14,20 @@ func TestCountEmbeddingsReturnsCountsByKind(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"event", "device", "behaviour", "sequence"}).
-			AddRow(4, 0, 0, 0),
+		sqlmock.NewRows([]string{"event", "device", "behaviour", "sequence", "event_documents", "device_documents"}).
+			AddRow(4, 0, 0, 0, true, false),
 	)
 
 	counts, err := (&Pool{DB: sqlDB}).CountEmbeddings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, EmbeddingCounts{Event: 4, Device: 0, Behaviour: 0, Sequence: 0}, counts)
-	require.Equal(t, []string{"device", "behaviour", "sequence"}, counts.EmptyKinds())
+	require.Equal(t, EmbeddingCounts{Event: 4, HasEventDocuments: true}, counts)
+	require.Empty(t, counts.EmptyKinds())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestEmptyKindsReturnsAllEmptyKinds(t *testing.T) {
-	require.Equal(t, []string{}, EmbeddingCounts{Event: 1, Device: 1, Behaviour: 1, Sequence: 1}.EmptyKinds())
-	require.Equal(t, []string{"event", "device", "behaviour", "sequence"}, EmbeddingCounts{}.EmptyKinds())
+func TestEmptyKindsWarnsOnlyForSupportedKindsWithSourceDocuments(t *testing.T) {
+	require.Empty(t, EmbeddingCounts{}.EmptyKinds())
+	require.Empty(t, EmbeddingCounts{Event: 1, Device: 1, HasEventDocuments: true, HasDeviceDocuments: true}.EmptyKinds())
+	require.Equal(t, []string{"event", "device"}, EmbeddingCounts{HasEventDocuments: true, HasDeviceDocuments: true}.EmptyKinds())
+	require.Equal(t, []string{"device"}, EmbeddingCounts{Event: 4, HasEventDocuments: true, HasDeviceDocuments: true}.EmptyKinds())
 }

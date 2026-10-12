@@ -30,6 +30,8 @@ func TestDatabaseRuntimePrivilegesAndSchemaChecksum(t *testing.T) {
 	ready, err := pool.SchemaReady(t.Context())
 	require.NoError(t, err)
 	require.True(t, ready.Ready)
+	_, err = pool.CountEmbeddings(t.Context())
+	require.NoError(t, err, "coverage query must execute with the runtime grants")
 	pool.expectedManifest = strings.Repeat("0", 64)
 	ready, err = pool.SchemaReady(t.Context())
 	require.NoError(t, err)

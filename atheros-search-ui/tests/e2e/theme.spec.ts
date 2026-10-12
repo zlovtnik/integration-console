@@ -90,7 +90,7 @@ test('system storage, forced colors and reduced motion preserve keyboard use', a
   await mockApi(page);
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  const search = page.getByRole('combobox', { name: 'Search wireless events' });
+  const search = page.getByRole('combobox', { name: 'Search wireless and proxy records' });
   await search.focus();
   await search.fill('probe_request');
   await page.keyboard.press('Enter');

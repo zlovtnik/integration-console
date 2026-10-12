@@ -25,7 +25,7 @@ const KINDS: { value: SearchKind; label: string; title: string }[] = [
   },
   {
     value: 'SEARCH_KIND_CROSS',
-    label: 'Cross',
+    label: 'All sources',
     title: 'Search across all types simultaneously',
   },
 ];

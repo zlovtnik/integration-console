@@ -47,25 +47,21 @@ type SchemaReadyStatus struct {
 }
 
 type EmbeddingCounts struct {
-	Event     int64
-	Device    int64
-	Behaviour int64
-	Sequence  int64
+	Event              int64
+	Device             int64
+	Behaviour          int64
+	Sequence           int64
+	HasEventDocuments  bool
+	HasDeviceDocuments bool
 }
 
 func (c EmbeddingCounts) EmptyKinds() []string {
-	empty := make([]string, 0, 4)
-	if c.Event == 0 {
+	empty := make([]string, 0, 2)
+	if c.Event == 0 && c.HasEventDocuments {
 		empty = append(empty, "event")
 	}
-	if c.Device == 0 {
+	if c.Device == 0 && c.HasDeviceDocuments {
 		empty = append(empty, "device")
-	}
-	if c.Behaviour == 0 {
-		empty = append(empty, "behaviour")
-	}
-	if c.Sequence == 0 {
-		empty = append(empty, "sequence")
 	}
 	return empty
 }
@@ -222,8 +218,12 @@ SELECT
   COUNT(*) FILTER (WHERE embedding_kind = 'event'),
   COUNT(*) FILTER (WHERE embedding_kind = 'device'),
   COUNT(*) FILTER (WHERE embedding_kind = 'behaviour'),
-  COUNT(*) FILTER (WHERE embedding_kind = 'sequence')
+  COUNT(*) FILTER (WHERE embedding_kind = 'sequence'),
+  EXISTS (SELECT 1 FROM atheros_search.search_documents
+          WHERE status = 'active' AND source_kind IN ('event', 'proxy_event', 'proxy_blocked_host_window')),
+  EXISTS (SELECT 1 FROM atheros_search.search_documents
+          WHERE status = 'active' AND source_kind = 'device')
 FROM atheros_search.embeddings
-`).Scan(&counts.Event, &counts.Device, &counts.Behaviour, &counts.Sequence)
+`).Scan(&counts.Event, &counts.Device, &counts.Behaviour, &counts.Sequence, &counts.HasEventDocuments, &counts.HasDeviceDocuments)
 	return counts, err
 }

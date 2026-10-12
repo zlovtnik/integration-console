@@ -20,6 +20,7 @@
 .report-table-scroll {
   overflow-x: auto;
   max-width: 100%;
+  min-width: 0;
 }
 .report-table {
   border-collapse: collapse;

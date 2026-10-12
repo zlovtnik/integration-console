@@ -41,7 +41,7 @@ func TestCheckCachesEmbeddingCounts(t *testing.T) {
 }
 
 func TestCheckLogsEmptyEmbeddingKindsOnlyWhenCountsRefresh(t *testing.T) {
-	database := &countingDatabase{}
+	database := &countingDatabase{counts: db.EmbeddingCounts{HasEventDocuments: true}}
 	var output bytes.Buffer
 	previousLogger := log.Logger
 	log.Logger = zerolog.New(&output)
@@ -51,6 +51,17 @@ func TestCheckLogsEmptyEmbeddingKindsOnlyWhenCountsRefresh(t *testing.T) {
 	require.NoError(t, readiness.Check(context.Background()))
 	require.NoError(t, readiness.Check(context.Background()))
 	require.Equal(t, 1, strings.Count(output.String(), "one or more search vector tables are empty"))
+}
+
+func TestCheckDoesNotWarnForAbsentSourcesOrRetiredKinds(t *testing.T) {
+	database := &countingDatabase{counts: db.EmbeddingCounts{Event: 10, HasEventDocuments: true}}
+	var output bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&output)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	require.NoError(t, (&Readiness{DB: database}).Check(context.Background()))
+	require.Empty(t, output.String())
 }
 
 type schemaDatabase struct {

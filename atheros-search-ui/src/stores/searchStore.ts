@@ -12,7 +12,7 @@ import type {
 const HISTORY_STORAGE_KEY = 'atheros-search.history';
 const SESSION_STORAGE_KEY = 'atheros-search.session-id';
 const HISTORY_LIMIT = 50;
-export const DEFAULT_SEARCH_KIND: SearchKind = 'SEARCH_KIND_EVENT';
+export const DEFAULT_SEARCH_KIND: SearchKind = 'SEARCH_KIND_CROSS';
 export const DEFAULT_SEARCH_MODE: SearchMode = 'SEARCH_MODE_HYBRID';
 export const DEFAULT_TOP_K = 20;
 export const DEFAULT_MIN_SIMILARITY = 0;
