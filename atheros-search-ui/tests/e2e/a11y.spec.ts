@@ -27,6 +27,7 @@ test('keyboard path covers skip link, search, and filter drawer', async ({
   await page.goto('/');
 
   const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await expect(page.locator('#main-content')).toBeVisible();
   await skipLink.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#main-content')).toBeFocused();

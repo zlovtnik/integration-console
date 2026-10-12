@@ -263,7 +263,7 @@ export default function SearchPage() {
 
   function openFocusedResult() {
     const active = document.activeElement as HTMLElement | null;
-    if (active instanceof HTMLAnchorElement && active.href) {
+    if (active instanceof HTMLAnchorElement && active.href && active.closest('.result-card')) {
       active.click();
       return;
     }

@@ -44,7 +44,10 @@ export function WirelessTopology() {
     <Show when={graph()}>{(data) => <>
       <p>{data().node_count} entities and {data().edge_count} relationships in this page.</p>
       <Show when={data().next_page_cursor}><p>This is a partial view. Additional relationships exist.</p></Show>
-      <table><caption>Topology relationships and radio evidence</caption>
+      {/* Keyboard users must be able to scroll the evidence table. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+      <div class="report-table-scroll" role="region" aria-label="Topology evidence" tabIndex={0}>
+      <table class="report-table"><caption>Topology relationships and radio evidence</caption>
         <thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Evidence window</th><th>Freshness and estimated range</th></tr></thead>
         <tbody><For each={topology()}>{(edge) => <tr>
           <td>{labels().get(edge.source) ?? edge.source}</td><td>{edge.label ?? edge.kind}</td>
@@ -54,11 +57,16 @@ export function WirelessTopology() {
             <Show when={edge.kind === 'calibrated_range'}>{rangeLabel(edge)}</Show></td>
         </tr>}</For></tbody>
       </table>
+      </div>
       <Show when={identity()}><h3>Reviewed identity layer</h3>
         <p>Membership reflects a reviewed identity decision. It does not establish physical proximity.</p>
-        <table><caption>Identity memberships</caption><thead><tr><th>Identity cluster</th><th>Device</th></tr></thead>
+        {/* Keyboard users must be able to scroll the membership table. */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+        <div class="report-table-scroll" role="region" aria-label="Identity memberships" tabIndex={0}>
+        <table class="report-table"><caption>Identity memberships</caption><thead><tr><th>Identity cluster</th><th>Device</th></tr></thead>
           <tbody><For each={identities()}>{(edge) => <tr><td>{labels().get(edge.source) ?? edge.source}</td>
             <td>{labels().get(edge.target) ?? edge.target}</td></tr>}</For></tbody></table>
+        </div>
       </Show>
       <Show when={data().nodes.length === 0}><p>No stream projection is available yet.</p></Show>
     </>}</Show>
