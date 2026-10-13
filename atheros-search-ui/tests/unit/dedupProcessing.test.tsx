@@ -67,6 +67,45 @@ describe('DQ beta processing', () => {
     );
   });
 
+  it('retries a lost admission after a completed run with the new invocation identity', async () => {
+    const completedRun = {
+      run_id: 'run-a',
+      processor_id: 'atheros.dedup',
+      processor_version: '0.1.0',
+      operation: 'prepare_candidates',
+      status: 'succeeded',
+      state_revision: 4,
+      execution_mode: 'shadow' as const,
+      projection_applied: false,
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    const submit = vi
+      .spyOn(api, 'admitDedupRun')
+      .mockResolvedValueOnce(completedRun)
+      .mockRejectedValue(new Error('Unavailable'));
+    vi.spyOn(api, 'dedupRun').mockResolvedValue(completedRun);
+    const view = render(() => <DedupProcessing />);
+    fireEvent.input(view.getByLabelText('Approved policy version'), {
+      target: { value: 'policy-1' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Prepare candidates' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(view.getByRole('button', { name: 'Prepare candidates' }));
+    await waitFor(() =>
+      expect(view.getByRole('alert')).toHaveTextContent('Unavailable'),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Prepare candidates' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(3));
+
+    expect(submit.mock.calls[1]![0].idempotency_key).not.toBe(
+      submit.mock.calls[0]![0].idempotency_key,
+    );
+    expect(submit.mock.calls[2]![0].idempotency_key).toBe(
+      submit.mock.calls[1]![0].idempotency_key,
+    );
+  });
+
   it('retains admitted status when polling fails and offers a status retry', async () => {
     const run = {
       run_id: 'run-1',

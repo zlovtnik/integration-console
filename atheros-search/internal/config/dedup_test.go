@@ -32,7 +32,15 @@ func TestDedupDisabledByDefaultAndEnabledRequiresAuthenticatedPrerequisites(t *t
 }
 
 func TestDedupRejectsAmbiguousManagerURLs(t *testing.T) {
-	for _, managerURL := range []string{"http://user:password@manager", "https://manager?token=secret", "https://manager/api", "https://manager#fragment", "file:///tmp/run"} {
+	for _, managerURL := range []string{
+		"http://user:password@manager",
+		"https://manager?token=secret",
+		"https://manager?",
+		"https://manager/api",
+		"https://manager#fragment",
+		"https://manager#",
+		"file:///tmp/run",
+	} {
 		err := validateDQ(Config{DQEnabled: true, DQManagerURL: managerURL})
 		require.ErrorContains(t, err, "ATHSEARCH_DQ_MANAGER_URL")
 	}

@@ -12,7 +12,7 @@ func validateDQ(cfg Config) error {
 		return nil
 	}
 	parsed, err := url.Parse(cfg.DQManagerURL)
-	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" && parsed.Path != "/" || parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || strings.HasSuffix(cfg.DQManagerURL, "#") || parsed.Path != "" && parsed.Path != "/" || parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return errors.New("ATHSEARCH_DQ_MANAGER_URL must be an absolute HTTP(S) origin without credentials")
 	}
 	if cfg.DQServiceToken == "" || strings.ContainsAny(cfg.DQServiceToken, "\r\n\x00") || cfg.DQInstallationID == "" || cfg.DQNamespace == "" {

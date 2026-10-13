@@ -18,7 +18,9 @@ export function useDedupRun() {
   const [statusError, setStatusError] = createSignal('');
   let active = true;
   let controller: AbortController | undefined;
-  let invocation: { fingerprint: string; key: string } | undefined;
+  let invocation:
+    | { fingerprint: string; key: string; runId?: string }
+    | undefined;
   const [run, { refetch, mutate }] = createResource<
     DedupRun | undefined,
     string
@@ -54,10 +56,13 @@ export function useDedupRun() {
   async function submit(request: Omit<DedupRunRequest, 'idempotency_key'>) {
     if (submitting()) return;
     const fingerprint = JSON.stringify(request);
+    const currentRun = run();
     if (
       !invocation ||
       invocation.fingerprint !== fingerprint ||
-      (run() && dedupRunTerminal(run()!.status))
+      (currentRun &&
+        invocation.runId === currentRun.run_id &&
+        dedupRunTerminal(currentRun.status))
     ) {
       invocation = { fingerprint, key: crypto.randomUUID() };
     }
@@ -71,6 +76,7 @@ export function useDedupRun() {
         controller.signal,
       );
       if (!active) return;
+      invocation.runId = admitted.run_id;
       mutate(admitted);
       setRunId(admitted.run_id);
     } catch (error) {
