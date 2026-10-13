@@ -20,6 +20,7 @@ func TestPackageBoundaries(t *testing.T) {
 	allowed := map[string][]string{
 		"apperror": {}, "queryscope": {}, "reportmeta": {},
 		"assets":     {"apperror", "queryscope"},
+		"dedup":      {"apperror"},
 		"reporting":  {"apperror", "queryscope", "reportmeta", "db", "metrics"},
 		"savedviews": {"apperror", "reporting", "db"},
 		"search":     {"apperror", "queryscope", "reportmeta", "reporting", "db", "embed", "config", "metrics"},

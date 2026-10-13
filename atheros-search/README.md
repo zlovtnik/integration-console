@@ -27,6 +27,33 @@ there is no Rails Search console.
 The service does not apply DDL. Canonical schema lives in
 [`sql/postgres/atheros_search`](../../../sql/postgres/atheros_search/).
 
+## Opt-in DQ dedup processing
+
+`POST /v1/dedup/runs` delegates candidate preparation or recorded-decision
+reconciliation to the [DQ manager](../../../services/dq/README.md).
+`GET /v1/dedup/runs/{run_id}` reads authoritative run status. These additive
+routes require the existing API authentication and operator/admin roles for
+submission; viewers may inspect authorized runs. Existing human merge decisions
+and their responses are unchanged. Run completion does not imply projection
+application; `projection_applied` reports that separately.
+
+The POST body contains `operation` (`prepare_candidates` or
+`reconcile_decision`), `authorized_scope`, `policy_version`, `max_candidates`
+(1..1000), and `idempotency_key`; optional fields are `processor_version`,
+`snapshot_revision`, and `candidate_id` (required for reconciliation). Execution
+mode is selected by backend scope policy. The client caps control responses at
+64 KiB, applies a bounded request deadline, disables redirects, and sanitizes
+upstream errors. It never reads DQ tables or applies proposals.
+
+`ATHSEARCH_DQ_ENABLED` defaults to `false`. Enabling requires
+`ATHSEARCH_DQ_MANAGER_URL` (HTTP(S) origin), `ATHSEARCH_DQ_SERVICE_TOKEN`
+(server-only delegated identity), `ATHSEARCH_DQ_INSTALLATION_ID`, and
+`ATHSEARCH_DQ_NAMESPACE`. `ATHSEARCH_DQ_TIMEOUT_SECONDS` defaults to 5 and must
+be between 1 and 30. The delegated identity must have exactly the intended DQ
+installation, namespace, processor and location grants. Octopus independently
+enforces beta and application policy. Configure these prerequisites through the
+reviewed production render before enabling the feature.
+
 ## Database and readiness
 
 Database settings:

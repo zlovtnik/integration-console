@@ -16,6 +16,7 @@ import (
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/auth"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/config"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/dedup"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/etlhealth"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/health"
@@ -198,7 +199,8 @@ func Run() error {
 		return fmt.Errorf("start grpc server: %w", err)
 	}
 	defer grpcServer.Stop()
-	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m, WirelessProjection: cfg.WirelessProjection}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
+	dedupService := dedup.New(dedup.Options{Enabled: cfg.DQEnabled, ManagerURL: cfg.DQManagerURL, ServiceToken: cfg.DQServiceToken, InstallationID: cfg.DQInstallationID, Namespace: cfg.DQNamespace, Timeout: cfg.DQTimeout})
+	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m, WirelessProjection: cfg.WirelessProjection}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}, Dedup: dedupService}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
 	if err != nil {
 		return fmt.Errorf("start http gateway: %w", err)
 	}

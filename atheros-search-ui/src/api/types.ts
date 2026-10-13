@@ -387,7 +387,13 @@ export interface InvestigationResponse {
   anchor: { kind: string; id: string };
   nodes: GraphNode[];
   links: InvestigationLink[];
-  roster: { mac: string; name: string; first_observed: string; last_observed: string; record_count: number }[];
+  roster: {
+    mac: string;
+    name: string;
+    first_observed: string;
+    last_observed: string;
+    record_count: number;
+  }[];
   evidence: InvestigationEvidence[];
   evidence_page: number;
   evidence_page_size: number;
@@ -727,4 +733,29 @@ export function isSearchMode(value: unknown): value is SearchMode {
   return (
     typeof value === 'string' && SEARCH_MODES.includes(value as SearchMode)
   );
+}
+export interface DedupRunRequest {
+  operation: 'prepare_candidates' | 'reconcile_decision';
+  processor_version?: string;
+  authorized_scope: string;
+  snapshot_revision?: string;
+  policy_version: string;
+  max_candidates: number;
+  candidate_id?: string;
+  idempotency_key: string;
+}
+
+export interface DedupRun {
+  run_id: string;
+  processor_id: string;
+  processor_version: string;
+  operation: string;
+  status: string;
+  state_revision: number;
+  execution_mode: 'shadow' | 'enabled';
+  projection_applied: boolean;
+  created_at: string;
+  completed_at?: string;
+  error_code?: string;
+  sanitized_error?: string;
 }

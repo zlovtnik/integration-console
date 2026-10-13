@@ -5,6 +5,8 @@ import { isRfc3339 } from '~/utils/timestamp';
 import type {
   ActivityBucket,
   Communication,
+  DedupRun,
+  DedupRunRequest,
   EmbeddingWork,
   ETLHealth,
   ExplainResponse,
@@ -1136,4 +1138,18 @@ export const api = {
 
   healthz: (signal?: AbortSignal) =>
     request<{ status: string }>('/v1/healthz', {}, signal, 3_000),
+
+  admitDedupRun: (body: DedupRunRequest, signal?: AbortSignal) =>
+    request<DedupRun>(
+      '/v1/dedup/runs',
+      { method: 'POST', body: JSON.stringify(body) },
+      signal,
+    ),
+
+  dedupRun: (runId: string, signal?: AbortSignal) =>
+    request<DedupRun>(
+      `/v1/dedup/runs/${encodeURIComponent(runId)}`,
+      {},
+      signal,
+    ),
 };
