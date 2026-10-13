@@ -77,6 +77,12 @@ type Config struct {
 	WorkerPollInterval            time.Duration
 	WorkerID                      string
 	WSEnabled                     bool
+	DQEnabled                     bool
+	DQManagerURL                  string
+	DQServiceToken                string
+	DQInstallationID              string
+	DQNamespace                   string
+	DQTimeout                     time.Duration
 }
 
 func Load() (Config, error) {
@@ -130,8 +136,17 @@ func Load() (Config, error) {
 		WorkerPollInterval:            time.Duration(envInt("ATHSEARCH_POLL_INTERVAL_MS", 1000)) * time.Millisecond,
 		WorkerID:                      envString("ATHSEARCH_WORKER_ID", "worker-1"),
 		WSEnabled:                     envBool("ATHSEARCH_WS_ENABLED", false),
+		DQEnabled:                     envBool("ATHSEARCH_DQ_ENABLED", false),
+		DQManagerURL:                  strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_MANAGER_URL")),
+		DQServiceToken:                strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_SERVICE_TOKEN")),
+		DQInstallationID:              strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_INSTALLATION_ID")),
+		DQNamespace:                   strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_NAMESPACE")),
+		DQTimeout:                     time.Duration(envInt("ATHSEARCH_DQ_TIMEOUT_SECONDS", 5)) * time.Second,
 	}
 
+	if err := validateDQ(cfg); err != nil {
+		return cfg, err
+	}
 	if err := validate(cfg); err != nil {
 		return cfg, err
 	}

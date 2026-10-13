@@ -53,8 +53,19 @@ The UI uses these endpoints (snake_case JSON, RFC 3339 timestamps):
 | `POST` | `/v1/inventory` | Inventory graph and dedup queue |
 | `GET` | `/v1/inventory/merge-candidates/{candidate_id}` | Merge candidate detail |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Merge, not-a-match, needs-more-data |
+| `POST` | `/v1/dedup/runs` | Explicit opt-in DQ candidate preparation |
+| `GET` | `/v1/dedup/runs/{run_id}` | DQ processing status and projection application |
 
 Types live in `src/api/types.ts`. The HTTP client is `src/api/client.ts`.
+
+Set `VITE_DQ_BETA_ENABLED=true` to show the DQ processing panel in the dedup
+queue. It is disabled by default and never starts a run on page load or decision
+submission. An operator enters an authorized location and approved policy before
+requesting candidate preparation. Admission retries reuse the same idempotency
+identity, and status polling stops at completion or an error. The panel keeps
+"decision recorded", "run completed", and "projection applied" distinct.
+The backend independently enforces access and beta policy. DQ service credentials
+belong on the API server and must never enter a `VITE_*` variable.
 
 ### Merge decisions are final
 

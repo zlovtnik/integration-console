@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/assets"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/dedup"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/reporting"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/savedviews"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search"
@@ -41,9 +42,15 @@ type SavedViewService interface {
 	DeleteSavedView(context.Context, string, string) error
 }
 
+type DedupService interface {
+	Admit(context.Context, dedup.Request) (*dedup.Run, error)
+	Run(context.Context, string) (*dedup.Run, error)
+}
+
 type Services struct {
 	Search     SearchService
 	Reporting  ReportingService
 	Assets     AssetService
 	SavedViews SavedViewService
+	Dedup      DedupService
 }

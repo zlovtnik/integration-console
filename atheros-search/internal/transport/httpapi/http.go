@@ -105,6 +105,9 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc Servi
 	if err := registerSavedViews(mux, tokenAuth, svc.SavedViews, logger); err != nil {
 		return nil, err
 	}
+	if err := registerDedupRoutes(mux, tokenAuth, svc.Dedup); err != nil {
+		return nil, err
+	}
 	if err := registerHealthRoutes(mux, tokenAuth, readiness, healthMonitor, wsEnabled, allowedOrigins, logger); err != nil {
 		return nil, err
 	}

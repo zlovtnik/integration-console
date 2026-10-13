@@ -4,6 +4,7 @@ export const env = {
   keycloakUrl: import.meta.env.VITE_KEYCLOAK_URL?.trim() || '',
   keycloakRealm: import.meta.env.VITE_KEYCLOAK_REALM?.trim() || '',
   keycloakClientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID?.trim() || '',
+  dqBetaEnabled: import.meta.env.VITE_DQ_BETA_ENABLED === 'true',
 } as const;
 
 // Backend-only secrets such as API_TOKEN belong on the search API server, not in VITE_* frontend env.

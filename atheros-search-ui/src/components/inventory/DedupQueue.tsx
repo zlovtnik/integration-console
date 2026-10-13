@@ -10,6 +10,8 @@ import {
 import { AlertTriangle, Check, Clock3, Split } from 'lucide-solid';
 import type { InventoryNode, MergeDecision } from '~/api/types';
 import { ScoreBar } from '~/components/ScoreBar';
+import { env } from '~/env';
+import { DedupProcessing } from './DedupProcessing';
 import {
   inventoryDedupCandidates,
   inventoryDedupDevices,
@@ -201,6 +203,10 @@ export function DedupQueue(props: {
           </Show>
         </span>
       </div>
+
+      <Show when={env.dqBetaEnabled}>
+        <DedupProcessing />
+      </Show>
 
       <Show when={inventoryDedupError()}>
         <div class="inventory-error" role="alert">
