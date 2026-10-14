@@ -1,177 +1,117 @@
-# Atheros Search and Integration Console
+# Atheros Search
 
-This directory is the Atheros Search project: the query and embedding control
-plane for wireless audit data, plus its browser UI. It is not an independent
-collector, ingestion service, schema migrator, or source of durable wireless
-truth. Its boundaries are deliberate:
+Atheros Search is a wireless-audit investigation platform. It turns durable
+wireless and proxy evidence into an authenticated search experience for finding
+devices, explaining results, exploring network relationships, reviewing
+identity candidates, and monitoring the embedding pipeline behind semantic
+search.
 
-- producers publish audit events and work-discovery messages;
-- Octopus owns durable ingestion, evidence, projections, and alert derivation;
-- Atheros Search queries the search-facing PostgreSQL domain and, when enabled,
-  executes embedding jobs prepared by Octopus;
-- the Integration Console is the authenticated browser client for those APIs.
+The project is intentionally more than a search UI. It is a production-oriented
+control plane with explicit data ownership, a fenced vector-processing workflow,
+least-privilege PostgreSQL access, and a browser client that never bypasses the
+API boundary.
 
-The repository-level [system architecture](../../docs/architecture.md) is the
-canonical whole-stack description. This README is the entry point for the two
-deployable Atheros Search applications and their sources of truth.
+## What it delivers
 
-## Start here
+| Capability | What an operator can do | How the system keeps it credible |
+|---|---|---|
+| Search and explain | Find wireless events, devices, proxy events and blocked-host windows; inspect why a result ranked | Dense, sparse and hybrid retrieval run against search-facing PostgreSQL projections |
+| Network investigation | Explore devices, access points, clients, alerts and their observed relationships | The UI distinguishes frame evidence from verified connectivity and marks bounded results explicitly |
+| Asset and identity review | Browse inventory, inspect merge candidates and record final decisions | Candidate similarity is kept separate from confirmed identity; final decisions are role-protected and durable |
+| Semantic enrichment | Turn prepared document text into 768-dimension vectors | Workers claim jobs with a token and fence, call the embedding backend outside a transaction, then atomically write and complete the matching job |
+| Operational visibility | Inspect job state, workers, data freshness and semantic-backend health | Readiness, Prometheus metrics, ETL health, structured logs and OTLP tracing expose the real operating state |
 
-| If you need to... | Read or use... |
-|---|---|
-| Understand the two applications and their boundaries | This README |
-| Change Go APIs, workers, auth, configuration, or operations | [Atheros Search API README](atheros-search/README.md) |
-| Change SolidJS screens, browser auth, or UI API consumption | [Integration Console UI README](atheros-search-ui/README.md) |
-| Change package dependencies or shared API contracts | [package map](atheros-search/docs/package-map.md) and [contract inventory](atheros-search/docs/contracts.md) |
-| Change tables, grants, or schema checksums | [Atheros Search manifest](../../sql/postgres/atheros_search/manifest.yaml) and the schema executor workflow |
-| Change deployment, routing, image pins, or rollout order | [Atheros Search Kustomization](../../cyber-stack/base/atheros-search/) and the [GitOps guide](../../cyber-stack/README.md) |
-| Investigate reporting meanings or accuracy gaps | [reporting workmap](../../docs/atheros-reporting-workmap.md) and [reporting data contract](../../docs/atheros-reporting-data-contract.md) |
-| Respond to an embedding or search alert | [Atheros Search degraded-mode runbook](../../docs/runbooks/atheros-search-degraded.md) |
-
-## System map
+## Architecture
 
 ```mermaid
 flowchart LR
     producers[Proxy and Atheros Sensor]
     broker[Redpanda]
-    octopus[Octopus]
-    database[(PostgreSQL: atheros_search)]
-    api[Atheros Search API and workers]
+    octopus[Octopus coordinator]
+    database[(PostgreSQL)]
+    search[Atheros Search]
     embeddings[Embedding backend]
     ui[Integration Console]
     dq[DQ manager, optional]
 
     producers -->|audit events and work discovery| broker
     broker --> octopus
-    octopus -->|ingestion, evidence, projections, search documents and jobs| database
-    api -->|query, claim and fenced vector writes| database
-    api <-->|HTTP embedding requests| embeddings
-    ui -->|authenticated HTTP requests| api
-    api -->|opt-in dedup admission and status| dq
+    octopus -->|durable evidence, projections, documents and jobs| database
+    search -->|query, lease claims and vector writes| database
+    search <-->|embedding requests| embeddings
+    ui -->|authenticated API calls| search
+    search -->|dedup run admission and status| dq
 ```
 
-The database arrow from Octopus to `atheros_search` represents shared,
-table-granted access, not shared ownership. Octopus prepares search documents
-and embedding jobs; Atheros Search owns job claiming, embedding execution and
-atomic vector completion. Neither the UI nor the producers receive direct
-PostgreSQL access.
+Octopus is the system of record for ingestion, deduplication, evidence,
+projection maintenance and alert derivation. Atheros Search is deliberately not
+a second coordinator: it serves the public query surface and owns embedding-job
+execution. The browser consumes the API only. It never has database credentials,
+API secrets, or authority to make a server-side authorization decision.
 
-## The two applications
+## Engineering characteristics
 
-| Application | Implementation | Runtime responsibility | Does not own |
-|---|---|---|---|
-| [Atheros Search](atheros-search/) | Go HTTP/gRPC service | Search, graph, inventory, ETL health, saved views, embedding-job leasing and vector writes | Redpanda ingestion, durable projection maintenance, alert derivation, DDL |
-| [Integration Console](atheros-search-ui/) | SolidJS/Bun static web application | Authenticated search, explanation, graph and inventory workflows | Database access, API secrets, server-side authorization |
+### Clear data ownership
 
-The API exposes HTTP on port 8080, gRPC on port 50051, and Prometheus metrics
-on port 9090. The UI container serves static assets and reverse-proxies its
-`/v1/` calls to the API inside the cluster. The API remains the authorization
-boundary; browser roles do not replace server-side checks.
+The design prevents accidental split-brain coordination. Producers publish to
+Redpanda; Octopus makes the durable state and search projections; Atheros Search
+queries that state and completes only the worker lifecycle it owns. Canonical
+DDL and grants live outside the application in the
+[Atheros Search PostgreSQL manifest](../../sql/postgres/atheros_search/manifest.yaml).
+At startup, the API verifies the selected database, TLS configuration, vector
+capability and recorded schema checksum before serving traffic.
 
-## Runtime behaviour
+### Safe, retryable embedding work
 
-### Query path
+Embedding is an at-least-once workflow, not a best-effort background call.
+Workers commit token-and-fence lease ownership before external I/O, renew long
+leases, recover expired claims within a bound, and atomically persist the vector
+with terminal job state. A stale worker cannot complete a job it no longer owns.
+Interactive queries and bulk workers also use separate capacity and
+circuit-breaker lanes so enrichment load cannot silently consume all search
+capacity.
 
-The browser obtains a Keycloak access token when Keycloak is configured and
-sends it to the API. The API validates issuer, audience, signature and client
-roles before it executes dense, sparse, hybrid, graph, inventory, evidence or
-ETL-health queries. Static-token digest authentication is a mutually exclusive
-local-development option. The UI never contains the API token or DQ delegated
-identity.
+### Security and privacy by design
 
-Search reads the `atheros_search` domain through its dedicated runtime account.
-At startup it verifies the selected database, TLS settings, schema manifest
-checksum and vector readiness. The canonical manifests and grant templates are
-the schema source of truth; application code never applies DDL.
+Production API access uses RS256 Keycloak JWT validation with exact issuer and
+audience checks. Operator and admin actions are enforced by the API, not by the
+UI. The service avoids raw queries, tokens, session identifiers and full MAC
+addresses in ordinary logs and metrics; search analytics use hashed identifiers.
+See the [privacy boundary](../../docs/atheros-search-privacy.md) for the
+handling model.
 
-### Embedding path
+### Honest reporting semantics
 
-Octopus prepares active `search_documents` and `embedding_jobs`. Atheros Search
-does not process work until `ATHSEARCH_WORKER_ENABLED=true`. When enabled, its
-workers claim a lease with a token and fence, commit that claim before calling
-the embedding backend, and atomically write a vector and complete the matching
-fenced job. Lease renewal and bounded recovery make an interrupted worker safe
-to retry without giving a stale worker ownership.
+The product avoids presenting uncertain radio observations as facts. An access
+point association is observed frame evidence, not proof of a verified session.
+A similarity candidate is a pending review item, not a confirmed identity.
+The [reporting data contract](../../docs/atheros-reporting-data-contract.md)
+defines those distinctions and the [reporting workmap](../../docs/atheros-reporting-workmap.md)
+separates implemented behaviour from proposed improvements.
 
-The worker and interactive query lanes share the embedding backend but keep
-separate capacity and circuit-breaker state. The complete configuration,
-response compatibility and repair procedure live in the
-[API README](atheros-search/README.md#embedding-workers) and
-[repair CLI guide](atheros-search/scripts/README.md).
+## Product surfaces
 
-### Optional DQ path
-
-The additive dedup routes are disabled unless `ATHSEARCH_DQ_ENABLED=true` and
-their required service configuration is present. Atheros Search delegates only
-admission and status to the [DQ manager](../../services/dq/README.md); it does
-not read DQ tables, run processors, or apply a proposal. The UI exposes the
-control only behind `VITE_DQ_BETA_ENABLED=true`, while the API independently
-enforces the feature and operator/admin authorization.
-
-## Ownership and data semantics
-
-| Concern | Authority | Important constraint |
+| Surface | Technology | Responsibility |
 |---|---|---|
-| Event ingestion, dedupe, projection maintenance and alerts | Octopus | Atheros Search must not become a second coordinator |
-| Search documents and embedding-job preparation | Octopus through canonical schema contracts | Preparation is separate from vector execution |
-| Job claims, leases, vector writes and terminal worker state | Atheros Search | Every worker mutation remains token- and fence-guarded |
-| Search-facing tables and grants | `sql/postgres/atheros_search` manifests | Only the provisioning schema executor applies DDL |
-| Search, graph, inventory and saved-view APIs | Atheros Search protobuf/HTTP contracts | Producer and UI compatibility checks are required for contract changes |
-| Browser presentation and user interactions | Integration Console | It consumes APIs only; it has no database fallback |
-| Reporting language and relationship meanings | Reporting data contract | Observed MACs, AP context, pending candidates and confirmed identities are distinct |
+| [Atheros Search API](atheros-search/) | Go, HTTP, gRPC, PostgreSQL/pgvector | Search, explain, graph, inventory, ETL health, saved views, embedding claims and vector writes |
+| [Integration Console](atheros-search-ui/) | SolidJS, Bun, Vite, Keycloak | Authenticated Search, Explain, Graph and Inventory workflows |
+| Optional DQ integration | Go HTTP client and [DQ manager](../../services/dq/README.md) | Explicit dedup-run admission and status; disabled until both API and policy gates are enabled |
 
-The reporting workmap labels proposed changes separately from current behaviour.
-An observed AP association is frame evidence, not verified connectivity, and a
-similarity candidate is a pending review item, not a confirmed identity.
+The API listens on HTTP 8080, gRPC 50051 and Prometheus 9090. The UI is a
+static application that reverse-proxies `/v1/` to the in-cluster API, preserving
+a single browser-facing API origin while keeping the API as the policy boundary.
 
-## Repository map
+## Technology and delivery
 
-```text
-apps/integration-console/
-|- README.md                     # This project map
-|- atheros-search/               # Go API, workers, protobuf contract and tests
-|  |- cmd/server/                # Service entry point
-|  |- cmd/embedding-job-repair/  # Operator repair CLI
-|  |- internal/                  # Feature, transport, auth, DB and worker packages
-|  |- docs/                      # Package, contract and quality rules
-|  |- proto/                     # Versioned public gRPC/protobuf contract
-|  |- scripts/                   # Protobuf and repair tooling
-|  `- testdata/contracts/        # Shared synthetic UI compatibility fixtures
-`- atheros-search-ui/            # SolidJS browser application
-   |- src/api/                   # Typed API client and response validation
-   |- src/auth/                  # Keycloak session and safe return-path handling
-   |- src/pages/                 # Search, Explain, Graph and Inventory views
-   `- tests/                     # Unit, accessibility and browser tests
-```
+| Area | Choices |
+|---|---|
+| API and workers | Go, pgx, gRPC, Protobuf, OpenTelemetry, Prometheus |
+| UI | SolidJS, TypeScript, Bun, Vite, D3, Keycloak |
+| Durable data | PostgreSQL, pgvector, table-level grants, manifest checksum verification |
+| Event plane | Redpanda and the Scala/Cats Effect/FS2 Octopus coordinator |
+| Delivery | Docker images, Kustomize, Argo CD, digest-pinned production promotion |
 
-## Development and verification
-
-Run focused checks from the repository root:
-
-```bash
-make atheros-search-test
-make atheros-search-quality
-make atheros-search-ui-check
-```
-
-The quality command includes Go formatting, vet, race tests, lint, package
-boundaries, protobuf comparison and shared-fixture checks. UI checks run the
-full UI test suite and production build. The required database and stack
-contract checks need an absolute repository path and their documented local
-dependencies:
-
-```bash
-make atheros-search-stack-contract
-make atheros-search-db-contract
-```
-
-Use [Atheros Search maintenance rules](atheros-search/docs/quality.md) for
-the exact prerequisites and command scope. Run `make docs-check` after README
-or other Markdown changes.
-
-## Delivery and operations
-
-The two images and their in-cluster services are declared together in
+The reviewed Kubernetes definition for both workloads lives in
 [`cyber-stack/base/atheros-search`](../../cyber-stack/base/atheros-search/).
 Production image digests and environment-specific API settings are reviewed in
 [`cyber-stack/matrix/prod/app-stack`](../../cyber-stack/matrix/prod/app-stack/).
@@ -179,14 +119,47 @@ Argo CD reconciles that desired state; changes to configuration, routing,
 network policy, scaling and image promotion are Git changes, not interactive
 cluster edits.
 
-| Endpoint | Meaning |
-|---|---|
-| `GET /healthz` | API process is alive |
-| `GET /readyz` | Database, schema and vector readiness gate has passed |
-| `GET /v1/etl/health` | Cached worker/job and semantic embedding health snapshot |
+## Repository map
 
-For alert response, check the [degraded-mode runbook](../../docs/runbooks/atheros-search-degraded.md)
-before changing a worker, backend or database setting. Operational logs and
-metrics must not include raw queries, tokens, full MACs or user identifiers;
-the [privacy policy](../../docs/atheros-search-privacy.md) defines the data
-handling boundary.
+```text
+atheros-search/
+|- atheros-search/               # Go API, background workers and public protobuf contract
+|  |- cmd/server/                # Service entry point
+|  |- cmd/embedding-job-repair/  # Bounded operator repair CLI
+|  |- internal/                  # Search, reporting, workers, auth, database and transport packages
+|  |- docs/                      # Contract, package-boundary and quality rules
+|  |- proto/                     # Versioned gRPC/protobuf API definition
+|  `- testdata/contracts/        # Synthetic compatibility fixtures shared with the UI
+`- atheros-search-ui/            # SolidJS application
+   |- src/api/                   # Typed API client and runtime response validation
+   |- src/auth/                  # Keycloak session and safe return-path handling
+   |- src/pages/                 # Search, Explain, Graph and Inventory views
+   `- tests/                     # Unit, accessibility and browser coverage
+```
+
+## Quality gates
+
+The project validates the boundaries that matter as much as happy-path output:
+
+```bash
+make atheros-search-test          # Go unit and integration-style tests
+make atheros-search-quality       # Format, vet, race, lint, boundaries, Protobuf and fixtures
+make atheros-search-ui-check      # UI tests and production build
+make atheros-search-stack-contract
+make atheros-search-db-contract
+```
+
+The database and stack-contract checks exercise canonical manifests, runtime
+grants and cross-project contracts. The exact requirements are documented in
+the [Atheros Search quality guide](atheros-search/docs/quality.md).
+
+## Technical references
+
+| Topic | Reference |
+|---|---|
+| API routes, environment, workers and repair | [Atheros Search API README](atheros-search/README.md) |
+| UI development and browser/API contract | [Integration Console UI README](atheros-search-ui/README.md) |
+| Package and import boundaries | [package map](atheros-search/docs/package-map.md) |
+| Producer/consumer contracts | [contract inventory](atheros-search/docs/contracts.md) |
+| Platform architecture and ownership | [system architecture](../../docs/architecture.md) |
+| Degradation response | [Atheros Search runbook](../../docs/runbooks/atheros-search-degraded.md) |

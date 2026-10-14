@@ -6,9 +6,8 @@ embedding job processing through an opt-in worker pool. Octopus owns durable
 ingestion, search-document/job preparation, maintained projections and alert
 derivation.
 
-For the two-application system map, ownership boundaries, repository layout
-and delivery path, start with the parent
-[Atheros Search and Integration Console README](../README.md).
+For the product architecture, engineering approach and repository map, see the
+[Atheros Search README](../README.md).
 
 The Integration Console is the SolidJS UI in
 [`apps/integration-console/atheros-search-ui`](../atheros-search-ui/);

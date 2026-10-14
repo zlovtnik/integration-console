@@ -4,8 +4,8 @@ SolidJS/Bun UI for Atheros Search. It talks to the Go service in
 [`../atheros-search`](../atheros-search/) over HTTP; it does not touch
 PostgreSQL directly.
 
-For the complete two-application system map, data ownership and delivery
-boundary, see the parent [Atheros Search and Integration Console README](../README.md).
+For the product architecture, engineering approach and repository map, see the
+[Atheros Search README](../README.md).
 
 ## Audience
 
