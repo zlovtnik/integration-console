@@ -1,15 +1,36 @@
 # Atheros Search
 
 Atheros Search is a wireless-audit investigation platform. It turns durable
-wireless and proxy evidence into an authenticated search experience for finding
-devices, explaining results, exploring network relationships, reviewing
-identity candidates, and monitoring the embedding pipeline behind semantic
-search.
+wireless and proxy observations into an authenticated search experience for
+reviewing records, explaining results, exploring observed relationships, and
+monitoring embedding work. An observed identifier, relationship or similarity
+candidate does not establish a physical device identity or a current connection.
 
-The project is intentionally more than a search UI. It is a production-oriented
-control plane with explicit data ownership, a fenced vector-processing workflow,
+This is an independently maintained engineering project with explicit data
+ownership, a fenced vector-processing workflow,
 least-privilege PostgreSQL access, and a browser client that never bypasses the
 API boundary.
+
+The public demonstration uses synthetic records. A judged query set and measured
+relevance, latency, and storage results have not been published. The benchmark
+sources alone do not establish retrieval quality or production capacity.
+
+## Workspace prerequisite
+
+The runtime depends on the canonical schemas, grants, and Octopus projections
+in the [ssl-proxy parent repository](https://github.com/zlovtnik/ssl-proxy).
+For the documented build and integration checks, clone that workspace:
+
+```bash
+git clone --recurse-submodules https://github.com/zlovtnik/ssl-proxy.git
+cd ssl-proxy
+make atheros-search-test
+```
+
+Run the root `make` commands from that workspace root. Commands documented in
+this README use their indicated `atheros-search/` or `atheros-search-ui/`
+directory. This checkout does not provision a standalone database or complete
+platform.
 
 ## What it delivers
 
@@ -89,7 +110,7 @@ The [reporting data contract](../../docs/atheros-reporting-data-contract.md)
 defines those distinctions and the [reporting workmap](../../docs/atheros-reporting-workmap.md)
 separates implemented behaviour from proposed improvements.
 
-## Product surfaces
+## Project surfaces
 
 | Surface | Technology | Responsibility |
 |---|---|---|
