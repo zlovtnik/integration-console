@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => {
       host: '127.0.0.1',
       port: 5173,
       strictPort: true,
+      proxy: {
+        '/dq-ui/': env.ATHSEARCH_DEV_API_ORIGIN || 'http://127.0.0.1:8080',
+        '/v1/dq/': env.ATHSEARCH_DEV_API_ORIGIN || 'http://127.0.0.1:8080',
+      },
     },
     preview: {
       port: 4173,

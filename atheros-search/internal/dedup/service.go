@@ -53,6 +53,7 @@ type Options struct {
 	InstallationID string
 	Namespace      string
 	Timeout        time.Duration
+	RemoteOrigin   string
 }
 
 type Service struct {
@@ -134,6 +135,24 @@ func (s *Service) Run(ctx context.Context, runID string) (*Run, error) {
 }
 
 func (s *Service) request(ctx context.Context, method, path string, body []byte) (*Run, error) {
+	data, err := s.do(ctx, method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var run Run
+	if err := json.Unmarshal(data, &run); err != nil || !validID(run.RunID) || run.ProcessorID != "atheros.dedup" || run.InstallationID != s.options.InstallationID || run.Namespace != s.options.Namespace {
+		return nil, apperror.New(apperror.ErrUnavailable, "invalid DQ status response")
+	}
+	return &run, nil
+}
+
+func (s *Service) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	if !s.options.Enabled {
+		return nil, apperror.New(apperror.ErrForbidden, "DQ beta is disabled")
+	}
+	if len(body) > maxControlBytes {
+		return nil, apperror.Validationf("DQ metadata exceeds 64 KiB")
+	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(s.options.ManagerURL, "/")+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, apperror.New(apperror.ErrUnavailable, "DQ manager is unavailable")
@@ -161,6 +180,8 @@ func (s *Service) request(ctx context.Context, method, path string, body []byte)
 			return nil, apperror.New(apperror.ErrNotFound, "DQ run or processor version not found")
 		case http.StatusConflict:
 			return nil, apperror.New(apperror.ErrConflict, "DQ invocation identity conflicts with an existing run")
+		case http.StatusTooManyRequests:
+			return nil, apperror.New(apperror.ErrCapacity, "DQ admission capacity is exhausted")
 		default:
 			return nil, apperror.New(apperror.ErrUnavailable, "DQ manager is unavailable")
 		}
@@ -169,9 +190,8 @@ func (s *Service) request(ctx context.Context, method, path string, body []byte)
 	if err != nil || len(data) > maxControlBytes {
 		return nil, apperror.New(apperror.ErrUnavailable, "invalid DQ status response")
 	}
-	var run Run
-	if err := json.Unmarshal(data, &run); err != nil || !validID(run.RunID) || run.ProcessorID != "atheros.dedup" || run.InstallationID != s.options.InstallationID || run.Namespace != s.options.Namespace {
+	if !json.Valid(data) {
 		return nil, apperror.New(apperror.ErrUnavailable, "invalid DQ status response")
 	}
-	return &run, nil
+	return data, nil
 }

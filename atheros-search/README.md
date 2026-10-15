@@ -57,6 +57,47 @@ installation, namespace, processor and location grants. Octopus independently
 enforces beta and application policy. Configure these prerequisites through the
 reviewed production render before enabling the feature.
 
+### Embedded DQ workspace
+
+The authenticated `/dq/*` workspace reuses Inventory candidate review at `/dq`.
+Processor catalog, pinned invocations, runs and artifacts have direct links.
+Opening any view never admits work. Decisions still use Atheros's merge-decision
+API; Octopus discovers recorded decisions and owns reconciliation. Returning to
+review and explicit refresh reload the independently paginated candidate queue.
+Preparation polling distinguishes computation completion from projection application.
+
+`GET /v1/dq/context` exposes only runtime UI availability, beta availability,
+bridge version and `ATHSEARCH_DQ_REMOTE_ORIGIN` (empty by default). This origin
+must match the DQ manager's approved extension origin; HTTPS is required except
+for loopback development. Existing read roles can inspect context, processors,
+processor versions, runs, artifact metadata and authorized artifact access.
+Operator/admin roles are required for admission, cancellation and replay.
+The typed `/v1/dq` routes share the legacy DQ client, inject deployment scope
+and service identity, reject scope overrides and preserve capacity failures as 429.
+
+The backend serves public shell files through `/dq-ui/embedded.html` and
+`/dq-ui/assets/`. Only GET/HEAD are accepted; credentials, cookies, redirects,
+arbitrary paths and query strings are not forwarded. DQ is resolved per request.
+The independently built manager image includes the embedded bundle. The web
+proxy removes frame-denial headers only on this path, while the shell limits
+ancestors to the same origin and extensions retain their separate origin and
+`allow-scripts` sandbox.
+
+Bridge version 1 pins the frame window, same origin and a per-frame random
+channel. Requests contain `version`, `channel`, `type`, `request_id`, `operation`
+and `payload`. Approved operations are context, catalog, version, admit, run,
+cancel, replay, artifact, access and workspace navigation. Metadata is bounded
+at 64 KiB; duplicate IDs, unknown operations and credential fields are rejected.
+The host owns session refresh, aborts on identity changes, and removes workspace
+state and the frame when access ends. No bearer token crosses this bridge.
+
+For local development, run the DQ UI build and manager, configure Atheros's
+existing DQ settings, then run the sibling UI dev server. Its DQ routes proxy
+to `ATHSEARCH_DEV_API_ORIGIN` (default `http://127.0.0.1:8080`). Runtime context
+replaces embedded build-time settings. The legacy Inventory processing panel
+retains its existing build-time beta flag. Production DQ remains disabled and
+excluded from the environment slices pending a separate reviewed promotion.
+
 ## Database and readiness
 
 Database settings:

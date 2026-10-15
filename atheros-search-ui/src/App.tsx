@@ -8,6 +8,7 @@ const CallbackPage = lazy(() => import('~/pages/CallbackPage'));
 const ExplainPage = lazy(() => import('~/pages/ExplainPage'));
 const GraphPage = lazy(() => import('~/pages/GraphPage'));
 const InventoryPage = lazy(() => import('~/pages/InventoryPage'));
+const DQPage = lazy(() => import('~/pages/DQPage'));
 const NotFoundPage = lazy(() => import('~/pages/NotFoundPage'));
 
 const AuthenticatedAppShell: ParentComponent = (props) => (
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/" component={SearchPage} />
         <Route path="/graph" component={GraphPage} />
         <Route path="/inventory" component={InventoryPage} />
+        <Route path="/dq/*" component={DQPage} />
         <Route path="/explain/:sourceKey" component={ExplainPage} />
       </Route>
       <Route component={AppShell}>

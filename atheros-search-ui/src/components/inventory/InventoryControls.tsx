@@ -15,6 +15,7 @@ function list(value: string) {
     .filter(Boolean);
 }
 export function InventoryControls(props: {
+  reviewOnly?: boolean;
   onRefresh: () => void;
   onResetView: () => void;
 }) {
@@ -104,28 +105,30 @@ export function InventoryControls(props: {
         </label>
       </div>
       <div class="report-toolbar">
-        <fieldset class="segmented-control" aria-label="Inventory view">
-          <legend class="sr-only">Inventory view</legend>
-          <For each={['table', 'graph', 'dedup_queue'] as const}>
-            {(view) => (
-              <label class="seg-option">
-                <input
-                  type="radio"
-                  name="inventory-view"
-                  checked={inventoryViewMode() === view}
-                  onChange={() => setInventoryViewMode(view)}
-                />
-                <span>
-                  {view === 'dedup_queue'
-                    ? 'Identity review'
-                    : view === 'table'
-                      ? 'Table'
-                      : 'Graph'}
-                </span>
-              </label>
-            )}
-          </For>
-        </fieldset>
+        <Show when={!props.reviewOnly}>
+          <fieldset class="segmented-control" aria-label="Inventory view">
+            <legend class="sr-only">Inventory view</legend>
+            <For each={['table', 'graph', 'dedup_queue'] as const}>
+              {(view) => (
+                <label class="seg-option">
+                  <input
+                    type="radio"
+                    name="inventory-view"
+                    checked={inventoryViewMode() === view}
+                    onChange={() => setInventoryViewMode(view)}
+                  />
+                  <span>
+                    {view === 'dedup_queue'
+                      ? 'Identity review'
+                      : view === 'table'
+                        ? 'Table'
+                        : 'Graph'}
+                  </span>
+                </label>
+              )}
+            </For>
+          </fieldset>
+        </Show>
         <Show when={inventoryViewMode() === 'graph'}>
           <label class="field">
             <span>Graph relationships</span>

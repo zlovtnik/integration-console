@@ -29,6 +29,17 @@ export function TopNav() {
         <ul role="list" class="nav-links">
           <li>
             <A
+              href="/dq"
+              class="nav-link"
+              aria-current={
+                location.pathname.startsWith('/dq') ? 'page' : undefined
+              }
+            >
+              DQ
+            </A>
+          </li>
+          <li>
+            <A
               href={reportLink('/', location.pathname, location.search)}
               class="nav-link"
               aria-current={location.pathname === '/' ? 'page' : undefined}

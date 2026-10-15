@@ -8,6 +8,12 @@ import (
 )
 
 func validateDQ(cfg Config) error {
+	if cfg.DQRemoteOrigin != "" {
+		u, err := url.Parse(cfg.DQRemoteOrigin)
+		if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || strings.ContainsAny(cfg.DQRemoteOrigin, " \t\r\n;#") || u.Scheme != "https" && (u.Scheme != "http" || u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1") {
+			return errors.New("ATHSEARCH_DQ_REMOTE_ORIGIN must be an HTTPS origin (loopback HTTP allowed)")
+		}
+	}
 	if !cfg.DQEnabled {
 		return nil
 	}

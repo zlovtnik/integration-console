@@ -290,3 +290,9 @@
     grid-template-columns: 1fr;
   }
 }
+.dq-frame {
+  width: 100%;
+  min-height: 75vh;
+  border: 0;
+  display: block;
+}

@@ -83,6 +83,7 @@ type Config struct {
 	DQInstallationID              string
 	DQNamespace                   string
 	DQTimeout                     time.Duration
+	DQRemoteOrigin                string
 }
 
 func Load() (Config, error) {
@@ -142,6 +143,7 @@ func Load() (Config, error) {
 		DQInstallationID:              strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_INSTALLATION_ID")),
 		DQNamespace:                   strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_NAMESPACE")),
 		DQTimeout:                     time.Duration(envInt("ATHSEARCH_DQ_TIMEOUT_SECONDS", 5)) * time.Second,
+		DQRemoteOrigin:                strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_REMOTE_ORIGIN")),
 	}
 
 	if err := validateDQ(cfg); err != nil {

@@ -60,6 +60,7 @@ function dedupRelationIndex() {
 }
 
 export function DedupQueue(props: {
+  embedded?: boolean;
   onSelect: (candidateId: string) => void;
   onDecision: (
     candidateId: string,
@@ -204,7 +205,7 @@ export function DedupQueue(props: {
         </span>
       </div>
 
-      <Show when={env.dqBetaEnabled}>
+      <Show when={env.dqBetaEnabled && !props.embedded}>
         <DedupProcessing />
       </Show>
 

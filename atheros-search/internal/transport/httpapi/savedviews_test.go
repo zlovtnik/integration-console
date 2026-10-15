@@ -301,8 +301,11 @@ func TestSavedViewErrorStatusMapping(t *testing.T) {
 
 // savedViewJWTAuth builds a JWT authenticator backed by an ephemeral JWKS
 // server and returns a bearer token for the given immutable subject.
-func savedViewJWTAuth(t *testing.T, subject, username string) (*auth.TokenAuth, string) {
+func savedViewJWTAuth(t *testing.T, subject, username string, roles ...string) (*auth.TokenAuth, string) {
 	t.Helper()
+	if len(roles) == 0 {
+		roles = []string{auth.RoleViewer}
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	keyID := "key-1"
@@ -329,7 +332,7 @@ func savedViewJWTAuth(t *testing.T, subject, username string) (*auth.TokenAuth, 
 		"sub":                subject,
 		"preferred_username": username,
 		"resource_access": map[string]any{
-			"atheros-search-ui": map[string]any{"roles": []string{auth.RoleViewer}},
+			"atheros-search-ui": map[string]any{"roles": roles},
 		},
 	}
 	return tokenAuth, signSavedViewJWT(t, key, keyID, claims)
