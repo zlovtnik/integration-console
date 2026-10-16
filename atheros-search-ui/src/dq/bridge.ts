@@ -125,13 +125,17 @@ export async function fetchDQ(
   call: Call,
   signal: AbortSignal,
 ): Promise<unknown> {
-  const response = await authenticatedFetch(env.apiBase + call.path, {
-    method: call.method,
-    headers: { 'Content-Type': 'application/json' },
-    body: call.body === undefined ? null : JSON.stringify(call.body),
-    redirect: 'error',
-    signal,
-  });
+  const response = await authenticatedFetch(
+    env.apiBase + call.path,
+    {
+      method: call.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: call.body === undefined ? null : JSON.stringify(call.body),
+      redirect: 'error',
+      signal,
+    },
+    { preserveForbidden: call.method === 'POST' },
+  );
   if (!response.ok)
     throw new Error(
       response.status === 429
@@ -170,25 +174,26 @@ export async function fetchDQ(
 export function hostBridge(options: {
   frame: () => Window | null;
   channel: string;
-  origin: string;
   navigate: (path: string) => void;
   ready: () => void;
   projection: () => void;
+  artifactAccess?: (url: string, artifactID: string) => void;
   request?: typeof fetchDQ;
 }) {
   const seen = new Set<string>();
   const pending = new Set<AbortController>();
+  const inFlight = new Set<string>();
   let disposed = false;
   const send = (value: object) => {
     if (!disposed && safeMetadata(value))
-      options.frame()?.postMessage(value, options.origin);
+      options.frame()?.postMessage(value, '*');
   };
   const receive = async (event: MessageEvent) => {
     if (
       disposed ||
       !options.frame() ||
       event.source !== options.frame() ||
-      event.origin !== options.origin ||
+      event.origin !== 'null' ||
       !safeMetadata(event.data)
     )
       return;
@@ -218,20 +223,37 @@ export function hostBridge(options: {
           ].includes(key),
       ) ||
       seen.has(message.request_id) ||
-      seen.size >= 4096 ||
       pending.size >= 32
     )
       return;
+    // Pending IDs stay pinned even when the completed-ID window rolls over.
+    if (seen.size >= 4096) {
+      const oldest = [...seen].find((id) => !inFlight.has(id));
+      if (oldest) seen.delete(oldest);
+    }
     seen.add(message.request_id);
-    const reply = (payload: unknown, error?: string) =>
-      send({
+    const reply = (payload: unknown, error?: string) => {
+      const response = {
         version: bridgeVersion,
         channel: options.channel,
         type: 'response',
         request_id: message.request_id,
         payload,
         error,
-      });
+      };
+      send(
+        safeMetadata(response)
+          ? response
+          : {
+              version: bridgeVersion,
+              channel: options.channel,
+              type: 'response',
+              request_id: message.request_id,
+              payload: null,
+              error: 'Invalid or oversized DQ response metadata.',
+            },
+      );
+    };
     if (message.operation === 'navigate') {
       if (
         Object.keys(message.payload).length !== 1 ||
@@ -250,6 +272,7 @@ export function hostBridge(options: {
       return;
     }
     const controller = new AbortController();
+    inFlight.add(message.request_id);
     pending.add(controller);
     const timer = window.setTimeout(() => controller.abort(), 10000);
     try {
@@ -259,6 +282,21 @@ export function hostBridge(options: {
       );
       if (controller.signal.aborted || disposed) return;
       if (message.operation === 'context') options.ready();
+      if (message.operation === 'access') {
+        const access = result as { download_url?: string; url?: string };
+        const url = new URL(access.download_url || access.url || '');
+        if (
+          url.username ||
+          url.password ||
+          (url.protocol !== 'https:' &&
+            !(
+              url.protocol === 'http:' &&
+              ['localhost', '127.0.0.1'].includes(url.hostname)
+            ))
+        )
+          throw new Error('Invalid artifact URL');
+        options.artifactAccess?.(url.toString(), message.payload.id);
+      }
       const run = result as {
         operation?: string;
         projection_applied?: boolean;
@@ -277,6 +315,7 @@ export function hostBridge(options: {
     } finally {
       window.clearTimeout(timer);
       pending.delete(controller);
+      inFlight.delete(message.request_id);
     }
   };
   return {
@@ -295,6 +334,7 @@ export function hostBridge(options: {
       for (const controller of pending) controller.abort();
       pending.clear();
       seen.clear();
+      inFlight.clear();
     },
   };
 }

@@ -159,13 +159,15 @@ export function InventoryControls(props: {
           >
             Refresh
           </button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            onClick={() => props.onResetView()}
-          >
-            Reset view
-          </button>
+          <Show when={!props.reviewOnly}>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onClick={() => props.onResetView()}
+            >
+              Reset view
+            </button>
+          </Show>
         </Show>
       </div>
       <details>

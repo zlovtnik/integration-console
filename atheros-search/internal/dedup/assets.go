@@ -50,6 +50,7 @@ func (s *Service) ServeAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; frame-src "+remote+"; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
 	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "no-store")

@@ -113,24 +113,28 @@ function DQFrame(props: {
   const [ready, setReady] = createSignal(false);
   const [failed, setFailed] = createSignal(false);
   const [src, setSrc] = createSignal('');
+  const [artifactURL, setArtifactURL] = createSignal('');
   let bridge: ReturnType<typeof hostBridge> | undefined;
   createEffect(() => {
     attempt();
     auditGeneration();
     setReady(false);
     setFailed(false);
+    setArtifactURL('');
     let handshakeComplete = false;
     const channel = crypto.randomUUID();
     bridge = hostBridge({
       frame: () => frame?.contentWindow ?? null,
       channel,
-      origin: window.location.origin,
       navigate: props.navigate,
       ready: () => {
         handshakeComplete = true;
         setReady(true);
       },
       projection: props.projection,
+      artifactAccess: (url, id) => {
+        if (props.path === '/dq/artifacts/' + id) setArtifactURL(url);
+      },
     });
     const active = bridge;
     const timer = window.setTimeout(() => {
@@ -149,10 +153,19 @@ function DQFrame(props: {
     });
   });
   createEffect(() => {
+    props.path;
+    setArtifactURL('');
     if (ready()) bridge?.route(props.path);
   });
   return (
     <section aria-label="DQ application">
+      <Show when={artifactURL()}>
+        <p>
+          <a href={artifactURL()} target="_blank" rel="noreferrer noopener">
+            Download authorized artifact
+          </a>
+        </p>
+      </Show>
       <Show when={!ready() && !failed()}>
         <p role="status">Loading DQ application...</p>
       </Show>
@@ -165,6 +178,7 @@ function DQFrame(props: {
       <Show when={src()}>
         <iframe
           title="DQ workspace"
+          sandbox="allow-scripts"
           src={src()}
           ref={frame}
           class="dq-frame"

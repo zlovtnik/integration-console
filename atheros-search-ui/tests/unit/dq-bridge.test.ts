@@ -14,7 +14,6 @@ function fixture(request = vi.fn().mockResolvedValue({ items: [] })) {
   const bridge = hostBridge({
     frame: () => frame,
     channel: 'channel-1',
-    origin: window.location.origin,
     navigate,
     ready,
     projection: vi.fn(),
@@ -23,7 +22,7 @@ function fixture(request = vi.fn().mockResolvedValue({ items: [] })) {
   const message = (
     overrides: Record<string, unknown> = {},
     source: Window = frame,
-    origin = window.location.origin,
+    origin = 'null',
   ) =>
     new MessageEvent('message', {
       source,
@@ -41,11 +40,35 @@ function fixture(request = vi.fn().mockResolvedValue({ items: [] })) {
   return { frame, navigate, ready, bridge, message, request };
 }
 describe('DQ host boundary', () => {
+  it('continues after the bounded replay window fills', async () => {
+    const f = fixture();
+    for (let i = 0; i < 4100; i++)
+      await f.bridge.receive(f.message({ request_id: `request-${i}` }));
+    expect(f.request).toHaveBeenCalledTimes(4100);
+    await f.bridge.receive(f.message({ request_id: 'request-4099' }));
+    expect(f.request).toHaveBeenCalledTimes(4100);
+    f.bridge.dispose();
+  });
+  it('replies explicitly when a valid payload overflows its envelope', async () => {
+    const payload = { data: 'x'.repeat(65510) };
+    expect(safeMetadata(payload)).toBe(true);
+    const f = fixture(vi.fn().mockResolvedValue(payload));
+    await f.bridge.receive(f.message());
+    expect(f.frame.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: null,
+        error: 'Invalid or oversized DQ response metadata.',
+      }),
+      '*',
+    );
+    f.bridge.dispose();
+  });
   it('rejects forged identities, origins, channels, IDs, credentials and oversized payloads', async () => {
     const f = fixture();
     for (const event of [
       f.message({}, window),
       f.message({}, f.frame, 'https://evil.test'),
+      f.message({}, f.frame, window.location.origin),
       f.message({ channel: 'other' }),
       f.message({ version: 2 }),
       f.message({ request_id: '../x' }),
@@ -72,7 +95,7 @@ describe('DQ host boundary', () => {
     expect(f.request).toHaveBeenCalledTimes(1);
     expect(f.frame.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ error: 'Unsupported DQ operation.' }),
-      window.location.origin,
+      '*',
     );
     f.bridge.dispose();
   });

@@ -83,8 +83,11 @@ proxy removes frame-denial headers only on this path, while the shell limits
 ancestors to the same origin and extensions retain their separate origin and
 `allow-scripts` sandbox.
 
-Bridge version 1 pins the frame window, same origin and a per-frame random
-channel. Requests contain `version`, `channel`, `type`, `request_id`, `operation`
+The shell uses an opaque-origin `allow-scripts` sandbox without same-origin
+privileges. Authorized artifact links open from Atheros with no opener. Public module assets
+allow credential-free CORS so they can load inside the sandbox.
+Bridge version 1 pins the frame window, opaque `null` origin and a per-frame random
+channel; the shell validates the parent's actual origin on replies. Requests contain `version`, `channel`, `type`, `request_id`, `operation`
 and `payload`. Approved operations are context, catalog, version, admit, run,
 cancel, replay, artifact, access and workspace navigation. Metadata is bounded
 at 64 KiB; duplicate IDs, unknown operations and credential fields are rejected.

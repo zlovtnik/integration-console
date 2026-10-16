@@ -55,6 +55,7 @@ async function embeddedAssets(page: Page) {
     );
     await route.fulfill({
       body,
+      headers: { 'Access-Control-Allow-Origin': '*' },
       contentType: path.endsWith('.js')
         ? 'text/javascript'
         : path.endsWith('.css')
@@ -63,6 +64,36 @@ async function embeddedAssets(page: Page) {
     });
   });
 }
+
+test('DQ menu retains Inventory filters and review has no inert reset control', async ({
+  page,
+}) => {
+  await mockApi(page, { inventory: () => mockInventorySimilarity });
+  await page.route('**/v1/dq/context', (route) =>
+    route.fulfill({ json: settings }),
+  );
+  await page.goto(
+    '/inventory?loc=lab&owner=security&sensor=sensor-a&tag=review&active=1&min=0.88&q=device',
+  );
+  await page.getByRole('link', { name: 'DQ', exact: true }).click();
+  await expect(
+    page.getByRole('region', { name: 'Candidate review' }),
+  ).toBeVisible();
+  const params = new URL(page.url()).searchParams;
+  for (const [key, value] of Object.entries({
+    loc: 'lab',
+    owner: 'security',
+    sensor: 'sensor-a',
+    tag: 'review',
+    active: '1',
+    min: '0.88',
+    q: 'device',
+  }))
+    expect(params.get(key)).toBe(value);
+  await expect(
+    page.getByRole('button', { name: 'Reset view', exact: true }),
+  ).toHaveCount(0);
+});
 
 test('DQ disabled and unavailable do not disrupt existing pages', async ({
   page,
@@ -96,14 +127,47 @@ test('independent shell supports invocation, status, direct links, history and s
   await mockApi(page);
   await embeddedAssets(page);
   await page.route('**/v1/dq/context', (route) =>
-    route.fulfill({ json: settings }),
+    route.fulfill({
+      json: {
+        ...settings,
+        approved_remote_origin: 'https://extensions.example.test',
+      },
+    }),
   );
   await page.route('**/v1/dq/processors', (route) =>
     route.fulfill({ json: { items: [manifest] } }),
   );
   await page.route('**/v1/dq/processor-versions/**', (route) =>
-    route.fulfill({ json: manifest }),
+    route.fulfill({
+      json: {
+        ...manifest,
+        ui_remote: {
+          immutable_url: `https://extensions.example.test/atheros.dedup/0.1.0/${'a'.repeat(64)}/index.html`,
+          bundle_digest: 'a'.repeat(64),
+          host_api_version: 'dq.host.v1',
+          run_inspector: true,
+        },
+      },
+    }),
   );
+  await page.route('https://extensions.example.test/**', async (route) => {
+    const module = new URL(route.request().url()).pathname.endsWith(
+      'remote.js',
+    );
+    const body = module
+      ? await readFile(
+          resolve(
+            process.cwd(),
+            '../../../services/dq/ui/remote-build/remote.js',
+          ),
+        )
+      : '<!doctype html><html><body><div id="remote-root"></div><script type="module" src="./remote.js"></script></body></html>';
+    await route.fulfill({
+      body,
+      contentType: module ? 'text/javascript' : 'text/html',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+    });
+  });
   let submissions = 0;
   let reads = 0;
   await page.route('**/v1/dq/runs', (route) => {
@@ -129,6 +193,19 @@ test('independent shell supports invocation, status, direct links, history and s
     frame.getByRole('heading', { name: 'Processors', exact: true }),
   ).toBeVisible();
   expect(submissions).toBe(0);
+  const shell = page
+    .frames()
+    .find((child) => child.url().includes('/dq-ui/embedded.html'))!;
+  expect(
+    await shell.evaluate(() => {
+      try {
+        void window.parent.document;
+        return false;
+      } catch {
+        return true;
+      }
+    }),
+  ).toBe(true);
   await expect(frame.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
   await frame.getByRole('button', { name: 'Open invocation' }).click();
   await expect(page).toHaveURL(
@@ -147,6 +224,9 @@ test('independent shell supports invocation, status, direct links, history and s
   await expect(
     frame.getByText('Run completed. Projection applied.'),
   ).toBeVisible({ timeout: 8000 });
+  await expect(
+    frame.getByText('Processor extension ready', { exact: true }),
+  ).toBeVisible();
   expect(submissions).toBe(1);
   await page.goBack();
   await expect(
@@ -303,8 +383,21 @@ test('shell failure has retry and artifact deep links authorize access explicitl
     .getByRole('button', { name: 'Authorize exact-version download' })
     .click();
   await expect(
-    frame.getByRole('link', { name: 'Download authorized artifact' }),
+    page.getByRole('link', { name: 'Download authorized artifact' }),
   ).toHaveAttribute('href', 'https://objects.example.test/a1?v=1');
+  await page
+    .context()
+    .route('https://objects.example.test/**', (route) =>
+      route.fulfill({ body: 'Authorized artifact', contentType: 'text/plain' }),
+    );
+  const popupPromise = page.waitForEvent('popup');
+  await page
+    .getByRole('link', { name: 'Download authorized artifact' })
+    .click();
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL('https://objects.example.test/a1?v=1');
+  expect(await popup.evaluate(() => window.opener)).toBeNull();
+  await popup.close();
   expect(access).toBe(1);
   await page.reload();
   await expect(

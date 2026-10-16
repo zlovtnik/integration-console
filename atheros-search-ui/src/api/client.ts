@@ -865,6 +865,7 @@ function abortSignalWithTimeout(
 export async function authenticatedFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
+  policy: { preserveForbidden?: boolean } = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   const token = await getAccessToken();
@@ -891,7 +892,11 @@ export async function authenticatedFetch(
 
   if (generation !== auditGeneration())
     throw new DOMException('Identity changed', 'AbortError');
-  if (response.status === 401 || response.status === 403) denyAuditAccess();
+  if (
+    response.status === 401 ||
+    (response.status === 403 && !policy.preserveForbidden)
+  )
+    denyAuditAccess();
   responseGenerations.set(response, generation);
   return response;
 }

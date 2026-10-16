@@ -31,6 +31,11 @@ func TestDedupDisabledByDefaultAndEnabledRequiresAuthenticatedPrerequisites(t *t
 	require.ErrorContains(t, err, "between 1 and 30")
 }
 
+func TestDisabledDQIgnoresStaleRemoteOrigin(t *testing.T) {
+	require.NoError(t, validateDQ(Config{DQRemoteOrigin: "not a valid origin"}))
+	require.ErrorContains(t, validateDQ(Config{DQEnabled: true, DQRemoteOrigin: "not a valid origin"}), "ATHSEARCH_DQ_REMOTE_ORIGIN")
+}
+
 func TestDedupRejectsAmbiguousManagerURLs(t *testing.T) {
 	for _, managerURL := range []string{
 		"http://user:password@manager",

@@ -3,6 +3,17 @@ const supported: Record<string, string[]> = {
   '/': [...shared, 'ssid', 'bssid', 'context', 'entity', 'tag'],
   '/graph': [...shared, 'ssid'],
   '/inventory': [...shared, 'owner', 'tag', 'active', 'preset'],
+  '/dq': [
+    ...shared,
+    'owner',
+    'tag',
+    'active',
+    'preset',
+    'min',
+    'q',
+    'limit',
+    'sort',
+  ],
 };
 
 export function reportLink(

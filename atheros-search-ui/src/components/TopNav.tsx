@@ -29,7 +29,7 @@ export function TopNav() {
         <ul role="list" class="nav-links">
           <li>
             <A
-              href="/dq"
+              href={reportLink('/dq', location.pathname, location.search)}
               class="nav-link"
               aria-current={
                 location.pathname.startsWith('/dq') ? 'page' : undefined
