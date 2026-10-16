@@ -37,7 +37,7 @@ function viewMode(value: string | undefined): InventoryViewMode {
   return value === 'dedup_queue' || value === 'graph' ? value : 'table';
 }
 
-export function useInventoryUrlSync() {
+export function useInventoryUrlSync(reviewOnly = false) {
   const [params, setParams] = useSearchParams();
   const [ready, setReady] = createSignal(false);
 
@@ -98,7 +98,7 @@ export function useInventoryUrlSync() {
           if (validBefore) nextFilters.observed_before = validBefore;
 
           setInventoryFilters(reconcile(nextFilters));
-          setInventoryViewMode(viewMode(first(params.view)));
+          setInventoryViewMode(reviewOnly ? 'dedup_queue' : viewMode(first(params.view)));
           setSelectedInventoryNodeId(first(params.node) ?? null);
           setReady(true);
         });

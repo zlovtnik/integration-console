@@ -51,6 +51,8 @@ func httpStatusFromError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, apperror.ErrForbidden):
 		return http.StatusForbidden
+	case errors.Is(err, apperror.ErrCapacity):
+		return http.StatusTooManyRequests
 	case errors.Is(err, apperror.ErrUnavailable):
 		return http.StatusServiceUnavailable
 	}
@@ -108,6 +110,9 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc Servi
 	if err := registerDedupRoutes(mux, tokenAuth, svc.Dedup); err != nil {
 		return nil, err
 	}
+	if err := registerDQRoutes(mux, tokenAuth, svc.DQ); err != nil {
+		return nil, err
+	}
 	if err := registerHealthRoutes(mux, tokenAuth, readiness, healthMonitor, wsEnabled, allowedOrigins, logger); err != nil {
 		return nil, err
 	}
@@ -115,9 +120,14 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc Servi
 	if err != nil {
 		return nil, fmt.Errorf("bind http server: %w", err)
 	}
+	root := http.NewServeMux()
+	root.Handle("/", mux)
+	if svc.DQ != nil {
+		root.HandleFunc("/dq-ui/", svc.DQ.ServeAssets)
+	}
 	server := &http.Server{
 		Addr:              listener.Addr().String(),
-		Handler:           otelhttp.NewHandler(corsMiddleware(mux, allowedOrigins), "atheros-search.http"),
+		Handler:           otelhttp.NewHandler(corsMiddleware(root, allowedOrigins), "atheros-search.http"),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

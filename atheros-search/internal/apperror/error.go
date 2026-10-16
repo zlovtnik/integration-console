@@ -13,6 +13,7 @@ var (
 	ErrConflict    = errors.New("conflict")
 	ErrForbidden   = errors.New("forbidden")
 	ErrUnavailable = errors.New("unavailable")
+	ErrCapacity    = errors.New("capacity exhausted")
 )
 
 type Error struct {

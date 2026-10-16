@@ -13,7 +13,7 @@ implementation; cross-stack source assertions have explicit build tags.
 | internal/search | Dense/sparse retrieval, fusion, suggestions, explain, record context; may consume reporting evidence |
 | internal/reporting | Graph, inventory, network, investigation and pairs; never imports Search |
 | internal/assets | Entity choices, annotations, merge decisions; apperror and queryscope |
-| internal/dedup | Opt-in DQ admission/status HTTP client; bounded metadata, delegated scoped identity, apperror; no SQL or coordinator ownership |
+| internal/dedup | Opt-in typed DQ workspace and legacy admission/status HTTP client, restricted public shell asset proxy; bounded metadata, delegated scoped identity, apperror; no SQL or coordinator ownership |
 | internal/savedviews | Validation, persistence, subject ownership, revisions; reporting filter validation |
 | internal/queryscope | Shared scoping, normalization and scan primitives; no features or transports |
 | internal/reportmeta | Report metadata and protobuf conversion; no features or transports |

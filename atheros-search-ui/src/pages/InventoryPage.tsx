@@ -11,7 +11,9 @@ import {
   startTransition,
 } from 'solid-js';
 import { AlertTriangle } from 'lucide-solid';
-import { DedupQueue } from '~/components/inventory/DedupQueue';
+import { DedupReview } from '~/components/inventory/DedupReview';
+import { useLocation, useNavigate } from '@solidjs/router';
+import { fetchDQ, type UIContext } from '~/dq/bridge';
 import { InventoryControls } from '~/components/inventory/InventoryControls';
 import { InventoryTable } from '~/components/inventory/InventoryTable';
 import { api } from '~/api/client';
@@ -72,6 +74,24 @@ function snapshotFilters(): InventoryFilters {
 }
 
 export default function InventoryPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const dqController = new AbortController();
+  const [dqContext] = createResource(async () => {
+    try {
+      return (await fetchDQ(
+        { path: '/v1/dq/context', method: 'GET' },
+        AbortSignal.any([dqController.signal, AbortSignal.timeout(10000)]),
+      )) as UIContext;
+    } catch {
+      return undefined;
+    }
+  });
+  createEffect(() => {
+    if (dqContext()?.enabled && inventoryViewMode() === 'dedup_queue')
+      navigate('/dq' + location.search, { replace: true });
+  });
+  onCleanup(() => dqController.abort());
   const [presenting, setPresenting] = createSignal(false);
   const [detailError, setDetailError] = createSignal('');
   let detailController: AbortController | undefined;
@@ -353,14 +373,11 @@ export default function InventoryPage() {
             </div>
           }
         >
-          <DedupQueue
-            onSelect={(candidateId) => setSelectedInventoryNodeId(candidateId)}
-            onDecision={handleDecision}
-          />
+          <DedupReview onDecision={handleDecision} />
         </Show>
       </Show>
 
-      <Show when={selected()}>
+      <Show when={inventoryViewMode() !== 'dedup_queue' && selected()}>
         {(node) => (
           <Show
             when={node().kind === 'merge_candidate'}

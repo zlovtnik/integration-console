@@ -78,7 +78,7 @@ func TestDisabledAndInvalidRequestsNeverReachManager(t *testing.T) {
 }
 
 func TestManagerErrorsAreTypedAndSanitized(t *testing.T) {
-	for status, kind := range map[int]error{400: apperror.ErrValidation, 401: apperror.ErrForbidden, 403: apperror.ErrForbidden, 404: apperror.ErrNotFound, 409: apperror.ErrConflict, 429: apperror.ErrUnavailable, 503: apperror.ErrUnavailable} {
+	for status, kind := range map[int]error{400: apperror.ErrValidation, 401: apperror.ErrForbidden, 403: apperror.ErrForbidden, 404: apperror.ErrNotFound, 409: apperror.ErrConflict, 429: apperror.ErrCapacity, 503: apperror.ErrUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(status)

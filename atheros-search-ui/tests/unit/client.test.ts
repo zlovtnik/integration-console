@@ -16,6 +16,7 @@ import { asRfc3339 } from '~/utils/timestamp';
 
 vi.mock('~/auth/session', () => ({
   getAccessToken: vi.fn(),
+  denyAuditAccess: vi.fn(),
 }));
 
 afterEach(() => {
@@ -25,6 +26,22 @@ afterEach(() => {
 });
 
 describe('api client authentication', () => {
+  it('preserves viewer access on an expected forbidden mutation', async () => {
+    const { denyAuditAccess } = await import('~/auth/session');
+    vi.mocked(getAccessToken).mockResolvedValue('viewer-token');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 403 }),
+    );
+    const response = await authenticatedFetch(
+      '/v1/dq/runs',
+      { method: 'POST' },
+      { preserveForbidden: true },
+    );
+    expect(response.status).toBe(403);
+    expect(denyAuditAccess).not.toHaveBeenCalled();
+    await authenticatedFetch('/v1/dq/processors');
+    expect(denyAuditAccess).toHaveBeenCalledOnce();
+  });
   it('injects a bearer token and retries once after refreshing on HTTP 401', async () => {
     const authorizationHeaders: Array<string | null> = [];
     vi.mocked(getAccessToken)

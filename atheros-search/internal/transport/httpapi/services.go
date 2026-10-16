@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/assets"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/dedup"
@@ -47,10 +48,24 @@ type DedupService interface {
 	Run(context.Context, string) (*dedup.Run, error)
 }
 
+type DQService interface {
+	UIContext() dedup.UIContext
+	Catalog(context.Context) (*dedup.Catalog, error)
+	Version(context.Context, string, string) (*dedup.Manifest, error)
+	AdmitProcessor(context.Context, dedup.Admission) (*dedup.WorkspaceRun, error)
+	Inspect(context.Context, string) (*dedup.WorkspaceRun, error)
+	Cancel(context.Context, string) (*dedup.WorkspaceRun, error)
+	Replay(context.Context, string, string) (*dedup.WorkspaceRun, error)
+	Artifact(context.Context, string) (*dedup.Artifact, error)
+	Access(context.Context, string) (*dedup.ArtifactAccess, error)
+	ServeAssets(http.ResponseWriter, *http.Request)
+}
+
 type Services struct {
 	Search     SearchService
 	Reporting  ReportingService
 	Assets     AssetService
 	SavedViews SavedViewService
 	Dedup      DedupService
+	DQ         DQService
 }
