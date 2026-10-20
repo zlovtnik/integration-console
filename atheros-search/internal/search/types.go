@@ -37,6 +37,7 @@ type RawResult struct {
 }
 
 type Options struct {
+	InputRevision   string
 	TopK            int
 	MinSimilarity   float32
 	Kinds           []string

@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 )
 
 // claimJobs leases pending jobs and attaches active document text. Jobs whose
 // document is missing or no longer active are cancelled in the same
 // transaction so one orphan cannot poison the batch or loop forever.
-func claimJobs(ctx context.Context, tx *sql.Tx, ownerID string, limit int, leaseExpiresAt time.Time) ([]Job, int, error) {
+func claimJobs(ctx context.Context, tx *sql.Tx, ownerID string, limit int, leaseExpiresAt time.Time, scopes ...JobScope) ([]Job, int, error) {
+	kinds, model, revision := scopeArgs(scopes)
 	rows, err := tx.QueryContext(ctx, `
 WITH candidates AS (
   SELECT job_id
@@ -20,6 +23,10 @@ WITH candidates AS (
   WHERE status = 'pending'
     AND next_attempt_at <= CURRENT_TIMESTAMP
     AND attempt_count < max_attempts
+    AND ($5 = '' OR embedding_model = $5) AND input_revision = $6
+    AND ($4::jsonb = 'null'::jsonb OR $4::jsonb = '[]'::jsonb OR EXISTS (
+      SELECT 1 FROM atheros_search.search_documents scoped WHERE scoped.document_id = embedding_jobs.document_id
+        AND scoped.source_kind IN (SELECT jsonb_array_elements_text($4::jsonb))))
   ORDER BY priority ASC, next_attempt_at ASC, job_id ASC
   FOR UPDATE SKIP LOCKED
   LIMIT $3
@@ -35,8 +42,8 @@ SET status = 'leased',
 FROM candidates
 WHERE jobs.job_id = candidates.job_id
 RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_model,
-          jobs.content_sha256, jobs.priority, jobs.lease_token, jobs.lease_fence
-`, ownerID, leaseExpiresAt, limit)
+          jobs.content_sha256, jobs.priority, jobs.lease_token, jobs.lease_fence, jobs.input_revision
+`, ownerID, leaseExpiresAt, limit, kinds, model, revision)
 	if err != nil {
 		return nil, 0, fmt.Errorf("claim embedding jobs: %w", err)
 	}
@@ -45,7 +52,7 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 	var jobs []Job
 	for rows.Next() {
 		var j Job
-		if err := rows.Scan(&j.JobID, &j.DocumentID, &j.EmbeddingKind, &j.EmbeddingModel, &j.ContentSHA256, &j.Priority, &j.LeaseToken, &j.LeaseFence); err != nil {
+		if err := rows.Scan(&j.JobID, &j.DocumentID, &j.EmbeddingKind, &j.EmbeddingModel, &j.ContentSHA256, &j.Priority, &j.LeaseToken, &j.LeaseFence, &j.InputRevision); err != nil {
 			return nil, 0, fmt.Errorf("scan claimed job: %w", err)
 		}
 		jobs = append(jobs, j)
@@ -69,7 +76,7 @@ RETURNING jobs.job_id, jobs.document_id, jobs.embedding_kind, jobs.embedding_mod
 		args = append(args, job.DocumentID)
 	}
 	textRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-SELECT document_id, normalized_text, status FROM atheros_search.search_documents
+SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search.search_documents
 WHERE document_id IN (%s)
 `, strings.Join(placeholders, ", ")), args...)
 	if err != nil {
@@ -77,16 +84,19 @@ WHERE document_id IN (%s)
 	}
 	defer func() { _ = textRows.Close() }() // Release resources on early return; query, scan, and iteration errors are checked separately.
 	type documentText struct {
-		text   string
-		status string
+		text     string
+		status   string
+		checksum string
+		revision string
+		kind     string
 	}
 	docByDocument := make(map[string]documentText, len(seen))
 	for textRows.Next() {
-		var documentID, normalizedText, status string
-		if err := textRows.Scan(&documentID, &normalizedText, &status); err != nil {
+		var documentID, normalizedText, status, checksum, inputRevision, sourceKind string
+		if err := textRows.Scan(&documentID, &normalizedText, &status, &checksum, &inputRevision, &sourceKind); err != nil {
 			return nil, 0, fmt.Errorf("scan document text: %w", err)
 		}
-		docByDocument[documentID] = documentText{text: normalizedText, status: status}
+		docByDocument[documentID] = documentText{text: normalizedText, status: status, checksum: checksum, revision: inputRevision, kind: sourceKind}
 	}
 	if err := textRows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate document text: %w", err)
@@ -105,6 +115,13 @@ WHERE document_id IN (%s)
 		}
 		if doc.status != "active" {
 			if err := cancelJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence, fmt.Sprintf("document status %s; embedding job cancelled", doc.status)); err != nil {
+				return nil, 0, err
+			}
+			cancelled++
+			continue
+		}
+		if doc.checksum != job.ContentSHA256 || textChecksum(doc.text) != doc.checksum || doc.revision != job.InputRevision || embeddingKindForSource(doc.kind) != job.EmbeddingKind {
+			if err := cancelJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence, "document input checksum or revision changed"); err != nil {
 				return nil, 0, err
 			}
 			cancelled++
@@ -134,7 +151,7 @@ WHERE job_id = $2
   AND status = 'leased'
   AND lease_token = $3
   AND lease_fence = $4
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, errMsg, jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
@@ -162,7 +179,7 @@ WHERE job_id = $1
   AND status = 'leased'
   AND lease_token = $2
   AND lease_fence = $3
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
@@ -195,7 +212,7 @@ WHERE job_id = $3
   AND status = 'leased'
   AND lease_token = $4
   AND lease_fence = $5
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, errMsg, int(maxBackoff.Seconds()), jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
@@ -228,7 +245,7 @@ WHERE job_id = $2
   AND status = 'leased'
   AND lease_token = $3
   AND lease_fence = $4
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, errMsg, jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
@@ -259,7 +276,7 @@ WHERE job_id = $2
   AND status = 'leased'
   AND lease_token = $3
   AND lease_fence = $4
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, retryAt, jobID, leaseToken, leaseFence)
 	if err != nil {
 		return err
@@ -282,7 +299,7 @@ WHERE job_id = $2
   AND status = 'leased'
   AND lease_token = $3
   AND lease_fence = $4
-  AND lease_expires_at > CURRENT_TIMESTAMP
+  AND lease_expires_at > clock_timestamp()
 `, leaseExpiresAt, job.JobID, job.LeaseToken, job.LeaseFence)
 	if err != nil {
 		return false, fmt.Errorf("renew embedding lease: %w", err)
@@ -291,12 +308,17 @@ WHERE job_id = $2
 	return affected == 1, err
 }
 
-func recoverExpiredLeases(ctx context.Context, db *sql.DB, limit int) (int64, error) {
+func recoverExpiredLeases(ctx context.Context, db *sql.DB, limit int, scopes ...JobScope) (int64, error) {
+	kinds, model, revision := scopeArgs(scopes)
 	result, err := db.ExecContext(ctx, `
 WITH expired AS (
   SELECT job_id
   FROM atheros_search.embedding_jobs
   WHERE status = 'leased' AND lease_expires_at <= CURRENT_TIMESTAMP
+    AND ($3 = '' OR embedding_model = $3) AND input_revision = $4
+    AND ($2::jsonb = 'null'::jsonb OR $2::jsonb = '[]'::jsonb OR EXISTS (
+      SELECT 1 FROM atheros_search.search_documents scoped WHERE scoped.document_id = embedding_jobs.document_id
+        AND scoped.source_kind IN (SELECT jsonb_array_elements_text($2::jsonb))))
   ORDER BY lease_expires_at, job_id
   FOR UPDATE SKIP LOCKED
   LIMIT $1
@@ -314,7 +336,7 @@ SET status = CASE WHEN attempt_count >= max_attempts THEN 'failed' ELSE 'pending
     updated_at = CURRENT_TIMESTAMP
 FROM expired
 WHERE jobs.job_id = expired.job_id
-`, limit)
+`, limit, kinds, model, revision)
 	if err != nil {
 		return 0, fmt.Errorf("recover expired embedding leases: %w", err)
 	}
@@ -336,7 +358,14 @@ func normalizeEmbeddingKind(kind string) (string, error) {
 	}
 }
 
-func insertVector(ctx context.Context, tx *sql.Tx, documentID, embeddingKind, embeddingModel, contentSHA256 string, embedding []float32) error {
+func insertVector(ctx context.Context, tx *sql.Tx, documentID, embeddingKind, embeddingModel, contentSHA256 string, embedding []float32, inputRevisions ...string) error {
+	if err := embed.ValidateVector(embedding, 768); err != nil {
+		return err
+	}
+	revision := "legacy_unknown"
+	if len(inputRevisions) > 0 && inputRevisions[0] != "" {
+		revision = inputRevisions[0]
+	}
 	vectorTable, err := vectorTableForKind(embeddingKind)
 	if err != nil {
 		return err
@@ -348,26 +377,26 @@ func insertVector(ctx context.Context, tx *sql.Tx, documentID, embeddingKind, em
 	vecStr := string(encoded)
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO atheros_search.embeddings (
-  document_id, embedding_kind, embedding_model, content_sha256, embedding, embedded_at
+  document_id, embedding_kind, embedding_model, content_sha256, embedding, embedded_at, input_revision
 )
-VALUES ($1, $2, $3, $4, $5::public.vector, CURRENT_TIMESTAMP)
-ON CONFLICT (document_id, embedding_kind, embedding_model) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5::public.vector, CURRENT_TIMESTAMP, $6)
+ON CONFLICT (document_id, embedding_kind, embedding_model, input_revision) DO UPDATE SET
   embedding = EXCLUDED.embedding,
   content_sha256 = EXCLUDED.content_sha256,
   embedded_at = CURRENT_TIMESTAMP
-`, documentID, embeddingKind, embeddingModel, contentSHA256, vecStr)
+`, documentID, embeddingKind, embeddingModel, contentSHA256, vecStr, revision)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO atheros_search.%s (
-  document_id, embedding_model, content_sha256, embedding, embedded_at
-) VALUES ($1, $2, $3, $4::public.vector, CURRENT_TIMESTAMP)
-ON CONFLICT (document_id, embedding_model) DO UPDATE SET
+  document_id, embedding_model, content_sha256, embedding, embedded_at, input_revision
+) VALUES ($1, $2, $3, $4::public.vector, CURRENT_TIMESTAMP, $5)
+ON CONFLICT (document_id, embedding_model, input_revision) DO UPDATE SET
   content_sha256 = EXCLUDED.content_sha256,
   embedding = EXCLUDED.embedding,
   embedded_at = CURRENT_TIMESTAMP
-`, vectorTable), documentID, embeddingModel, contentSHA256, vecStr)
+`, vectorTable), documentID, embeddingModel, contentSHA256, vecStr, revision)
 	return err
 }
 

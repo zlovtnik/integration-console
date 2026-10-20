@@ -29,11 +29,12 @@ func TestReportingScopedCandidatesBeyondGlobalBudget(t *testing.T) {
  CASE WHEN i = 100 THEN 'aa:bb:cc:dd:ee:ff' ELSE '11:22:33:44:55:66' END,
  CASE WHEN i = 100 THEN 'target' ELSE 'outside' END, 'sensor-a',
  '2026-09-01'::timestamptz + i * interval '1 second',
- CASE WHEN i = 100 THEN 'needle' ELSE repeat('needle ', 20) END, repeat('a',64),
+ CASE WHEN i = 100 THEN 'needle' ELSE repeat('needle ', 20) END,
+ encode(sha256(convert_to(CASE WHEN i = 100 THEN 'needle' ELSE repeat('needle ', 20) END,'UTF8')),'hex'),
  to_tsvector('simple', CASE WHEN i = 100 THEN 'needle' ELSE repeat('needle ', 20) END)
  FROM generate_series(1,100) i;
  INSERT INTO atheros_search.embeddings(document_id, embedding_kind, embedding_model, content_sha256, embedded_at, embedding)
- SELECT document_id, 'event', 'scope-test', repeat('a',64), CURRENT_TIMESTAMP,
+ SELECT document_id, 'event', 'scope-test', normalized_sha256, CURRENT_TIMESTAMP,
  (ARRAY[1::real, CASE WHEN source_id = 'scope-100' THEN 1::real ELSE 0::real END] || array_fill(0::real, ARRAY[766]))::public.vector
  FROM atheros_search.search_documents;`)
 	require.NoError(t, err)

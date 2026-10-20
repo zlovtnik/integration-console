@@ -20,9 +20,9 @@ func seedJobs(t *testing.T, count int) (*sql.DB, *sql.DB) {
 	require.NoError(t, err)
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
-		_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256) VALUES($1,$2,$2,'wireless_frames','event','wireless', $3)`, id, id, strings.Repeat("a", 64))
+		_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256) VALUES($1,$2,$2,'wireless_frames','event','wireless', $3)`, id, id, textChecksum("wireless"))
 		require.NoError(t, err)
-		_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, id, strings.Repeat("a", 64))
+		_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256) VALUES($1,$1,'event','test-model',$2)`, id, textChecksum("wireless"))
 		require.NoError(t, err)
 	}
 	return provision, runtimeDB
@@ -38,6 +38,83 @@ func claimOne(t *testing.T, database *sql.DB, owner string) Job {
 	require.Zero(t, cancelled)
 	require.Len(t, jobs, 1)
 	return jobs[0]
+}
+
+func TestDatabaseProxyScopeFencesClaimsAndRecovery(t *testing.T) {
+	provision, runtimeDB := seedJobs(t, 2)
+	proxyID := "00000000-0000-0000-0000-000000000002"
+	_, err := provision.ExecContext(t.Context(), `UPDATE atheros_search.search_documents SET source_kind='proxy_event' WHERE document_id=$1`, proxyID)
+	require.NoError(t, err)
+	scope := JobScope{SourceKinds: []string{"proxy_event", "proxy_blocked_host_window"}, Model: "test-model", InputRevision: "legacy_unknown"}
+	tx, err := runtimeDB.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	jobs, cancelled, err := claimJobs(t.Context(), tx, "proxy", 10, time.Now().Add(time.Minute), scope)
+	require.NoError(t, err)
+	require.Zero(t, cancelled)
+	require.Len(t, jobs, 1)
+	require.Equal(t, proxyID, jobs[0].DocumentID)
+	require.NoError(t, tx.Commit())
+	_, err = provision.ExecContext(t.Context(), `UPDATE atheros_search.embedding_jobs SET status='leased',owner_id='test',lease_token=gen_random_uuid(),lease_expires_at=now()-interval '1 second'`)
+	require.NoError(t, err)
+	n, err := recoverExpiredLeases(t.Context(), runtimeDB, 10, scope)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+	var status string
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT status FROM atheros_search.embedding_jobs WHERE document_id <> $1`, proxyID).Scan(&status))
+	require.Equal(t, "leased", status)
+}
+
+func TestDatabaseClaimRejectsActualTextMutation(t *testing.T) {
+	provision, runtimeDB := seedJobs(t, 1)
+	_, err := provision.ExecContext(t.Context(), `UPDATE atheros_search.search_documents SET normalized_text='mutated after checksum'`)
+	require.NoError(t, err)
+	tx, err := runtimeDB.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	jobs, cancelled, err := claimJobs(t.Context(), tx, "worker", 10, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+	require.Equal(t, 1, cancelled)
+	require.NoError(t, tx.Commit())
+}
+
+func TestDatabaseCompletionRejectsSupersessionAndRollsBackBothStores(t *testing.T) {
+	provision, runtimeDB := seedJobs(t, 1)
+	job := claimOne(t, runtimeDB, "worker")
+	_, err := provision.ExecContext(t.Context(), `UPDATE atheros_search.search_documents SET status='superseded'`)
+	require.NoError(t, err)
+	pool := &Pool{db: runtimeDB}
+	require.Error(t, pool.storeCompletion(t.Context(), job, testVector()))
+	var count int
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embeddings`).Scan(&count))
+	require.Zero(t, count)
+	_, err = provision.ExecContext(t.Context(), `UPDATE atheros_search.search_documents SET status='active'`)
+	require.NoError(t, err)
+	_, err = provision.ExecContext(t.Context(), `ALTER TABLE atheros_search.search_vectors_event ADD CONSTRAINT test_reject_vector CHECK (embedding_model <> 'test-model') NOT VALID`)
+	require.NoError(t, err)
+	defer func() {
+		_, _ = provision.ExecContext(t.Context(), `ALTER TABLE atheros_search.search_vectors_event DROP CONSTRAINT test_reject_vector`)
+	}()
+	require.Error(t, pool.storeCompletion(t.Context(), job, testVector()))
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embeddings`).Scan(&count))
+	require.Zero(t, count)
+	var status string
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT status FROM atheros_search.embedding_jobs`).Scan(&status))
+	require.Equal(t, "leased", status)
+}
+
+func TestDatabaseInputRevisionsCoexistWithoutVectorOverwrite(t *testing.T) {
+	_, runtimeDB := seedJobs(t, 1)
+	for _, revision := range []string{"legacy_unknown", "nomic-prefix-v1:" + strings.Repeat("a", 64)} {
+		tx, err := runtimeDB.BeginTx(t.Context(), nil)
+		require.NoError(t, err)
+		require.NoError(t, insertVector(t.Context(), tx, "00000000-0000-0000-0000-000000000001", "event", "test-model", textChecksum("wireless"), testVector(), revision))
+		require.NoError(t, tx.Commit())
+	}
+	var count int
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embeddings`).Scan(&count))
+	require.Equal(t, 2, count)
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.search_vectors_event`).Scan(&count))
+	require.Equal(t, 2, count)
 }
 
 func TestDatabaseClaimContentionSkipsLockedRows(t *testing.T) {

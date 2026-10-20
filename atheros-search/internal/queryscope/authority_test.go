@@ -46,3 +46,16 @@ func TestAuthoritySharedCorpus(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthorityDiscardsUserinfoBeforeClassification(t *testing.T) {
+	for _, raw := range []string{"user:secret@example.com:443", "hmac:user@example.com", "@example.com"} {
+		for _, sanitized := range []bool{false, true} {
+			for _, source := range []string{"query", "unknown"} {
+				got := NormalizeAuthority(&raw, source, sanitized)
+				if got.AuthorityRaw != nil || got.HostRaw != nil || got.ParseStatus != "invalid" {
+					t.Fatalf("userinfo retained or misclassified for source=%s sanitized=%t", source, sanitized)
+				}
+			}
+		}
+	}
+}

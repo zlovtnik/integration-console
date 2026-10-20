@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,9 @@ const (
 )
 
 type Config struct {
+	WorkerSourceKinds             []string
+	EmbeddingInputRevision        string
+	EmbeddingPrefixOwner          string
 	WirelessProjection            bool
 	PostgresDSN                   string
 	PostgresTLSCAFile             string
@@ -94,6 +98,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg := Config{
+		WorkerSourceKinds:             envCSV("ATHSEARCH_WORKER_SOURCE_KINDS", nil),
+		EmbeddingInputRevision:        envString("ATHSEARCH_EMBEDDING_INPUT_REVISION", "legacy_unknown"),
+		EmbeddingPrefixOwner:          envString("ATHSEARCH_EMBEDDING_PREFIX_OWNER", "legacy"),
 		WirelessProjection:            envBool("ATHSEARCH_WIRELESS_PROJECTION", false),
 		PostgresDSN:                   postgresDSN,
 		PostgresTLSCAFile:             postgresTLSCAFile,
@@ -207,6 +214,24 @@ func buildPostgresDSN(tlsCAFile string) (string, error) {
 }
 
 func validate(cfg Config) error {
+	if cfg.EmbeddingInputRevision != "" && cfg.EmbeddingInputRevision != "legacy_unknown" && !regexp.MustCompile(`^nomic-prefix-v1:[0-9a-f]{64}$`).MatchString(cfg.EmbeddingInputRevision) {
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_INPUT_REVISION must identify the preprocessing and artifact SHA-256")
+	}
+	if cfg.EmbeddingPrefixOwner != "" && cfg.EmbeddingPrefixOwner != "legacy" && cfg.EmbeddingPrefixOwner != "client" {
+		return fmt.Errorf("ATHSEARCH_EMBEDDING_PREFIX_OWNER must be legacy or client; the current backend request cannot signal query/document roles for server-owned prefixes")
+	}
+	modern := cfg.EmbeddingInputRevision != "" && cfg.EmbeddingInputRevision != "legacy_unknown"
+	if modern != (cfg.EmbeddingPrefixOwner == "client") {
+		return fmt.Errorf("embedding input revision and verified prefix owner must be configured together")
+	}
+	allowedKinds := map[string]bool{"event": true, "device": true, "behaviour_window": true, "frame_sequence": true, "proxy_event": true, "proxy_blocked_host_window": true, "device_profile": true, "ap_profile": true, "identity_summary": true, "observation_window": true}
+	seenKinds := make(map[string]bool)
+	for _, kind := range cfg.WorkerSourceKinds {
+		if !allowedKinds[kind] || seenKinds[kind] {
+			return fmt.Errorf("ATHSEARCH_WORKER_SOURCE_KINDS contains an unknown or duplicate kind")
+		}
+		seenKinds[kind] = true
+	}
 	checks := []func(Config) error{
 		validateWorkerConfig,
 		validatePostgresTLS,

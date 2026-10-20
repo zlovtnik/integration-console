@@ -4,13 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"math"
 	"sort"
 	"strings"
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/apperror"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/db"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/embed"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/queryscope"
 )
 
@@ -41,6 +40,9 @@ func embeddingKindForSourceKind(kind string) string {
 }
 
 func Dense(ctx context.Context, pool *sql.DB, qvec []float32, model string, opts Options) ([]RawResult, error) {
+	if err := db.Require(pool); err != nil {
+		return nil, err
+	}
 	if err := validateVector(qvec); err != nil {
 		return nil, err
 	}
@@ -78,9 +80,14 @@ func denseKind(ctx context.Context, pool *sql.DB, qvec []float32, model, kind st
 	}
 	vector := VectorLiteral(qvec)
 	query := denseKindQuery()
-	scope, scopeArgs := queryscope.DocumentScopeSQL("candidate", opts.Filters, 6)
+	revision := opts.InputRevision
+	if revision == "" {
+		revision = "legacy_unknown"
+	}
+	query = strings.Replace(query, "    AND embedding_row.embedding_kind = $4", "    AND embedding_row.embedding_kind = $4 AND embedding_row.input_revision = $6", 1)
+	scope, scopeArgs := queryscope.DocumentScopeSQL("candidate", opts.Filters, 7)
 	query = strings.Replace(query, "  ORDER BY embedding_row.embedding", scope+"\n  ORDER BY embedding_row.embedding", 1)
-	args := append([]any{vector, overfetch, model, embeddingKindForSourceKind(kind), kind}, scopeArgs...)
+	args := append([]any{vector, overfetch, model, embeddingKindForSourceKind(kind), kind, revision}, scopeArgs...)
 	rows, err := pool.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -140,8 +147,12 @@ FROM (
     ON candidate.document_id = embedding_row.document_id
    AND candidate.source_kind = $5
    AND candidate.status = 'active'
+   AND embedding_row.content_sha256 = candidate.normalized_sha256
+   AND embedding_row.input_revision = candidate.input_revision
+   AND candidate.normalized_sha256 = encode(sha256(convert_to(candidate.normalized_text, 'UTF8')), 'hex')
   WHERE embedding_row.embedding_model = $3
     AND embedding_row.embedding_kind = $4
+    AND embedding_row.embedding OPERATOR(public.<#>) embedding_row.embedding < 0
   ORDER BY embedding_row.embedding OPERATOR(public.<=>) $1::public.vector ASC
   LIMIT $2
 ) nearest
@@ -152,15 +163,7 @@ ORDER BY nearest.cosine_distance ASC, d.source_id ASC`
 }
 
 func validateVector(vector []float32) error {
-	if len(vector) != embeddingDimensions {
-		return fmt.Errorf("embedding vector has %d dimensions, expected %d", len(vector), embeddingDimensions)
-	}
-	for i, value := range vector {
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return fmt.Errorf("embedding vector contains a non-finite value at index %d", i)
-		}
-	}
-	return nil
+	return embed.ValidateVector(vector, embeddingDimensions)
 }
 
 func normalizeJSONObject(value string) string {

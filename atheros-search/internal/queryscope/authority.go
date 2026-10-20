@@ -53,8 +53,8 @@ func NormalizeAuthority(raw *string, source string, sanitized bool) Authority {
 		a.ParseStatus = "missing"
 		return a
 	}
-	// Oversized or control-bearing evidence must not be echoed into structured diagnostics.
-	if !utf8.ValidString(*raw) || len(*raw) > 1024 || strings.IndexFunc(*raw, unicode.IsControl) >= 0 {
+	// Unsafe evidence, including userinfo, must not be echoed into structured diagnostics.
+	if !utf8.ValidString(*raw) || len(*raw) > 1024 || strings.IndexFunc(*raw, unicode.IsControl) >= 0 || strings.Contains(*raw, "@") {
 		return a
 	}
 	v := *raw
@@ -68,7 +68,7 @@ func NormalizeAuthority(raw *string, source string, sanitized bool) Authority {
 	default:
 		return a
 	}
-	if strings.ContainsAny(v, "@/\\?#%") || strings.IndexFunc(v, unicode.IsSpace) >= 0 {
+	if strings.ContainsAny(v, "/\\?#%") || strings.IndexFunc(v, unicode.IsSpace) >= 0 {
 		return a
 	}
 	host, portText, explicit := v, "", false

@@ -149,6 +149,7 @@ Workers are disabled by default in the binary:
 | Variable | Default | Shared fallback | Purpose |
 |---|---:|---|---|
 | `ATHSEARCH_WORKER_ENABLED` | `false` | None | Start the worker pool |
+| `ATHSEARCH_WORKER_SOURCE_KINDS` | empty (existing shared scope) | None | Comma-separated validated source-kind allowlist applied before claims and expired recovery. Proxy-only selection: `proxy_event,proxy_blocked_host_window`. |
 | `ATHSEARCH_WORKER_COUNT` | `4` | None | Concurrent claim loops |
 | `ATHSEARCH_EMBEDDING_BATCH_SIZE` | `64` | None | Jobs claimed and embedded per batch |
 | `ATHSEARCH_LEASE_SECONDS` | `1800` | None | Claim lease duration |
@@ -162,6 +163,8 @@ Embedding settings use these shared fallbacks only when their corresponding
 |---|---:|---|---|
 | `ATHSEARCH_EMBEDDING_BACKEND` | empty | `VECTOR_EMBEDDING_URL` | Base URL of the llama.cpp embedding backend |
 | `ATHSEARCH_EMBEDDING_MODEL` | `nomic-embed-text-v2-moe` | `VECTOR_EMBEDDING_MODEL`; other model values fail startup validation | Model name sent with each request |
+| `ATHSEARCH_EMBEDDING_INPUT_REVISION` | `legacy_unknown` | None | Query/worker vector-space identity: `legacy_unknown` or `nomic-prefix-v1:<artifact-sha256>`. Jobs and both vector stores match it exactly. |
+| `ATHSEARCH_EMBEDDING_PREFIX_OWNER` | `legacy` | None | `client` requires a nonlegacy input revision and a reviewed synthetic backend probe proving that the server does not add prefixes. Client prefixes distinguish query/document lanes on every chunk and reserve special-token overhead within 512 tokens. Server-owned role prefixes are unsupported by the current request contract. |
 | `ATHSEARCH_EMBEDDING_DIMENSIONS` | `768` | `VECTOR_EMBEDDING_DIMENSIONS` | Expected vector width |
 | `ATHSEARCH_EMBEDDING_MAX_TOKENS` | `512` | None | Model context; chunks are capped at 480 content tokens |
 | `ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY` | `4` | None | In-flight `/v1/embeddings` requests; match it to backend slots |
