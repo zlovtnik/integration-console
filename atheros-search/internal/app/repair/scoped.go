@@ -104,7 +104,8 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
           AND per_kind.embedding_model=unified.embedding_model AND per_kind.input_revision=unified.input_revision
           AND per_kind.content_sha256=unified.content_sha256 AND per_kind.embedding::text=unified.embedding::text
         WHERE unified.document_id=job.document_id AND unified.embedding_model=job.embedding_model
-          AND unified.input_revision=job.input_revision AND unified.embedding_kind='event' AND unified.content_sha256=job.content_sha256)
+          AND unified.input_revision=job.input_revision AND unified.embedding_kind='event' AND unified.content_sha256=job.content_sha256
+          AND unified.embedding OPERATOR(public.<#>) unified.embedding<0)
       FROM atheros_search.embedding_jobs job JOIN atheros_search.search_documents doc ON doc.document_id=job.document_id
       WHERE doc.source_kind IN (SELECT jsonb_array_elements_text($1::jsonb))
         AND job.embedding_model=$2 AND job.input_revision=$3 AND ($4::uuid IS NULL OR job.job_id > $4::uuid)

@@ -153,6 +153,9 @@ func Load() (Config, error) {
 		DQRemoteOrigin:                strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_REMOTE_ORIGIN")),
 	}
 
+	if strings.TrimSpace(os.Getenv("ATHSEARCH_WORKER_SOURCE_KINDS")) != "" && len(cfg.WorkerSourceKinds) == 0 {
+		return cfg, errors.New("ATHSEARCH_WORKER_SOURCE_KINDS must contain at least one kind when configured")
+	}
 	if err := validateDQ(cfg); err != nil {
 		return cfg, err
 	}
