@@ -269,7 +269,7 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]flo
 	for i := range texts {
 		pooled[i] = meanVectors(vectors[offsets[i]:offsets[i+1]], c.Dimensions)
 		if err := ValidateVector(pooled[i], c.Dimensions); err != nil {
-			return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: pooled embedding: %v", ErrInvalidResponse, err)}
+			return nil, invalidRequest("pooled embedding input %d: %v", i, err)
 		}
 	}
 	return pooled, nil
