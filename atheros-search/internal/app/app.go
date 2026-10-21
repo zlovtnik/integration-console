@@ -122,6 +122,7 @@ func Run() error {
 		httpEmbedder.Scheduler = scheduler
 		httpEmbedder.TokenizerConcurrency = cfg.EmbeddingTokenizerConcurrency
 		httpEmbedder.MaxChunksPerInput = cfg.EmbeddingMaxChunksPerInput
+		httpEmbedder.PrefixOwner = cfg.EmbeddingPrefixOwner
 		lanes = embed.NewLanedClient(httpEmbedder)
 		embedder = lanes
 		// Tokenizer compatibility is proven in the background instead of at
@@ -145,10 +146,11 @@ func Run() error {
 		})
 	}
 	embedder = embed.CachedClient{
-		Inner: embedder,
-		Cache: embed.NewQueryCache(4096, 60*time.Second),
-		Hits:  m.EmbeddingCacheHits.Inc,
-		Miss:  m.EmbeddingCacheMiss.Inc,
+		Namespace: cfg.EmbeddingModel + ":" + cfg.EmbeddingInputRevision,
+		Inner:     embedder,
+		Cache:     embed.NewQueryCache(4096, 60*time.Second),
+		Hits:      m.EmbeddingCacheHits.Inc,
+		Miss:      m.EmbeddingCacheMiss.Inc,
 	}
 
 	healthMon := etlhealth.NewHealthMonitor(pool.DB)
@@ -168,6 +170,9 @@ func Run() error {
 	var workerPool *worker.Pool
 	if cfg.WorkerEnabled {
 		workerPool = worker.NewPool(pool.DB, &workerEmbedderAdapter{embedder: embedder}, worker.PoolConfig{
+			SourceKinds:       cfg.WorkerSourceKinds,
+			EmbeddingModel:    cfg.EmbeddingModel,
+			InputRevision:     cfg.EmbeddingInputRevision,
 			WorkerCount:       cfg.WorkerCount,
 			LeaseSeconds:      cfg.LeaseSeconds,
 			PollInterval:      cfg.WorkerPollInterval,

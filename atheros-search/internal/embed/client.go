@@ -40,11 +40,15 @@ func (c NoopClient) Embed(_ context.Context, texts []string, _ Kind) ([][]float3
 func (c NoopClient) Health(context.Context) error { return nil }
 
 type HTTPClient struct {
-	BaseURL    string
-	Model      string
-	Dimensions int
-	MaxTokens  int // retained for configuration compatibility; chunks are always 480 content tokens.
-	Client     *http.Client
+	// Set only after a synthetic wire probe has attested the serving boundary.
+	// legacy preserves historical effective inputs; client is gated by
+	// an explicit artifact/preprocessing revision in application configuration.
+	PrefixOwner string
+	BaseURL     string
+	Model       string
+	Dimensions  int
+	MaxTokens   int // retained for configuration compatibility; chunks are always 480 content tokens.
+	Client      *http.Client
 	// PackTokenLimit is the content budget for one /v1/embeddings request. It
 	// defaults to RequestPackTokenLimit so requests fan out across backend
 	// slots instead of stacking tokens onto one slot.
@@ -208,6 +212,29 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]flo
 	if c.BaseURL == "" {
 		return nil, invalidRequest("embedding backend URL is empty")
 	}
+	if c.PrefixOwner != "" && c.PrefixOwner != "legacy" && c.PrefixOwner != "client" {
+		return nil, invalidRequest("unsupported task prefix owner")
+	}
+	modern := c.PrefixOwner == "client"
+	prefix := "search_query: "
+	if LaneFromContext(ctx) == LaneWorker {
+		prefix = "search_document: "
+	}
+	if modern {
+		clean := make([]string, len(texts))
+		for i, text := range texts {
+			text = strings.TrimSpace(text)
+			for strings.HasPrefix(text, "search_query:") || strings.HasPrefix(text, "search_document:") {
+				_, text, _ = strings.Cut(text, ":")
+				text = strings.TrimSpace(text)
+			}
+			if text == "" {
+				return nil, invalidRequest("empty embedding input")
+			}
+			clean[i] = text
+		}
+		texts = clean
+	}
 	offsets := make([]int, len(texts)+1)
 	inputs := make([]TokenChunk, 0, len(texts))
 	chunked, err := ChunkTexts(ctx, c.tokenizer, texts, c.tokenizerConcurrency(), c.MaxChunksPerInput)
@@ -215,6 +242,22 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]flo
 		return nil, err
 	}
 	for i, chunks := range chunked {
+		if modern {
+			for j := range chunks {
+				// Count the final prefixed input with the serving tokenizer.
+				// Two model special tokens are reserved inside the 512 limit.
+				effective := prefix + chunks[j].Text
+				tokens, err := c.tokenizer.Tokenize(ctx, effective)
+				if err != nil {
+					return nil, err
+				}
+				if len(tokens) > DefaultMaxTokens-2 {
+					return nil, invalidRequest("prefixed embedding chunk exceeds model context")
+				}
+				chunks[j].TokenCount = len(tokens)
+				chunks[j].Text = effective
+			}
+		}
 		offsets[i+1] = offsets[i] + len(chunks)
 		inputs = append(inputs, chunks...)
 	}
@@ -225,6 +268,9 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string, _ Kind) ([][]flo
 	pooled := make([][]float32, len(texts))
 	for i := range texts {
 		pooled[i] = meanVectors(vectors[offsets[i]:offsets[i+1]], c.Dimensions)
+		if err := ValidateVector(pooled[i], c.Dimensions); err != nil {
+			return nil, invalidRequest("pooled embedding input %d: %v", i, err)
+		}
 	}
 	return pooled, nil
 }
@@ -347,8 +393,8 @@ func (c *HTTPClient) embedOnce(ctx context.Context, inputs []string) ([][]float3
 		return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: returned %d vectors for %d inputs", ErrInvalidResponse, len(vectors), len(inputs))}
 	}
 	for i, vec := range vectors {
-		if len(vec) != c.Dimensions {
-			return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: embedding %d has %d dimensions, expected %d", ErrInvalidResponse, i, len(vec), c.Dimensions)}
+		if err := ValidateVector(vec, c.Dimensions); err != nil {
+			return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: embedding %d: %v", ErrInvalidResponse, i, err)}
 		}
 	}
 	return vectors, nil

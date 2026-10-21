@@ -1,5 +1,18 @@
 # Atheros Search operational commands
 
+Proxy recovery uses bounded `proxy-status` and `proxy-reconcile` pages. Supply
+`-source-kinds=proxy_event,proxy_blocked_host_window`, `-model`,
+`-input-revision`, `-created-before` (a frozen RFC3339 cutoff), and `-limit`
+(1 through 1000). Both default to inspection;
+`proxy-reconcile` also requires `-apply` and `-campaign-id` to retry completed current-content jobs
+whose two vector stores are missing or disagree. Capture the returned
+`after_job_id` and pass it as `-after-job-id` for the next page. Receipts retain
+the previous state, attempts and diagnostic. Applied campaigns resume from their
+persisted cursor and reject changed scope. A fresh Octopus queue policy and
+sufficient headroom are required before a repair can enqueue work. Failed, cancelled, exhausted,
+superseded and orphaned work is not revived by this operation. Legacy broad
+reset/retry commands below are not the proxy recovery runbook.
+
 Repository-level build and test entry points:
 
 ```bash

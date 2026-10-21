@@ -35,25 +35,26 @@ func TestProcessBatchCommitsClaimBeforeEmbeddingAndCompletesAtomically(t *testin
 	job := testJob()
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs("worker-1", sqlmock.AnyArg(), 1).
+		WithArgs("worker-1", sqlmock.AnyArg(), 1, "null", "", "legacy_unknown").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"job_id", "document_id", "embedding_kind", "embedding_model",
-			"content_sha256", "priority", "lease_token", "lease_fence",
+			"content_sha256", "priority", "lease_token", "lease_fence", "input_revision",
 		}).AddRow(
 			job.JobID, job.DocumentID, job.EmbeddingKind, job.EmbeddingModel,
-			job.ContentSHA256, job.Priority, job.LeaseToken, job.LeaseFence,
+			job.ContentSHA256, job.Priority, job.LeaseToken, job.LeaseFence, "legacy_unknown",
 		))
-	mock.ExpectQuery("SELECT document_id, normalized_text, status FROM atheros_search\\.search_documents").
+	mock.ExpectQuery("SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search\\.search_documents").
 		WithArgs(job.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status"}).AddRow(job.DocumentID, "normalized wireless event", "active"))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status", "normalized_sha256", "input_revision", "source_kind"}).AddRow(job.DocumentID, "normalized wireless event", "active", testJob().ContentSHA256, "legacy_unknown", "event"))
 	mock.ExpectCommit()
 	mock.ExpectPing()
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, job)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, "[0.25,0.5]").
+		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(job.DocumentID, job.EmbeddingModel, job.ContentSHA256, "[0.25,0.5]").
+		WithArgs(job.DocumentID, job.EmbeddingModel, job.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(job.JobID, job.LeaseToken, job.LeaseFence).
@@ -63,7 +64,7 @@ func TestProcessBatchCommitsClaimBeforeEmbeddingAndCompletesAtomically(t *testin
 	pool := NewPool(db, checkingEmbedder{
 		t:       t,
 		dbPing:  db.PingContext,
-		vectors: [][]float32{{0.25, 0.5}},
+		vectors: [][]float32{testVector()},
 	}, PoolConfig{WorkerCount: 1, LeaseSeconds: 60, BatchSize: 1}, zerolog.Nop())
 	pool.processBatch(context.Background(), "worker-1", zerolog.Nop())
 
@@ -81,7 +82,7 @@ func (e *oversizedEmbedder) Embed(_ context.Context, texts []string, _ string) (
 	}
 	vectors := make([][]float32, len(texts))
 	for i := range texts {
-		vectors[i] = []float32{1}
+		vectors[i] = testVector()
 	}
 	return vectors, nil
 }
@@ -97,20 +98,22 @@ func TestStoreCompletionsWritesGroupInOneTransaction(t *testing.T) {
 	second.DocumentID = "document-2"
 
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, first)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(first.DocumentID, first.EmbeddingKind, first.EmbeddingModel, first.ContentSHA256, "[1]").
+		WithArgs(first.DocumentID, first.EmbeddingKind, first.EmbeddingModel, first.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(first.DocumentID, first.EmbeddingModel, first.ContentSHA256, "[1]").
+		WithArgs(first.DocumentID, first.EmbeddingModel, first.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(first.JobID, first.LeaseToken, first.LeaseFence).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectCompletionGuard(mock, second)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(second.JobID, second.LeaseToken, second.LeaseFence).
@@ -121,7 +124,7 @@ func TestStoreCompletionsWritesGroupInOneTransaction(t *testing.T) {
 	require.NoError(t, pool.storeCompletions(
 		context.Background(),
 		[]Job{first, second},
-		[][]float32{{1}, {1}},
+		[][]float32{testVector(), testVector()},
 	))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -138,20 +141,20 @@ func TestProcessBatchFailsOversizedJobAndCompletesTheRest(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs("worker-1", sqlmock.AnyArg(), 2).
+		WithArgs("worker-1", sqlmock.AnyArg(), 2, "null", "", "legacy_unknown").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"job_id", "document_id", "embedding_kind", "embedding_model",
-			"content_sha256", "priority", "lease_token", "lease_fence",
+			"content_sha256", "priority", "lease_token", "lease_fence", "input_revision",
 		}).
 			AddRow(first.JobID, first.DocumentID, first.EmbeddingKind, first.EmbeddingModel,
-				first.ContentSHA256, first.Priority, first.LeaseToken, first.LeaseFence).
+				first.ContentSHA256, first.Priority, first.LeaseToken, first.LeaseFence, "legacy_unknown").
 			AddRow(second.JobID, second.DocumentID, second.EmbeddingKind, second.EmbeddingModel,
-				second.ContentSHA256, second.Priority, second.LeaseToken, second.LeaseFence))
-	mock.ExpectQuery("SELECT document_id, normalized_text, status FROM atheros_search\\.search_documents").
+				second.ContentSHA256, second.Priority, second.LeaseToken, second.LeaseFence, "legacy_unknown"))
+	mock.ExpectQuery("SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search\\.search_documents").
 		WithArgs(first.DocumentID, second.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status"}).
-			AddRow(first.DocumentID, "first document", "active").
-			AddRow(second.DocumentID, "second document", "active"))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status", "normalized_sha256", "input_revision", "source_kind"}).
+			AddRow(first.DocumentID, "normalized wireless event", "active", testJob().ContentSHA256, "legacy_unknown", "event").
+			AddRow(second.DocumentID, "normalized wireless event", "active", testJob().ContentSHA256, "legacy_unknown", "event"))
 	mock.ExpectCommit()
 
 	mock.ExpectBegin()
@@ -161,11 +164,12 @@ func TestProcessBatchFailsOversizedJobAndCompletesTheRest(t *testing.T) {
 	mock.ExpectCommit()
 
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, second)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WithArgs(second.DocumentID, second.EmbeddingKind, second.EmbeddingModel, second.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, "[1]").
+		WithArgs(second.DocumentID, second.EmbeddingModel, second.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(second.JobID, second.LeaseToken, second.LeaseFence).
@@ -192,19 +196,19 @@ func TestProcessBatchCancelsMissingDocumentAndCompletesTheRest(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs("worker-1", sqlmock.AnyArg(), 2).
+		WithArgs("worker-1", sqlmock.AnyArg(), 2, "null", "", "legacy_unknown").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"job_id", "document_id", "embedding_kind", "embedding_model",
-			"content_sha256", "priority", "lease_token", "lease_fence",
+			"content_sha256", "priority", "lease_token", "lease_fence", "input_revision",
 		}).
 			AddRow(missing.JobID, missing.DocumentID, missing.EmbeddingKind, missing.EmbeddingModel,
-				missing.ContentSHA256, missing.Priority, missing.LeaseToken, missing.LeaseFence).
+				missing.ContentSHA256, missing.Priority, missing.LeaseToken, missing.LeaseFence, "legacy_unknown").
 			AddRow(good.JobID, good.DocumentID, good.EmbeddingKind, good.EmbeddingModel,
-				good.ContentSHA256, good.Priority, good.LeaseToken, good.LeaseFence))
-	mock.ExpectQuery("SELECT document_id, normalized_text, status FROM atheros_search\\.search_documents").
+				good.ContentSHA256, good.Priority, good.LeaseToken, good.LeaseFence, "legacy_unknown"))
+	mock.ExpectQuery("SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search\\.search_documents").
 		WithArgs(missing.DocumentID, good.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status"}).
-			AddRow(good.DocumentID, "normalized wireless event", "active"))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status", "normalized_sha256", "input_revision", "source_kind"}).
+			AddRow(good.DocumentID, "normalized wireless event", "active", testJob().ContentSHA256, "legacy_unknown", "event"))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs("document missing; embedding job cancelled", missing.JobID, missing.LeaseToken, missing.LeaseFence).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -212,11 +216,12 @@ func TestProcessBatchCancelsMissingDocumentAndCompletesTheRest(t *testing.T) {
 
 	mock.ExpectPing()
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, good)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(good.DocumentID, good.EmbeddingKind, good.EmbeddingModel, good.ContentSHA256, "[0.25,0.5]").
+		WithArgs(good.DocumentID, good.EmbeddingKind, good.EmbeddingModel, good.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(good.DocumentID, good.EmbeddingModel, good.ContentSHA256, "[0.25,0.5]").
+		WithArgs(good.DocumentID, good.EmbeddingModel, good.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(good.JobID, good.LeaseToken, good.LeaseFence).
@@ -226,7 +231,7 @@ func TestProcessBatchCancelsMissingDocumentAndCompletesTheRest(t *testing.T) {
 	pool := NewPool(db, checkingEmbedder{
 		t:       t,
 		dbPing:  db.PingContext,
-		vectors: [][]float32{{0.25, 0.5}},
+		vectors: [][]float32{testVector()},
 	}, PoolConfig{WorkerCount: 1, LeaseSeconds: 60, BatchSize: 2}, zerolog.Nop())
 	pool.processBatch(context.Background(), "worker-1", zerolog.Nop())
 
@@ -241,17 +246,17 @@ func TestProcessBatchCancelsNonActiveDocumentWithoutEmbedding(t *testing.T) {
 	job := testJob()
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs("worker-1", sqlmock.AnyArg(), 1).
+		WithArgs("worker-1", sqlmock.AnyArg(), 1, "null", "", "legacy_unknown").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"job_id", "document_id", "embedding_kind", "embedding_model",
-			"content_sha256", "priority", "lease_token", "lease_fence",
+			"content_sha256", "priority", "lease_token", "lease_fence", "input_revision",
 		}).AddRow(
 			job.JobID, job.DocumentID, job.EmbeddingKind, job.EmbeddingModel,
-			job.ContentSHA256, job.Priority, job.LeaseToken, job.LeaseFence))
-	mock.ExpectQuery("SELECT document_id, normalized_text, status FROM atheros_search\\.search_documents").
+			job.ContentSHA256, job.Priority, job.LeaseToken, job.LeaseFence, "legacy_unknown"))
+	mock.ExpectQuery("SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search\\.search_documents").
 		WithArgs(job.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status"}).
-			AddRow(job.DocumentID, "stale text", "superseded"))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status", "normalized_sha256", "input_revision", "source_kind"}).
+			AddRow(job.DocumentID, "stale text", "superseded", testJob().ContentSHA256, "legacy_unknown", "event"))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs("document status superseded; embedding job cancelled", job.JobID, job.LeaseToken, job.LeaseFence).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -275,18 +280,18 @@ func TestProcessBatchCommitsWhenAllClaimedJobsAreDead(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs("worker-1", sqlmock.AnyArg(), 2).
+		WithArgs("worker-1", sqlmock.AnyArg(), 2, "null", "", "legacy_unknown").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"job_id", "document_id", "embedding_kind", "embedding_model",
-			"content_sha256", "priority", "lease_token", "lease_fence",
+			"content_sha256", "priority", "lease_token", "lease_fence", "input_revision",
 		}).
 			AddRow(first.JobID, first.DocumentID, first.EmbeddingKind, first.EmbeddingModel,
-				first.ContentSHA256, first.Priority, first.LeaseToken, first.LeaseFence).
+				first.ContentSHA256, first.Priority, first.LeaseToken, first.LeaseFence, "legacy_unknown").
 			AddRow(second.JobID, second.DocumentID, second.EmbeddingKind, second.EmbeddingModel,
-				second.ContentSHA256, second.Priority, second.LeaseToken, second.LeaseFence))
-	mock.ExpectQuery("SELECT document_id, normalized_text, status FROM atheros_search\\.search_documents").
+				second.ContentSHA256, second.Priority, second.LeaseToken, second.LeaseFence, "legacy_unknown"))
+	mock.ExpectQuery("SELECT document_id, normalized_text, status, normalized_sha256, input_revision, source_kind FROM atheros_search\\.search_documents").
 		WithArgs(first.DocumentID, second.DocumentID).
-		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status"}))
+		WillReturnRows(sqlmock.NewRows([]string{"document_id", "normalized_text", "status", "normalized_sha256", "input_revision", "source_kind"}))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs("document missing; embedding job cancelled", first.JobID, first.LeaseToken, first.LeaseFence).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -308,11 +313,12 @@ func TestStoreCompletionRollsBackVectorWhenLeaseIsLost(t *testing.T) {
 
 	job := testJob()
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, job)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, "[1]").
+		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO atheros_search\\.search_vectors_event").
-		WithArgs(job.DocumentID, job.EmbeddingModel, job.ContentSHA256, "[1]").
+		WithArgs(job.DocumentID, job.EmbeddingModel, job.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
 		WithArgs(job.JobID, job.LeaseToken, job.LeaseFence).
@@ -320,7 +326,7 @@ func TestStoreCompletionRollsBackVectorWhenLeaseIsLost(t *testing.T) {
 	mock.ExpectRollback()
 
 	pool := NewPool(db, checkingEmbedder{}, PoolConfig{}, zerolog.Nop())
-	err = pool.storeCompletion(context.Background(), job, []float32{1})
+	err = pool.storeCompletion(context.Background(), job, testVector())
 	require.ErrorContains(t, err, "lease lost")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -332,13 +338,14 @@ func TestStoreCompletionRollsBackWhenVectorWriteFails(t *testing.T) {
 
 	job := testJob()
 	mock.ExpectBegin()
+	expectCompletionGuard(mock, job)
 	mock.ExpectExec("INSERT INTO atheros_search\\.embeddings").
-		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, "[1]").
+		WithArgs(job.DocumentID, job.EmbeddingKind, job.EmbeddingModel, job.ContentSHA256, testVectorJSON(), "legacy_unknown").
 		WillReturnError(errors.New("vector write failed"))
 	mock.ExpectRollback()
 
 	pool := NewPool(db, checkingEmbedder{}, PoolConfig{}, zerolog.Nop())
-	err = pool.storeCompletion(context.Background(), job, []float32{1})
+	err = pool.storeCompletion(context.Background(), job, testVector())
 	require.ErrorContains(t, err, "vector write failed")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -351,7 +358,7 @@ func TestStoreCompletionHonorsCancellationBeforeTransaction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	pool := NewPool(db, checkingEmbedder{}, PoolConfig{}, zerolog.Nop())
-	err = pool.storeCompletion(ctx, testJob(), []float32{1})
+	err = pool.storeCompletion(ctx, testJob(), testVector())
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -379,7 +386,7 @@ func TestRecoverExpiredLeasesIsBounded(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	mock.ExpectExec("UPDATE atheros_search\\.embedding_jobs").
-		WithArgs(25).
+		WithArgs(25, "null", "", "legacy_unknown").
 		WillReturnResult(sqlmock.NewResult(0, 3))
 
 	recovered, err := recoverExpiredLeases(context.Background(), db, 25)
@@ -454,9 +461,21 @@ func testJob() Job {
 		DocumentID:     "document-1",
 		EmbeddingKind:  "event",
 		EmbeddingModel: "model-1",
-		ContentSHA256:  "sha-256",
+		ContentSHA256:  textChecksum("normalized wireless event"),
+		InputRevision:  "legacy_unknown",
 		Priority:       10,
 		LeaseToken:     "token-1",
 		LeaseFence:     7,
 	}
+}
+
+func testVector() []float32  { v := make([]float32, 768); v[0] = 1; return v }
+func testVectorJSON() string { b, _ := json.Marshal(testVector()); return string(b) }
+func expectCompletionGuard(mock sqlmock.Sqlmock, job Job) {
+	mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(job.DocumentID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT normalized_text, normalized_sha256, input_revision").WithArgs(job.DocumentID).
+		WillReturnRows(sqlmock.NewRows([]string{"normalized_text", "normalized_sha256", "input_revision", "source_kind"}).AddRow("normalized wireless event", job.ContentSHA256, "legacy_unknown", "event"))
+	mock.ExpectQuery("SELECT 1 FROM atheros_search\\.embedding_jobs").
+		WithArgs(job.JobID, job.DocumentID, job.ContentSHA256, job.EmbeddingModel, "legacy_unknown", job.LeaseToken, job.LeaseFence, job.EmbeddingKind).
+		WillReturnRows(sqlmock.NewRows([]string{"present"}).AddRow(1))
 }

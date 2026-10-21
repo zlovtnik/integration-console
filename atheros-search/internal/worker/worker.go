@@ -22,6 +22,9 @@ type Pool struct {
 }
 
 type PoolConfig struct {
+	SourceKinds       []string
+	EmbeddingModel    string
+	InputRevision     string
 	WorkerCount       int
 	LeaseSeconds      int
 	PollInterval      time.Duration
@@ -45,6 +48,7 @@ type Embedder interface {
 }
 
 type Job struct {
+	InputRevision  string
 	JobID          string
 	DocumentID     string
 	EmbeddingKind  string
@@ -57,6 +61,9 @@ type Job struct {
 }
 
 func NewPool(db *sql.DB, embedder Embedder, cfg PoolConfig, logger zerolog.Logger) *Pool {
+	if cfg.InputRevision == "" {
+		cfg.InputRevision = "legacy_unknown"
+	}
 	if cfg.WorkerCount < 1 {
 		cfg.WorkerCount = 1
 	}
@@ -143,7 +150,7 @@ func (p *Pool) processBatch(ctx context.Context, workerID string, logger zerolog
 
 	leaseDeadline := time.Now().Add(time.Duration(p.cfg.LeaseSeconds) * time.Second)
 
-	jobs, cancelled, err := claimJobs(ctx, tx, workerID, p.cfg.BatchSize, leaseDeadline)
+	jobs, cancelled, err := claimJobs(ctx, tx, workerID, p.cfg.BatchSize, leaseDeadline, JobScope{SourceKinds: p.cfg.SourceKinds, Model: p.cfg.EmbeddingModel, InputRevision: p.cfg.InputRevision})
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to claim jobs")
 		return
@@ -296,7 +303,10 @@ func (p *Pool) storeCompletion(ctx context.Context, job Job, vector []float32) e
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := insertVector(ctx, tx, job.DocumentID, kind, job.EmbeddingModel, job.ContentSHA256, vector); err != nil {
+	if err := guardCompletion(ctx, tx, job); err != nil {
+		return err
+	}
+	if err := insertVector(ctx, tx, job.DocumentID, kind, job.EmbeddingModel, job.ContentSHA256, vector, job.InputRevision); err != nil {
 		return err
 	}
 	if err := completeJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence); err != nil {
@@ -319,11 +329,14 @@ func (p *Pool) storeCompletions(ctx context.Context, jobs []Job, vectors [][]flo
 	}
 	defer func() { _ = tx.Rollback() }()
 	for i, job := range jobs {
+		if err := guardCompletion(ctx, tx, job); err != nil {
+			return err
+		}
 		kind, err := normalizeEmbeddingKind(job.EmbeddingKind)
 		if err != nil {
 			return err
 		}
-		if err := insertVector(ctx, tx, job.DocumentID, kind, job.EmbeddingModel, job.ContentSHA256, vectors[i]); err != nil {
+		if err := insertVector(ctx, tx, job.DocumentID, kind, job.EmbeddingModel, job.ContentSHA256, vectors[i], job.InputRevision); err != nil {
 			return err
 		}
 		if err := completeJob(ctx, tx, job.JobID, job.LeaseToken, job.LeaseFence); err != nil {
@@ -424,7 +437,7 @@ func (p *Pool) runLeaseRecovery(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			recovered, err := recoverExpiredLeases(ctx, p.db, p.cfg.BatchSize)
+			recovered, err := recoverExpiredLeases(ctx, p.db, p.cfg.BatchSize, JobScope{SourceKinds: p.cfg.SourceKinds, Model: p.cfg.EmbeddingModel, InputRevision: p.cfg.InputRevision})
 			if err != nil {
 				p.logger.Error().Err(err).Msg("embedding lease recovery failed")
 			} else if recovered > 0 {

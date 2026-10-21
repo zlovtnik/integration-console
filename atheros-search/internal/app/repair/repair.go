@@ -25,8 +25,15 @@ func Run() error {
 	schemaManifestSHA256 := flag.String("schema-manifest-sha256", envOr("ATHSEARCH_SCHEMA_MANIFEST_SHA256", ""), "Expected schema manifest SHA-256 (required)")
 	action := flag.String("action", "status", "Action: status, reset-stale, retry-failed (retryable jobs only), cancel-superseded (non-active documents), cancel-orphaned (missing documents)")
 	staleMinutes := flag.Int("stale-minutes", 60, "Minutes after which a leased job is considered stale")
-	cancelLimit := flag.Int("limit", 5000, "Maximum rows for cancel-superseded and cancel-orphaned per invocation")
+	cancelLimit := flag.Int("limit", 5000, "Maximum rows per invocation (proxy operations capped at 1000)")
 	dryRun := flag.Bool("dry-run", false, "Count affected rows without writing (cancel-superseded, cancel-orphaned)")
+	sourceKinds := flag.String("source-kinds", "", "Comma-separated proxy kinds for proxy-status/proxy-reconcile")
+	model := flag.String("model", "", "Exact model for scoped proxy operations")
+	inputRevision := flag.String("input-revision", "", "Exact preprocessing/artifact revision for scoped proxy operations")
+	afterJobID := flag.String("after-job-id", "", "Resume scoped inspection after this opaque job UUID")
+	apply := flag.Bool("apply", false, "Apply one scoped proxy-reconcile page; default is read-only")
+	campaignID := flag.String("campaign-id", "", "Durable scoped repair campaign identity (required with apply)")
+	createdBefore := flag.String("created-before", "", "Frozen job creation cutoff in RFC3339 (required for proxy operations)")
 	flag.Parse()
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
@@ -61,6 +68,16 @@ func Run() error {
 	logger.Info().Msg("schema readiness gate passed")
 
 	switch *action {
+	case "proxy-status", "proxy-reconcile":
+		cutoff, parseErr := time.Parse(time.RFC3339, *createdBefore)
+		if parseErr != nil {
+			return fmt.Errorf("created-before must be a frozen RFC3339 timestamp")
+		}
+		page, scopedErr := repairProxyPage(ctx, db, Scope{Kinds: strings.Split(*sourceKinds, ","), Model: *model, InputRevision: *inputRevision, AfterJobID: *afterJobID, Limit: min(*cancelLimit, 1000), CampaignID: *campaignID, CreatedBefore: cutoff}, *action == "proxy-reconcile" && *apply && !*dryRun)
+		err = scopedErr
+		if err == nil {
+			logger.Info().Int("scanned", page.Scanned).Int("completed_missing_vector", page.CompletedMissingVector).Int64("retried", page.Retried).Str("after_job_id", page.AfterJobID).Msg("bounded proxy repair page")
+		}
 	case "status":
 		err = showStatus(ctx, db, logger)
 	case "reset-stale":

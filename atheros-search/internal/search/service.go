@@ -76,7 +76,7 @@ func (s *Service) Search(ctx context.Context, req *searchv1.SearchRequest) (resp
 	searchCtx, cancel := context.WithTimeout(ctx, s.Config.SearchTimeout)
 	defer cancel()
 
-	opts := Options{TopK: topK, MinSimilarity: req.MinSimilarity, Kinds: kinds, Filters: req.Filters, OverfetchFactor: s.Config.DenseOverfetchFactor}
+	opts := Options{TopK: topK, MinSimilarity: req.MinSimilarity, Kinds: kinds, Filters: req.Filters, OverfetchFactor: s.Config.DenseOverfetchFactor, InputRevision: s.Config.EmbeddingInputRevision}
 	var denseResults, sparseResults []RawResult
 	var qvec []float32
 	var modeUsed = mode

@@ -96,6 +96,7 @@ type staticEmbedder struct{}
 
 func (staticEmbedder) Embed(context.Context, []string, embed.Kind) ([][]float32, error) {
 	vector := make([]float32, embeddingDimensions)
+	vector[0] = 1
 	return [][]float32{vector}, nil
 }
 

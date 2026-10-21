@@ -88,17 +88,19 @@ func (c *QueryCache) InvalidateKind(kind Kind) {
 }
 
 type CachedClient struct {
-	Inner Client
-	Cache *QueryCache
-	Hits  func()
-	Miss  func()
+	Namespace string
+	Inner     Client
+	Cache     *QueryCache
+	Hits      func()
+	Miss      func()
 }
 
 func (c CachedClient) Embed(ctx context.Context, texts []string, kind Kind) ([][]float32, error) {
-	if len(texts) != 1 {
+	if len(texts) != 1 || LaneFromContext(ctx) == LaneWorker {
 		return c.Inner.Embed(ctx, texts, kind)
 	}
-	if vec, ok := c.Cache.Get(texts[0], kind); ok {
+	cacheText := c.Namespace + "\x00" + texts[0]
+	if vec, ok := c.Cache.Get(cacheText, kind); ok {
 		if c.Hits != nil {
 			c.Hits()
 		}
@@ -112,7 +114,7 @@ func (c CachedClient) Embed(ctx context.Context, texts []string, kind Kind) ([][
 		return nil, err
 	}
 	if len(vectors) == 1 {
-		c.Cache.Put(texts[0], kind, vectors[0])
+		c.Cache.Put(cacheText, kind, vectors[0])
 	}
 	return vectors, nil
 }
