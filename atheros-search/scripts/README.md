@@ -1,5 +1,9 @@
 # Atheros Search operational commands
 
+These commands operate on embedding jobs and vectors; they do not provision
+the database or canonical schema. Run root `make atheros-search-*` wrappers from
+the parent ssl-proxy workspace and `go run` commands from `atheros-search/`.
+
 Proxy recovery uses bounded `proxy-status` and `proxy-reconcile` pages. Supply
 `-source-kinds=proxy_event,proxy_blocked_host_window`, `-model`,
 `-input-revision`, `-created-before` (a frozen RFC3339 cutoff), and `-limit`
@@ -16,15 +20,34 @@ reset/retry commands below are not the proxy recovery runbook.
 Repository-level build and test entry points:
 
 ```bash
-make atheros-search-proto
+make atheros-search-proto-check
 make atheros-search-build
 make atheros-search-test
 ```
 
+Use `make atheros-search-proto` to regenerate bindings only after changing the
+source `.proto`. Pinned generator requirements are in the
+[quality guide](../docs/quality.md).
+
 Embedding-job repair is implemented by `cmd/embedding-job-repair`:
+
+The CLI requires `ATHSEARCH_POSTGRES_DSN` and
+`ATHSEARCH_SCHEMA_MANIFEST_SHA256` (or their `-dsn` and
+`-schema-manifest-sha256` equivalents), including for status inspection. It does
+not assemble a DSN from the service's discrete host/password variables. Supply
+`ATHSEARCH_POSTGRES_TLS_CA_FILE` and `ATHSEARCH_POSTGRES_TLS_SERVER_NAME` for
+verified TLS, plus the certificate/key pair when client certificates are used.
+Use the same restricted runtime identity and canonical readiness checksum as
+the service. Do not place credentials in shell history.
 
 ```bash
 go run ./cmd/embedding-job-repair -action=status
+```
+
+The following commands change durable job state unless `-dry-run` is shown.
+Broad retry/reset actions are separate from the bounded proxy campaign workflow:
+
+```bash
 go run ./cmd/embedding-job-repair -action=reset-stale -stale-minutes=60
 go run ./cmd/embedding-job-repair -action=retry-failed
 go run ./cmd/embedding-job-repair -action=cancel-superseded -dry-run
@@ -40,7 +63,6 @@ go run ./cmd/embedding-job-repair -action=cancel-orphaned -limit=5000
 - `cancelled` is terminal: `retry-failed` will not reset it. Restoring a
   document requires a new job from Octopus `embedding-preparer`.
 
-Run repair commands with the same Postgres DSN, CA and server-name verification as
-the service. Start with `status`, capture evidence and confirm the exact
+Start with `status`, capture evidence and confirm the exact
 affected jobs before a mutation. The canonical service behavior and worker
 configuration are in the [Atheros Search README](../README.md).

@@ -27,17 +27,23 @@ cd ssl-proxy
 make atheros-search-test
 ```
 
-Run the root `make` commands from that workspace root. Commands documented in
-this README use their indicated `atheros-search/` or `atheros-search-ui/`
-directory. This checkout does not provision a standalone database or complete
-platform.
+Run the root `make` commands from that workspace root. Go unit tests can run
+from `atheros-search/` without a live database; UI tests can run from
+`atheros-search-ui/` with Bun. The API module declares Go 1.25, while its quality
+workflow uses Go 1.26 and pinned generator/linter tools described in the
+[quality guide](atheros-search/docs/quality.md).
+
+Running the API also requires provisioned PostgreSQL/pgvector schemas, runtime
+grants and the canonical manifest checksum. The authenticated UI requires a
+matching Keycloak client and API issuer/audience configuration. This checkout
+does not provision those services or a standalone platform.
 
 ## What it delivers
 
 | Capability | What an operator can do | How the system keeps it credible |
 |---|---|---|
 | Search and explain | Find wireless events, devices, proxy events and blocked-host windows; inspect why a result ranked | Dense, sparse and hybrid retrieval run against search-facing PostgreSQL projections |
-| Network investigation | Explore devices, access points, clients, alerts and their observed relationships | The UI distinguishes frame evidence from verified connectivity and marks bounded results explicitly |
+| Network investigation | Explore a network overview, inspect a device or AP, and page through its evidence | Scoped investigation and evidence routes retain observation semantics and mark bounded results explicitly |
 | Asset and identity review | Browse inventory, inspect merge candidates and record final decisions | Candidate similarity is kept separate from confirmed identity; final decisions are role-protected and durable |
 | Semantic enrichment | Turn prepared document text into 768-dimension vectors | Workers claim jobs with a token and fence, call the embedding backend outside a transaction, then atomically write and complete the matching job |
 | Operational visibility | Inspect job state, workers, data freshness and semantic-backend health | Readiness, Prometheus metrics, ETL health, structured logs and OTLP tracing expose the real operating state |
@@ -115,8 +121,8 @@ separates implemented behaviour from proposed improvements.
 | Surface | Technology | Responsibility |
 |---|---|---|
 | [Atheros Search API](atheros-search/) | Go, HTTP, gRPC, PostgreSQL/pgvector | Search, explain, graph, inventory, ETL health, saved views, embedding claims and vector writes |
-| [Integration Console](atheros-search-ui/) | SolidJS, Bun, Vite, Keycloak | Authenticated Search, Explain, Graph and Inventory workflows |
-| Optional DQ integration | Go HTTP client and [DQ manager](../../services/dq/README.md) | Explicit dedup-run admission and status; disabled until both API and policy gates are enabled |
+| [Integration Console](atheros-search-ui/) | SolidJS, Bun, Vite, Keycloak | Authenticated Search, record detail, network map, Inventory and DQ workspace |
+| Optional DQ integration | Go HTTP client and [DQ manager](../../services/dq/README.md) | Runtime-gated embedded workspace, explicit run admission, artifacts and status; backend policy controls execution |
 
 The API listens on HTTP 8080, gRPC 50051 and Prometheus 9090. The UI is a
 static application that reverse-proxies `/v1/` to the in-cluster API, preserving
@@ -146,7 +152,7 @@ cluster edits.
 atheros-search/
 |- atheros-search/               # Go API, background workers and public protobuf contract
 |  |- cmd/server/                # Service entry point
-|  |- cmd/embedding-job-repair/  # Bounded operator repair CLI
+|  |- cmd/embedding-job-repair/   # Bounded operator repair CLI
 |  |- internal/                  # Search, reporting, workers, auth, database and transport packages
 |  |- docs/                      # Contract, package-boundary and quality rules
 |  |- proto/                     # Versioned gRPC/protobuf API definition
@@ -154,7 +160,7 @@ atheros-search/
 `- atheros-search-ui/            # SolidJS application
    |- src/api/                   # Typed API client and runtime response validation
    |- src/auth/                  # Keycloak session and safe return-path handling
-   |- src/pages/                 # Search, Explain, Graph and Inventory views
+   |- src/pages/                 # Search, record detail, network, Inventory and DQ views
    `- tests/                     # Unit, accessibility and browser coverage
 ```
 
@@ -165,14 +171,17 @@ The project validates the boundaries that matter as much as happy-path output:
 ```bash
 make atheros-search-test          # Go unit and integration-style tests
 make atheros-search-quality       # Format, vet, race, lint, boundaries, Protobuf and fixtures
+make atheros-search-fixtures      # Shared Go fixtures and UI response validation
 make atheros-search-ui-check      # UI tests and production build
 make atheros-search-stack-contract
 make atheros-search-db-contract
 ```
 
 The database and stack-contract checks exercise canonical manifests, runtime
-grants and cross-project contracts. The exact requirements are documented in
-the [Atheros Search quality guide](atheros-search/docs/quality.md).
+grants and cross-project contracts. Required database checks need Docker and
+the parent's Python test requirements; missing prerequisites or skipped tests
+fail the required check. The exact requirements are documented in the
+[Atheros Search quality guide](atheros-search/docs/quality.md).
 
 ## Technical references
 
