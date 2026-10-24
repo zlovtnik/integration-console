@@ -9,14 +9,13 @@ derivation.
 For the product architecture, engineering approach and repository map, see the
 [Atheros Search README](../README.md).
 
-The Integration Console is the SolidJS UI in
-[`apps/integration-console/atheros-search-ui`](../atheros-search-ui/);
-there is no Rails Search console.
+The Integration Console is the sibling [SolidJS UI](../atheros-search-ui/).
 
 ## Runtime responsibilities
 
 - dense `VECTOR(768)`, sparse and hybrid search
-- graph, inventory, explain, filter-suggestion and merge-decision APIs
+- network map, scoped investigation/evidence, graph, inventory, record-context,
+  explain, filter-suggestion and merge-decision APIs
 - query analytics using hashed query/session/result identifiers
 - readiness and ETL health/stream APIs
 - token-and-fence lease claiming of `embedding_jobs`, committed before external I/O
@@ -103,14 +102,13 @@ excluded from the environment slices pending a separate reviewed promotion.
 
 ## Database and readiness
 
-Database settings:
+Database configuration accepts only `ATHSEARCH_POSTGRES_*` variables.
+`DATABASE_URL` and `SYNC_DATABASE_URL` are ignored. A supplied DSN selects the
+connection directly; otherwise the service builds one from the discrete
+settings below. The defaults in this table are literal values, not shared
+environment-variable fallbacks.
 
-An explicit, valid `ATHSEARCH_*` value takes precedence over the shared
-fallback shown below. `None` means that no shared-variable fallback exists.
-In particular, `DATABASE_URL` and `SYNC_DATABASE_URL` are not fallbacks for
-`ATHSEARCH_POSTGRES_DSN` and are ignored.
-
-| Variable | Shared fallback | Purpose |
+| Variable | Default | Purpose |
 |---|---|---|
 | `ATHSEARCH_POSTGRES_DSN` | None | Compatibility native PostgreSQL DSN; when absent, the discrete settings below are required |
 | `ATHSEARCH_POSTGRES_HOST` | None | Postgres host used to build the native DSN |
@@ -124,10 +122,11 @@ In particular, `DATABASE_URL` and `SYNC_DATABASE_URL` are not fallbacks for
 | `ATHSEARCH_POSTGRES_TLS_KEY_FILE` | None | Optional PEM client private key; must be supplied with the certificate |
 | `ATHSEARCH_POSTGRES_TLS_SERVER_NAME` | None | Required certificate identity when a CA is configured |
 | `ATHSEARCH_SCHEMA_MANIFEST_SHA256` | None | Exact 64-character canonical manifest checksum |
-| `ATHSEARCH_WIRELESS_PROJECTION` | `false` | Selects the compact wireless topology graph by default when the stream projector is enabled |
 
-Startup verifies the selected database, UTC/strict SQL session, Postgres version,
-manifest checksum and vector readiness. Pool/search controls include:
+Startup verifies database `sync`, schema `atheros_search`, a UTC session,
+PostgreSQL 16 or newer, manifest checksum and vector readiness. Runtime schema
+verification never applies DDL. A missing or mismatched readiness record prevents
+the service from becoming ready. Pool/search controls include:
 
 | Variable | Default | Shared fallback |
 |---|---:|---|
@@ -141,6 +140,10 @@ manifest checksum and vector readiness. Pool/search controls include:
 | `ATHSEARCH_SCHEMA_READY_REQUIRED` | `true` | None |
 | `ATHSEARCH_SCHEMA_READY_TIMEOUT_MS` | `60000` | None |
 | `ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS` | `1000` | None |
+| `ATHSEARCH_WIRELESS_PROJECTION` | `false` | None |
+
+`ATHSEARCH_WIRELESS_PROJECTION` selects the compact wireless topology graph
+when its projector is enabled; it does not start that Octopus projector.
 
 ## Embedding workers
 
@@ -168,6 +171,7 @@ Embedding settings use these shared fallbacks only when their corresponding
 | `ATHSEARCH_EMBEDDING_DIMENSIONS` | `768` | `VECTOR_EMBEDDING_DIMENSIONS` | Expected vector width |
 | `ATHSEARCH_EMBEDDING_MAX_TOKENS` | `512` | None | Model context; chunks are capped at 480 content tokens |
 | `ATHSEARCH_EMBEDDING_REQUEST_CONCURRENCY` | `4` | None | In-flight `/v1/embeddings` requests; match it to backend slots |
+| `ATHSEARCH_EMBEDDING_QUERY_RESERVED_SLOTS` | `1` | None | Backend slots reserved for interactive queries rather than bulk workers |
 | `ATHSEARCH_EMBEDDING_TOKENIZER_CONCURRENCY` | `8` | None | In-flight `/tokenize` and `/detokenize` requests |
 | `ATHSEARCH_EMBEDDING_MAX_CHUNKS_PER_INPUT` | `1024` | None | Chunk bound for one source; a source above it fails durably (`0` disables) |
 
@@ -183,10 +187,13 @@ OpenAI-compatible and Ollama response shapes. Enabling workers requires a
 non-empty backend URL and fails startup otherwise. With workers disabled, an
 empty backend selects the zero-vector client for search wiring tests only.
 
-The app-stack Kustomization passes worker, embedding, Postgres TLS and manifest
-settings to the container. Octopus produces search documents and embedding
-jobs only when `embedding-text-builder` and `embedding-preparer` are enabled
-after their dependencies; both remain disabled by default.
+The [Kubernetes workload](../../../cyber-stack/base/atheros-search/deployment.yaml)
+enables workers and passes embedding, Postgres TLS and manifest settings to the
+container. Octopus must separately enable `embedding-text-builder` and
+`embedding-preparer` after their dependencies to produce documents and jobs;
+the [coordinator workload](../../../cyber-stack/base/java-coordinator/deployment.yaml)
+includes both in its enabled processor list. Binary defaults alone do not
+describe the deployed configuration.
 
 ## Network and API
 
@@ -219,6 +226,7 @@ Key routes:
 | `POST` | `/v1/network-map` | Per-device and per-AP network overview |
 | `POST` | `/v1/graph` | Graph projection query |
 | `POST` | `/v1/inventory` | Inventory query |
+| `GET` | `/v1/inventory/merge-candidates/{candidate_id}` | Candidate pair detail and evidence |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Persist a final merge decision (operator/admin) |
 | `GET` | `/v1/saved-views?surface=graph_projection` | List the caller's saved graph views |
 | `POST` | `/v1/saved-views` | Create a saved graph view (`201`) |
@@ -365,17 +373,35 @@ Do not log raw queries, source keys, session IDs, tokens or full MACs. See
 
 ## Development
 
+Run these commands from this directory. The module declares Go 1.25; CI quality
+checks use Go 1.26. Ordinary unit tests use mocks and need no running database.
+
 ```bash
 go test ./...
-go build ./cmd/server
+make build
 make proto-check
-go run ./cmd/embedding-job-repair -action=status
 ```
+
+`make build` writes the server binary to `/tmp/atheros-search-server`. Running it
+requires the database and manifest settings above, plus an embedding backend for
+semantic queries/workers and matching authentication configuration for an
+authenticated UI. A zero-vector client is a wiring-test option, not a semantic
+backend.
 
 See [maintenance rules](docs/quality.md), [package map](docs/package-map.md), and
 [contract inventory](docs/contracts.md) for required checks and ownership.
-Run `make quality-go` and `make ui-check`; canonical database checks require
-`ATHSEARCH_STACK_ROOT`. Use `make proto` for generation.
+Run `make quality-go`, `make fixtures` and `make ui-check`; install the pinned
+tools with `make tools` and provide protoc 25.1 before protobuf checks.
+Canonical checks require the absolute parent checkout path:
+
+```bash
+make stack-contract ATHSEARCH_STACK_ROOT=/absolute/path/to/ssl-proxy
+make db-contract ATHSEARCH_STACK_ROOT=/absolute/path/to/ssl-proxy
+```
+
+The required database check provisions ephemeral pgvector PostgreSQL through
+Docker and fails if prerequisites are missing or tests skip. It does not use
+the production database.
 
 Run protobuf generation only after changing the source `.proto`. Repair
 commands and deployment cautions are documented in
