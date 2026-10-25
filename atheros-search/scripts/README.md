@@ -10,8 +10,9 @@ whose two vector stores are missing or disagree. Capture the returned
 the previous state, attempts and diagnostic. Applied campaigns resume from their
 persisted cursor and reject changed scope. A fresh Octopus queue policy and
 sufficient headroom are required before a repair can enqueue work. Failed, cancelled, exhausted,
-superseded and orphaned work is not revived by this operation. Legacy broad
-reset/retry commands below are not the proxy recovery runbook.
+superseded and orphaned work is not revived by this operation. Legacy
+reset/retry commands below accept `-limit` and only target active non-proxy
+documents; they cannot bypass scoped proxy campaign receipts and queue budgets.
 
 Repository-level build and test entry points:
 

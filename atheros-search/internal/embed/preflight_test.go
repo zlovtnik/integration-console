@@ -2,12 +2,51 @@ package embed
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateTokenizerRejectsSameLengthCorruption(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tokenize":
+			var request tokenizeRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			tokens := []int{1, 2}
+			if request.Content == "corrupted readiness" {
+				tokens = []int{3, 4}
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(tokenizeResponse{Tokens: tokens}))
+		case "/detokenize":
+			require.NoError(t, json.NewEncoder(w).Encode(detokenizeResponse{Content: "corrupted readiness"}))
+		default:
+			t.Errorf("unexpected preflight endpoint: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "contract-model", 2, 512)
+	preflight := NewPreflight(client.ValidateTokenizer)
+	require.False(t, preflight.CheckNow(t.Context()))
+	require.False(t, preflight.Ready())
+	require.Equal(t, PreflightIncompatible, preflight.Snapshot().State)
+}
+
+func TestValidateTokenizerAcceptsExactRoundTrip(t *testing.T) {
+	server := (&llamaFake{}).server()
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "contract-model", 2, 512)
+	preflight := NewPreflight(client.ValidateTokenizer)
+	require.True(t, preflight.CheckNow(t.Context()))
+	require.True(t, preflight.Ready())
+	require.Equal(t, PreflightCompatible, preflight.Snapshot().State)
+}
 
 func TestPreflightHoldsWorkersUntilTokenizerIsProven(t *testing.T) {
 	backendHealthy := false

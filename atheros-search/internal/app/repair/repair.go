@@ -81,13 +81,17 @@ func Run() error {
 	case "status":
 		err = showStatus(ctx, db, logger)
 	case "reset-stale":
-		if *staleMinutes <= 0 {
-			err = fmt.Errorf("stale-minutes must be greater than zero")
+		if *staleMinutes <= 0 || *cancelLimit <= 0 {
+			err = fmt.Errorf("stale-minutes and limit must be greater than zero")
 		} else {
-			err = resetStaleJobs(ctx, db, logger, time.Duration(*staleMinutes)*time.Minute)
+			err = resetStaleJobs(ctx, db, logger, time.Duration(*staleMinutes)*time.Minute, *cancelLimit)
 		}
 	case "retry-failed":
-		err = retryFailedJobs(ctx, db, logger)
+		if *cancelLimit <= 0 {
+			err = fmt.Errorf("limit must be greater than zero")
+		} else {
+			err = retryFailedJobs(ctx, db, logger, *cancelLimit)
+		}
 	case "cancel-superseded":
 		if *cancelLimit <= 0 {
 			err = fmt.Errorf("limit must be greater than zero")
@@ -252,18 +256,28 @@ ORDER BY embedding_kind
 	return nil
 }
 
-func resetStaleJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, staleThreshold time.Duration) error {
+func resetStaleJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, staleThreshold time.Duration, limit int) error {
 	result, err := db.ExecContext(ctx, `
-UPDATE atheros_search.embedding_jobs
+WITH targets AS (
+ SELECT job.job_id FROM atheros_search.embedding_jobs job
+ JOIN atheros_search.search_documents document USING(document_id)
+ WHERE job.status = 'leased' AND job.lease_expires_at < $1
+   AND job.attempt_count < job.max_attempts
+   AND document.status='active'
+   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window')
+ ORDER BY job.job_id LIMIT $2 FOR UPDATE OF job SKIP LOCKED
+)
+UPDATE atheros_search.embedding_jobs job
 SET status = 'pending',
     owner_id = NULL,
     lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
-WHERE status = 'leased'
-  AND lease_expires_at < $1
-`, time.Now().Add(-staleThreshold))
+FROM targets
+WHERE job.job_id=targets.job_id AND job.status = 'leased'
+  AND job.lease_expires_at < $1
+`, time.Now().Add(-staleThreshold), limit)
 	if err != nil {
 		return fmt.Errorf("reset stale jobs: %w", err)
 	}
@@ -275,18 +289,27 @@ WHERE status = 'leased'
 	return nil
 }
 
-func retryFailedJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger) error {
+func retryFailedJobs(ctx context.Context, db *sql.DB, logger zerolog.Logger, limit int) error {
 	result, err := db.ExecContext(ctx, `
-UPDATE atheros_search.embedding_jobs
+WITH targets AS (
+ SELECT job.job_id FROM atheros_search.embedding_jobs job
+ JOIN atheros_search.search_documents document USING(document_id)
+ WHERE job.status = 'failed' AND job.attempt_count < job.max_attempts
+   AND document.status='active'
+   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window')
+ ORDER BY job.job_id LIMIT $1 FOR UPDATE OF job SKIP LOCKED
+)
+UPDATE atheros_search.embedding_jobs job
 SET status = 'pending',
     owner_id = NULL,
     lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
-WHERE status = 'failed'
-  AND attempt_count < max_attempts
-`)
+FROM targets
+WHERE job.job_id=targets.job_id AND job.status = 'failed'
+  AND job.attempt_count < job.max_attempts
+`, limit)
 	if err != nil {
 		return fmt.Errorf("retry failed jobs: %w", err)
 	}

@@ -92,6 +92,7 @@ describe('record context normalization', () => {
         {
           embedding_kind: 'event',
           embedding_model: 'text-embed-v1',
+          input_revision: 'legacy_unknown',
           status: 'completed',
           attempt_count: 1,
           max_attempts: 5,
@@ -118,6 +119,7 @@ describe('record context normalization', () => {
     expect(result.related?.neighbours[0]?.corroborated).toBe(true);
     expect(result.related?.links[0]?.weight_basis).toBe('time_overlap_windows');
     expect(result.embedding[0]?.content_current).toBe(true);
+    expect(result.embedding[0]?.input_revision).toBe('legacy_unknown');
     expect(result.embedding[0]?.last_error).toBeUndefined();
     expect(result.freshness?.coverage_status).toBe('partial');
   });

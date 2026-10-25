@@ -61,6 +61,9 @@ type RecordFields struct {
 // with neither a device MAC nor an AP BSSID has no neighbourhood to report,
 // which is surfaced as unavailable rather than as an empty result.
 func (f RecordFields) anchor() (kind, id string) {
+	if f.SourceKind == "proxy_event" || f.SourceKind == "proxy_blocked_host_window" {
+		return "", ""
+	}
 	if queryscope.MacPattern.MatchString(f.SourceMAC) {
 		return "device", f.SourceMAC
 	}
@@ -145,6 +148,7 @@ type RelatedContext struct {
 type EmbeddingWork struct {
 	EmbeddingKind  string     `json:"embedding_kind"`
 	EmbeddingModel string     `json:"embedding_model"`
+	InputRevision  string     `json:"input_revision"`
 	Status         string     `json:"status"`
 	AttemptCount   int        `json:"attempt_count"`
 	MaxAttempts    int        `json:"max_attempts"`
@@ -352,6 +356,9 @@ func (s *Service) RecordContext(ctx context.Context, req RecordContextRequest) (
 	switch anchorKind {
 	case "":
 		response.RelatedReason = "This record carries no device MAC and no AP BSSID, so the evidence projection has no neighbourhood to report for it."
+		if document.Fields.SourceKind == "proxy_event" || document.Fields.SourceKind == "proxy_blocked_host_window" {
+			response.RelatedReason = "Proxy timeline evidence is unavailable; wireless activity and neighbourhood projections do not describe proxy records."
+		}
 	default:
 		if err := s.loadRecordActivity(ctx, tx, anchorKind, anchorID, windowStart, windowEnd, bucket, response); err != nil {
 			return nil, err
@@ -362,7 +369,7 @@ func (s *Service) RecordContext(ctx context.Context, req RecordContextRequest) (
 		}
 		response.Related = related
 	}
-	if err := s.loadRecordEmbedding(ctx, tx, document.DocumentID, document.Fields.NormalizedSHA, response); err != nil {
+	if err := s.loadRecordEmbedding(ctx, tx, document.DocumentID, response); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -375,7 +382,7 @@ func embeddingContractNote(documentSHA string) string {
 	if strings.TrimSpace(documentSHA) == "" {
 		return "This document has no content hash, so embedding freshness cannot be compared."
 	}
-	return "content_current is true only when a stored vector exists, the job completed, and the job content hash matches the live document hash."
+	return "content_current requires a completed job and a nonzero vector matching the active document text hash and input revision."
 }
 
 func (s *Service) loadRecordActivity(ctx context.Context, tx *sql.Tx, anchorKind, anchorID string, windowStart, windowEnd time.Time, bucketMinutes int, response *RecordContext) error {
@@ -623,18 +630,26 @@ LIMIT $4`, anchorMAC, windowStart, windowEnd, recordContextNeighbourLimit)
 	return rows.Err()
 }
 
-func (s *Service) loadRecordEmbedding(ctx context.Context, tx *sql.Tx, documentID, documentSHA string, response *RecordContext) error {
+func (s *Service) loadRecordEmbedding(ctx context.Context, tx *sql.Tx, documentID string, response *RecordContext) error {
 	rows, err := tx.QueryContext(ctx, `SELECT job.embedding_kind, job.embedding_model, job.status,
  COALESCE(job.attempt_count,0), COALESCE(job.max_attempts,0), job.next_attempt_at,
  COALESCE(job.last_error,''), job.completed_at, vector.embedded_at,
- btrim(COALESCE(job.content_sha256,'')), (vector.embedding_id IS NOT NULL) AS has_vector
+ btrim(COALESCE(job.content_sha256,'')), (vector.embedding_id IS NOT NULL) AS has_vector,
+ job.input_revision,
+ (vector.embedding_id IS NOT NULL AND job.status='completed' AND document.status='active'
+  AND job.content_sha256=document.normalized_sha256 AND job.input_revision=document.input_revision
+  AND document.normalized_sha256=encode(sha256(convert_to(document.normalized_text,'UTF8')),'hex')
+  AND vector.embedding OPERATOR(public.<#>) vector.embedding < 0) AS content_current
 FROM atheros_search.embedding_jobs job
+JOIN atheros_search.search_documents document ON document.document_id=job.document_id
 LEFT JOIN atheros_search.embeddings vector
   ON vector.document_id = job.document_id
  AND vector.embedding_kind = job.embedding_kind
  AND vector.embedding_model = job.embedding_model
+ AND vector.input_revision = job.input_revision
+ AND vector.content_sha256 = job.content_sha256
 WHERE job.document_id = $1
-ORDER BY job.embedding_kind ASC, job.embedding_model ASC`, documentID)
+ORDER BY job.embedding_kind ASC, job.embedding_model ASC, job.input_revision ASC`, documentID)
 	if err != nil {
 		return err
 	}
@@ -643,12 +658,10 @@ ORDER BY job.embedding_kind ASC, job.embedding_model ASC`, documentID)
 		var item EmbeddingWork
 		if err := rows.Scan(&item.EmbeddingKind, &item.EmbeddingModel, &item.Status,
 			&item.AttemptCount, &item.MaxAttempts, &item.NextAttemptAt, &item.LastError,
-			&item.CompletedAt, &item.EmbeddedAt, &item.ContentSHA, &item.HasVector); err != nil {
+			&item.CompletedAt, &item.EmbeddedAt, &item.ContentSHA, &item.HasVector,
+			&item.InputRevision, &item.ContentCurrent); err != nil {
 			return err
 		}
-		item.ContentCurrent = item.HasVector &&
-			documentSHA != "" &&
-			strings.EqualFold(strings.TrimSpace(item.ContentSHA), strings.TrimSpace(documentSHA))
 		response.Embedding = append(response.Embedding, item)
 	}
 	return rows.Err()

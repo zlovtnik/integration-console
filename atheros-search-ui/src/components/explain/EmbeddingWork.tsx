@@ -57,6 +57,7 @@ export function EmbeddingWorkList(props: {
                   <span class="mono">
                     {item.embedding_kind} / {item.embedding_model}
                   </span>
+                  <span class="mono">input revision {item.input_revision}</span>
                   <span>
                     attempt {item.attempt_count} of {item.max_attempts}
                   </span>

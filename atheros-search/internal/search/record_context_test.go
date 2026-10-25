@@ -158,7 +158,7 @@ func TestRecordContextWithoutAnchorExplainsItself(t *testing.T) {
 	mock.ExpectQuery("FROM atheros_search.embedding_jobs").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"embedding_kind", "embedding_model", "status", "attempt_count", "max_attempts",
-			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector",
+			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector", "input_revision", "content_current",
 		}))
 	mock.ExpectCommit()
 
@@ -217,10 +217,10 @@ func TestRecordContextLoadsActivityAndEmbedding(t *testing.T) {
 		WithArgs("doc-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"embedding_kind", "embedding_model", "status", "attempt_count", "max_attempts",
-			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector",
+			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector", "input_revision", "content_current",
 		}).
-			AddRow("event", "text-embed-v1", "completed", 1, 5, nil, "", observed, observed, "sha-1", true).
-			AddRow("device", "text-embed-v1", "failed", 5, 5, observed.Add(time.Hour), "backend refused payload", nil, nil, "sha-1", false))
+			AddRow("event", "text-embed-v1", "completed", 1, 5, nil, "", observed, observed, "sha-1", true, "legacy_unknown", true).
+			AddRow("device", "text-embed-v1", "failed", 5, 5, observed.Add(time.Hour), "backend refused payload", nil, nil, "sha-1", false, "legacy_unknown", false))
 	mock.ExpectCommit()
 
 	response, err := svc.RecordContext(t.Context(), RecordContextRequest{SourceKey: "frame-key"})
@@ -304,19 +304,30 @@ func TestEmbeddingWorkContentCurrentRequiresMatchingHash(t *testing.T) {
 		WithArgs("doc-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"embedding_kind", "embedding_model", "status", "attempt_count", "max_attempts",
-			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector",
+			"next_attempt_at", "last_error", "completed_at", "embedded_at", "content_sha256", "has_vector", "input_revision", "content_current",
 		}).
-			AddRow("event", "m1", "completed", 1, 5, nil, "", observed, observed, "stale-sha", true).
-			AddRow("device", "m1", "failed", 5, 5, nil, "backend refused", nil, nil, "live-sha", false))
+			AddRow("event", "m1", "completed", 1, 5, nil, "", observed, observed, "stale-sha", true, "legacy_unknown", false).
+			AddRow("device", "m1", "failed", 5, 5, nil, "backend refused", nil, nil, "live-sha", false, "legacy_unknown", false).
+			AddRow("event", "m2", "failed", 5, 5, nil, "backend refused", nil, observed, "live-sha", true, "legacy_unknown", false))
 	mock.ExpectCommit()
 
 	response, err := svc.RecordContext(t.Context(), RecordContextRequest{SourceKey: "frame-key"})
 	require.NoError(t, err)
-	require.Len(t, response.Embedding, 2)
+	require.Len(t, response.Embedding, 3)
 	require.False(t, response.Embedding[0].ContentCurrent, "a stale content hash is not current even with a stored vector")
 	require.Equal(t, "completed", response.Embedding[0].Status)
 	require.False(t, response.Embedding[1].ContentCurrent, "no vector means the job is not embedded")
 	require.Equal(t, "backend refused", response.Embedding[1].LastError)
 	require.Equal(t, 5, response.Embedding[1].MaxAttempts)
+	require.False(t, response.Embedding[2].ContentCurrent, "a failed job is not current even when its vector and content hash match")
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestProxyRecordCannotAnchorWirelessEvidence(t *testing.T) {
+	for _, kind := range []string{"proxy_event", "proxy_blocked_host_window"} {
+		fields := RecordFields{SourceKind: kind, SourceMAC: "aa:bb:cc:dd:ee:01", BSSID: "aa:bb:cc:dd:ee:02"}
+		anchorKind, anchorID := fields.anchor()
+		require.Empty(t, anchorKind)
+		require.Empty(t, anchorID)
+	}
 }

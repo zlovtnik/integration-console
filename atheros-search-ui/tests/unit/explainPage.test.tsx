@@ -100,6 +100,7 @@ function contextFixture(
       {
         embedding_kind: 'event',
         embedding_model: 'text-embed-v1',
+        input_revision: 'legacy_unknown',
         status: 'completed',
         attempt_count: 1,
         max_attempts: 5,
@@ -184,6 +185,7 @@ describe('record detail page', () => {
 
     // Embedding work.
     expect(screen.getByText('Embedded')).toBeTruthy();
+    expect(screen.getByText('input revision legacy_unknown')).toBeTruthy();
     expect(screen.getByText(/vector matches the current document/)).toBeTruthy();
   });
 

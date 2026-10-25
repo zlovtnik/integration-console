@@ -4,6 +4,8 @@ package search
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +14,36 @@ import (
 	"github.com/stretchr/testify/require"
 	searchv1 "github.com/zlovtnik/ssl-proxy/services/atheros-search/proto/atheros/search/v1"
 )
+
+func TestReportingRecordEmbeddingUsesExactRevisionAndCurrentContent(t *testing.T) {
+	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
+	_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs,atheros_search.embeddings;
+ INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256)
+ SELECT lpad(i::text,32,'0')::uuid,i::text,i::text,'proxy_events','proxy_event','synthetic',encode(sha256(convert_to('synthetic','UTF8')),'hex') FROM generate_series(1,6)i;
+ INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256,status,input_revision)
+ SELECT document_id,document_id,'event','context-contract',normalized_sha256,CASE source_id WHEN '4' THEN 'failed' ELSE 'completed' END,
+ CASE source_id WHEN '3' THEN 'old-input' ELSE 'legacy_unknown' END FROM atheros_search.search_documents;
+ INSERT INTO atheros_search.embeddings(document_id,embedding_kind,embedding_model,content_sha256,embedding,embedded_at,input_revision)
+ SELECT document_id,'event',embedding_model,CASE WHEN document_id='00000000-0000-0000-0000-000000000002' THEN repeat('a',64) ELSE content_sha256 END,
+ array_fill(CASE WHEN document_id='00000000-0000-0000-0000-000000000005' THEN 0::real ELSE 1::real END,ARRAY[768])::public.vector,now(),input_revision FROM atheros_search.embedding_jobs;
+ INSERT INTO atheros_search.embeddings(document_id,embedding_kind,embedding_model,content_sha256,embedding,embedded_at,input_revision)
+ SELECT document_id,'event',embedding_model,content_sha256,array_fill(1::real,ARRAY[768])::public.vector,now(),'other-input' FROM atheros_search.embedding_jobs WHERE document_id='00000000-0000-0000-0000-000000000001';
+ UPDATE atheros_search.search_documents SET normalized_text='changed without checksum' WHERE source_id='6';`)
+	require.NoError(t, err)
+	svc := &Service{Pool: runtimeDB}
+	tx, err := runtimeDB.BeginTx(t.Context(), &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	for i, expected := range []struct{ hasVector, current bool }{{true, true}, {false, false}, {true, false}, {true, false}, {true, false}, {true, false}} {
+		response := &RecordContext{}
+		id := fmt.Sprintf("%032d", i+1)
+		require.NoError(t, svc.loadRecordEmbedding(t.Context(), tx, id, response))
+		require.Len(t, response.Embedding, 1, "a vector from another input revision cannot duplicate a job")
+		require.Equal(t, expected.hasVector, response.Embedding[0].HasVector, "fixture %d", i+1)
+		require.Equal(t, expected.current, response.Embedding[0].ContentCurrent, "fixture %d", i+1)
+	}
+	require.NoError(t, tx.Commit())
+}
 
 func reportingSeedRecordContext(t *testing.T) (context.Context, *Service, time.Time) {
 	t.Helper()
@@ -32,7 +64,7 @@ func reportingSeedRecordContext(t *testing.T) (context.Context, *Service, time.T
   VALUES
   ('11111111-1111-1111-1111-111111111111','ctx-frame','ctx-frame','wireless_frames','event',
    'aa:bb:cc:dd:ee:01','aa:bb:cc:dd:ee:ff','lab-ssid','london-lab','sensor-north','2026-03-04T09:15:00Z','data',2,true,
-   'Data frame','normalized text', repeat('a',64), to_tsvector('simple','normalized'),
+   'Data frame','normalized text', encode(sha256(convert_to('normalized text','UTF8')),'hex'), to_tsvector('simple','normalized'),
    '{"event_type":"data","sequence_tokens":["assoc","auth"]}','["threat:probe"]','{"producer":"octopus"}',
    '22222222-2222-2222-2222-222222222222','unknown',''),
   ('33333333-3333-3333-3333-333333333333','ctx-proxy','ctx-proxy','proxy_events','proxy_event',
@@ -44,13 +76,13 @@ func reportingSeedRecordContext(t *testing.T) (context.Context, *Service, time.T
   (job_id, document_id, embedding_kind, embedding_model, content_sha256, status,
    attempt_count, max_attempts, last_error, completed_at)
   VALUES
-  ('55555555-5555-5555-5555-555555555555','11111111-1111-1111-1111-111111111111','event','text-embed-v1',repeat('a',64),'completed',1,5,'','2026-03-04T09:15:00Z'),
-  ('66666666-6666-6666-6666-666666666666','11111111-1111-1111-1111-111111111111','device','text-embed-v1',repeat('a',64),'failed',5,5,
+  ('55555555-5555-5555-5555-555555555555','11111111-1111-1111-1111-111111111111','event','text-embed-v1',encode(sha256(convert_to('normalized text','UTF8')),'hex'),'completed',1,5,'','2026-03-04T09:15:00Z'),
+  ('66666666-6666-6666-6666-666666666666','11111111-1111-1111-1111-111111111111','device','text-embed-v1',encode(sha256(convert_to('normalized text','UTF8')),'hex'),'failed',5,5,
    'backend refused payload',NULL);
 
   INSERT INTO atheros_search.embeddings
   (document_id, embedding_kind, embedding_model, content_sha256, embedded_at, embedding)
-  VALUES ('11111111-1111-1111-1111-111111111111','event','text-embed-v1',repeat('a',64),
+  VALUES ('11111111-1111-1111-1111-111111111111','event','text-embed-v1',encode(sha256(convert_to('normalized text','UTF8')),'hex'),
    '2026-03-04T09:15:00Z',(ARRAY[1::real] || array_fill(0::real, ARRAY[767]))::public.vector);
 
   INSERT INTO atheros_search.devices(mac, display_name, first_seen, last_seen)

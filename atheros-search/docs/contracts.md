@@ -13,9 +13,10 @@ variable. Generated protobuf code remains in its existing authoritative module.
 | Graph / Solid UI | internal/reporting/graph_types.go and sibling atheros-search-ui/src/api/types.ts | Closed node/edge payloads; optional presentation-only parent/depth/role and hierarchy metadata; hierarchy root filters and explicit truncation; reporting graph tests, make db-contract, make ui-check |
 | gRPC / clients | proto/atheros/search/v1/search.proto; Search produces, generated clients consume | Preserve RPC names and field numbers; real in-memory unary/streamed client tests; make proto-check and make test |
 | ETL / clients | internal/transport/httpapi/health_handlers.go; ETL health produces, Solid UI consumes | Actual WebSocket upgrade, origin/auth, JSON text snapshots every five seconds, disconnect cleanup; make test |
+| Proxy record context / clients | internal/search/record_context.go; Search produces, record drilldown consumes | Proxy records never anchor wireless activity, including legacy rows with MAC fields; proxy timelines remain explicitly unavailable. Embedding rows include input revision and require completed status, matching current text/checksum/revision and a nonzero vector; make db-contract |
 | Octopus / workers | sql/postgres/contracts/processors.json and canonical embedding_jobs/search_documents; Octopus prepares jobs, Search claims/completes | Event/device/behaviour/sequence kinds, document/model/checksum identity, exclusive ownership, fences, retries and recovery; make stack-contract; make db-contract |
 | Search / PostgreSQL | sql/postgres/atheros_search/manifest.yaml, octopus_core/manifest.yaml and their grants/least_privilege.sql.tmpl; canonical provisioner produces schema, feature services consume | Checksums, readiness, VECTOR(768), executable report/record-context/worker queries, isolated runtime privileges and denied DDL/Octopus access; make db-contract |
-| Search / embedding backend | internal/embed/client.go request/response implementation; configured backend produces vectors, Search/worker consume | model/input request, OpenAI data[].embedding and embeddings[] shapes, count/dimension/finite validation, malformed payloads, capacity and retry timing; go test ./internal/embed ./internal/search |
+| Search / embedding backend | internal/embed/client.go request/response implementation; configured backend produces vectors, Search/worker consume | model/input request, indexed OpenAI data[].embedding association and legacy unindexed/embeddings[] shapes, rejection of mixed/duplicate/out-of-range indices, count/dimension/finite/zero-norm validation, exact tokenizer round-trip identity, capacity and retry timing; go test ./internal/embed ./internal/search |
 | Search / deployment | internal/config/config.go and stack cyber-stack/base/atheros resources/platform-config; deployment supplies ATHSEARCH_* inputs, app consumes | HTTP/gRPC/metrics ports, health routes, worker opt-in, schema checksum wiring; config/app unit tests and stackcontract source checks |
 
 Shared synthetic fixtures live in `testdata/contracts`. The UI imports the exact
@@ -44,3 +45,8 @@ Required mode fails if Docker, Testcontainers, or database connectivity is
 unavailable, if any selected test skips, or if a consumer package executes no
 tests. Seed writes use the provisioning account; assertions query through
 canonical runtime grants. No production DDL or grants are modified.
+
+ETL embedding gauges aggregate all job kinds and models. They do not establish
+proxy source coverage, current vector coverage, or recovered attempts. Proxy
+coverage publication and timelines remain gated work in the parent plan; no
+health result should be interpreted as their implementation.

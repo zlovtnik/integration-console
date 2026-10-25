@@ -27,10 +27,11 @@ func TestRetryFailedJobsDoesNotResetPendingJobs(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = database.Close() }() // Best-effort test teardown; assertions verify the operation before cleanup.
-	mock.ExpectExec("WHERE status = 'failed'\\s+AND attempt_count < max_attempts").
+	mock.ExpectExec("(?s)WHERE job.status = 'failed'.*document.source_kind NOT IN.*LIMIT \\$1.*FOR UPDATE OF job SKIP LOCKED").
+		WithArgs(10).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	require.NoError(t, retryFailedJobs(context.Background(), database, zerolog.Nop()))
+	require.NoError(t, retryFailedJobs(context.Background(), database, zerolog.Nop(), 10))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

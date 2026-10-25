@@ -18,6 +18,9 @@ func TestDatabaseRuntimePrivilegesAndSchemaChecksum(t *testing.T) {
 	var superuser bool
 	require.NoError(t, database.QueryRowContext(t.Context(), `SELECT rolsuper FROM pg_roles WHERE rolname=current_user`).Scan(&superuser))
 	require.False(t, superuser)
+	var searchPath string
+	require.NoError(t, database.QueryRowContext(t.Context(), `SHOW search_path`).Scan(&searchPath))
+	require.Equal(t, "atheros_search", searchPath, "exercise the production role path without public fallback")
 	for _, query := range []string{`CREATE TABLE atheros_search.forbidden(id int)`, `DELETE FROM atheros_search.search_documents`, `SELECT * FROM octopus_core.registered_devices`, `SELECT * FROM octopus_core.proxy_events`, `SELECT * FROM octopus_core.proxy_preparation_dirty`, `UPDATE atheros_search.proxy_event_evidence SET evidence='{}'`, `SELECT * FROM octopus_core.work_items`, `UPDATE atheros_search.schema_readiness SET ready=false`} {
 		_, err := database.ExecContext(t.Context(), query)
 		var pgErr *pgconn.PgError

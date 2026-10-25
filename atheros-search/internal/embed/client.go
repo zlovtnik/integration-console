@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,7 @@ type embeddingsRequest struct {
 type embeddingsResponse struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
+		Index     *int      `json:"index,omitempty"`
 	} `json:"data"`
 	Embeddings [][]float32 `json:"embeddings"`
 	Error      any         `json:"error"`
@@ -204,6 +206,9 @@ func (c *HTTPClient) ValidateTokenizer(ctx context.Context) error {
 	}
 	if len(verified) != len(tokens) {
 		return fmt.Errorf("validate llama.cpp tokenizer round trip: got %d tokens after detokenize, expected %d", len(verified), len(tokens))
+	}
+	if !slices.Equal(verified, tokens) {
+		return errors.New("validate llama.cpp tokenizer round trip: token identities changed after detokenize")
 	}
 	return nil
 }
@@ -385,8 +390,23 @@ func (c *HTTPClient) embedOnce(ctx context.Context, inputs []string) ([][]float3
 	vectors := parsed.Embeddings
 	if len(vectors) == 0 && len(parsed.Data) > 0 {
 		vectors = make([][]float32, len(parsed.Data))
+		indexed := parsed.Data[0].Index != nil
+		seen := make([]bool, len(parsed.Data))
 		for i, item := range parsed.Data {
-			vectors[i] = item.Embedding
+			// Older compatible backends omit every index. Once present, the
+			// index owns input association; response array order is not enough.
+			if (item.Index != nil) != indexed {
+				return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: mixed indexed and unindexed embeddings", ErrInvalidResponse)}
+			}
+			index := i
+			if indexed {
+				index = *item.Index
+			}
+			if index < 0 || index >= len(vectors) || seen[index] {
+				return nil, &BackendUnavailableError{Cause: fmt.Errorf("%w: duplicate or out-of-range embedding index", ErrInvalidResponse)}
+			}
+			seen[index] = true
+			vectors[index] = item.Embedding
 		}
 	}
 	if len(vectors) != len(inputs) {

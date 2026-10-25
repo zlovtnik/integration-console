@@ -18,6 +18,13 @@ func TestEmbeddingBackendRequestAndResponseContracts(t *testing.T) {
 		invalid    bool
 	}{
 		{"openai", `{"data":[{"embedding":[1,2]},{"embedding":[3,4]}]}`, 200, false},
+		{"openai indexed", `{"data":[{"index":0,"embedding":[1,2]},{"index":1,"embedding":[3,4]}]}`, 200, false},
+		{"openai reordered", `{"data":[{"index":1,"embedding":[3,4]},{"index":0,"embedding":[1,2]}]}`, 200, false},
+		{"duplicate index", `{"data":[{"index":0,"embedding":[1,2]},{"index":0,"embedding":[3,4]}]}`, 200, true},
+		{"negative index", `{"data":[{"index":-1,"embedding":[1,2]},{"index":1,"embedding":[3,4]}]}`, 200, true},
+		{"out of range index", `{"data":[{"index":0,"embedding":[1,2]},{"index":2,"embedding":[3,4]}]}`, 200, true},
+		{"mixed indexed response", `{"data":[{"embedding":[1,2]},{"index":1,"embedding":[3,4]}]}`, 200, true},
+		{"mixed unindexed response", `{"data":[{"index":0,"embedding":[1,2]},{"embedding":[3,4]}]}`, 200, true},
 		{"embeddings", `{"embeddings":[[1,2],[3,4]]}`, 200, false},
 		{"count", `{"embeddings":[[1,2]]}`, 200, true},
 		{"dimensions", `{"embeddings":[[1],[3,4]]}`, 200, true},

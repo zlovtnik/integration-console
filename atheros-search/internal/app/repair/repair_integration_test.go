@@ -14,6 +14,48 @@ import (
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/testdb"
 )
 
+func TestDatabaseLegacyRetriesAreBoundedAndCannotReviveProxyJobs(t *testing.T) {
+	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
+	for _, operation := range []string{"retry-failed", "reset-stale"} {
+		t.Run(operation, func(t *testing.T) {
+			_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs;
+ INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status)
+ SELECT lpad(i::text,32,'0')::uuid,i::text,i::text,'synthetic',CASE WHEN i=1 THEN 'proxy_event' ELSE 'event' END,'synthetic',repeat('a',64),CASE WHEN i=4 THEN 'superseded' ELSE 'active' END FROM generate_series(1,5)i;
+ INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256,status,attempt_count)
+ SELECT document_id,document_id,'event','contract',normalized_sha256,'failed',CASE WHEN source_id='5' THEN 5 ELSE 1 END FROM atheros_search.search_documents;`)
+			require.NoError(t, err)
+			if operation == "reset-stale" {
+				_, err = provision.ExecContext(t.Context(), `UPDATE atheros_search.embedding_jobs SET status='leased',owner_id='synthetic-owner',lease_token=gen_random_uuid(),lease_expires_at=now()-interval '2 hours'`)
+				require.NoError(t, err)
+			}
+			apply := func() {
+				if operation == "retry-failed" {
+					require.NoError(t, retryFailedJobs(t.Context(), runtimeDB, zerolog.Nop(), 1))
+				} else {
+					require.NoError(t, resetStaleJobs(t.Context(), runtimeDB, zerolog.Nop(), time.Hour, 1))
+				}
+			}
+			apply()
+			var count int
+			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs WHERE status='pending'`).Scan(&count))
+			require.Equal(t, 1, count)
+			var proxyStatus string
+			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT status FROM atheros_search.embedding_jobs WHERE job_id='00000000-0000-0000-0000-000000000001'`).Scan(&proxyStatus))
+			if operation == "retry-failed" {
+				require.Equal(t, "failed", proxyStatus)
+			} else {
+				require.Equal(t, "leased", proxyStatus)
+			}
+			apply()
+			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs WHERE status='pending'`).Scan(&count))
+			require.Equal(t, 2, count)
+			apply()
+			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs WHERE status='pending'`).Scan(&count))
+			require.Equal(t, 2, count, "exhausted and superseded work stays terminal")
+		})
+	}
+}
+
 func TestDatabaseProxyRepairCLIDefaultLimit(t *testing.T) {
 	t.Setenv("ATHSEARCH_POSTGRES_DSN", os.Getenv("ATHSEARCH_REPORT_TEST_DSN"))
 	t.Setenv("ATHSEARCH_SCHEMA_MANIFEST_SHA256", os.Getenv("ATHSEARCH_TEST_MANIFEST_SHA256"))

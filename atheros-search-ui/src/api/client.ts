@@ -545,6 +545,7 @@ function normalizeEmbeddingWork(raw: RawRecord): EmbeddingWork {
   return {
     embedding_kind: firstString(raw.embedding_kind, raw.embeddingKind),
     embedding_model: firstString(raw.embedding_model, raw.embeddingModel),
+    input_revision: firstString(raw.input_revision, raw.inputRevision) || 'unknown',
     status: firstString(raw.status),
     attempt_count: firstNumber(raw.attempt_count, raw.attemptCount),
     max_attempts: firstNumber(raw.max_attempts, raw.maxAttempts),

@@ -263,6 +263,7 @@ export interface RelatedContext {
 export interface EmbeddingWork {
   embedding_kind: string;
   embedding_model: string;
+  input_revision: string;
   status: string;
   attempt_count: number;
   max_attempts: number;
@@ -272,7 +273,7 @@ export interface EmbeddingWork {
   embedded_at?: string | undefined;
   content_sha256?: string | undefined;
   has_vector: boolean;
-  /** True when a stored vector matches the live document's content hash. */
+  /** True when completed work matches the active document's content and input revision. */
   content_current: boolean;
 }
 

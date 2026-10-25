@@ -18,6 +18,32 @@ import (
 
 // The repository Testcontainers runner supplies a newly provisioned database.
 
+func TestReportingProxyDenseUsesCurrentInputAndSubstringHostBeforeBudget(t *testing.T) {
+	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
+	_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embeddings;
+ INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,host,normalized_text,normalized_sha256,input_revision)
+ SELECT lpad(i::text,32,'0')::uuid,i::text,i::text,'proxy_events',CASE WHEN i=7 THEN 'proxy_blocked_host_window' WHEN i=8 THEN 'event' ELSE 'proxy_event' END,
+ CASE WHEN i=1 THEN 'outside.example' ELSE 'API.Example.COM' END,'synthetic',encode(sha256(convert_to('synthetic','UTF8')),'hex'),'current-input' FROM generate_series(1,8)i;
+ INSERT INTO atheros_search.embeddings(document_id,embedding_kind,embedding_model,content_sha256,input_revision,embedding,embedded_at)
+ SELECT document_id,'event','dense-contract',CASE source_id WHEN '3' THEN repeat('a',64) ELSE normalized_sha256 END,
+ CASE source_id WHEN '4' THEN 'old-input' ELSE input_revision END,
+ (ARRAY[1::real,CASE source_id WHEN '6' THEN 1::real ELSE 0::real END]||array_fill(0::real,ARRAY[766]))::public.vector,now() FROM atheros_search.search_documents;
+ UPDATE atheros_search.search_documents SET normalized_text='tampered' WHERE source_id='2';
+ UPDATE atheros_search.search_documents SET input_revision='old-input' WHERE source_id='5';`)
+	require.NoError(t, err)
+	vector := make([]float32, 768)
+	vector[0] = 1
+	for _, item := range []struct{ kind, source string }{{"proxy_event", "6"}, {"proxy_blocked_host_window", "7"}} {
+		results, err := Dense(t.Context(), runtimeDB, vector, "dense-contract", Options{
+			TopK: 1, OverfetchFactor: 1, Kinds: []string{item.kind}, InputRevision: "current-input",
+			Filters: &searchv1.SearchFilters{Host: "example.c"},
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		require.Equal(t, item.source, results[0].SourceKey)
+	}
+}
+
 func TestReportingScopedCandidatesBeyondGlobalBudget(t *testing.T) {
 	db := testdb.Provision(t)
 	runtimeDB := testdb.Runtime(t)
