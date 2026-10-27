@@ -62,7 +62,9 @@ export function EmbeddingWorkList(props: {
                     attempt {item.attempt_count} of {item.max_attempts}
                   </span>
                   <span>
-                    {item.has_vector ? 'vector stored' : 'no vector stored'}
+                    {item.has_vector
+                      ? 'vector stored'
+                      : 'no vector for this job revision'}
                   </span>
                   <span
                     class={
