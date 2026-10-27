@@ -113,6 +113,9 @@ func StartHTTP(ctx context.Context, port int, allowedOrigins []string, svc Servi
 	if err := registerDQRoutes(mux, tokenAuth, svc.DQ); err != nil {
 		return nil, err
 	}
+	if err := registerOperationsRoutes(mux, tokenAuth, svc.Operations); err != nil {
+		return nil, err
+	}
 	if err := registerHealthRoutes(mux, tokenAuth, readiness, healthMonitor, wsEnabled, allowedOrigins, logger); err != nil {
 		return nil, err
 	}

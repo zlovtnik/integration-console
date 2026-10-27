@@ -75,7 +75,7 @@ test('DQ menu retains Inventory filters and review has no inert reset control', 
   await page.goto(
     '/inventory?loc=lab&owner=security&sensor=sensor-a&tag=review&active=1&min=0.88&q=device',
   );
-  await page.getByRole('link', { name: 'DQ', exact: true }).click();
+  await page.getByRole('link', { name: 'Processing', exact: true }).click();
   await expect(
     page.getByRole('region', { name: 'Candidate review' }),
   ).toBeVisible();
@@ -103,10 +103,10 @@ test('DQ disabled and unavailable do not disrupt existing pages', async ({
     route.fulfill({ json: { ...settings, enabled: false } }),
   );
   await page.goto('/');
-  await page.getByRole('link', { name: 'DQ', exact: true }).click();
+  await page.getByRole('link', { name: 'Processing', exact: true }).click();
   await expect(page.getByText('DQ is disabled.')).toBeVisible();
   expect(page.frames()).toHaveLength(1);
-  await page.getByRole('link', { name: 'Search', exact: true }).click();
+  await page.getByRole('link', { name: 'Retrieval', exact: true }).click();
   await expect(page).toHaveURL(/\/($|\?)/);
   await page.route('**/v1/dq/context', (route) =>
     route.fulfill({ status: 503, json: { error: 'unavailable' } }),

@@ -19,6 +19,7 @@ implementation; cross-stack source assertions have explicit build tags.
 | internal/reportmeta | Report metadata and protobuf conversion; no features or transports |
 | internal/apperror | Typed validation, not-found, conflict, forbidden, unavailable errors; no features or transports |
 | internal/etlhealth | Cached database health snapshots, deadlines and live semantic view |
+| internal/operations | Allowlisted global pipeline/source reads and bounded shared proxy/materialized-snapshot caches; no recovery or readiness ownership |
 | internal/worker | Fenced claims, renewal, recovery and atomic vector completion; embed dependency |
 | internal/auth | Static token and JWT authorization |
 | internal/config | Environment validation and defaults; embedding configuration |

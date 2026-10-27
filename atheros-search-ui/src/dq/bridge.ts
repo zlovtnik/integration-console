@@ -1,4 +1,4 @@
-import { authenticatedFetch } from '~/api/client';
+import { authenticatedFetch, releaseAuthenticatedResponse } from '~/api/client';
 import { env } from '~/env';
 
 export const bridgeVersion = 1;
@@ -136,39 +136,43 @@ export async function fetchDQ(
     },
     { preserveForbidden: call.method === 'POST' },
   );
-  if (!response.ok)
-    throw new Error(
-      response.status === 429
-        ? 'Admission capacity is exhausted. Retry later.'
-        : 'DQ request unavailable or unauthorized.',
-    );
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('DQ metadata is unavailable.');
-  const chunks: Uint8Array[] = [];
-  let size = 0;
   try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      size += next.value.length;
-      if (size > metadataLimit) {
-        await reader.cancel();
-        throw new Error('DQ metadata exceeds 64 KiB.');
+    if (!response.ok)
+      throw new Error(
+        response.status === 429
+          ? 'Admission capacity is exhausted. Retry later.'
+          : 'DQ request unavailable or unauthorized.',
+      );
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('DQ metadata is unavailable.');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        size += next.value.length;
+        if (size > metadataLimit) {
+          await reader.cancel();
+          throw new Error('DQ metadata exceeds 64 KiB.');
+        }
+        chunks.push(next.value);
       }
-      chunks.push(next.value);
+    } finally {
+      reader.releaseLock();
     }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!safeMetadata(value)) throw new Error('Invalid DQ metadata.');
+    return value;
   } finally {
-    reader.releaseLock();
+    releaseAuthenticatedResponse(response);
   }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
-  if (!safeMetadata(value)) throw new Error('Invalid DQ metadata.');
-  return value;
 }
 
 export function hostBridge(options: {

@@ -3,6 +3,11 @@ import { denyAuditAccess, getAccessToken } from '~/auth/session';
 import { auditGeneration, auditSignal } from '~/auth/auditState';
 import { isRfc3339 } from '~/utils/timestamp';
 import type {
+  OperationsPipeline,
+  OperationsSources,
+  ProxyLive,
+} from './operations';
+import type {
   ActivityBucket,
   Communication,
   DedupRun,
@@ -53,6 +58,13 @@ type ApiErrorPayload = {
 
 let outgoingTimestampReporter: OutgoingTimestampReporter | undefined;
 const responseGenerations = new WeakMap<Response, number>();
+const responseCleanups = new WeakMap<Response, () => void>();
+
+/** Release signal listeners after consuming or discarding an authenticated body. */
+export function releaseAuthenticatedResponse(response: Response): void {
+  responseCleanups.get(response)?.();
+  responseCleanups.delete(response);
+}
 
 type RawSearchResult = Partial<SearchResult> & {
   sourceKey?: unknown;
@@ -545,7 +557,8 @@ function normalizeEmbeddingWork(raw: RawRecord): EmbeddingWork {
   return {
     embedding_kind: firstString(raw.embedding_kind, raw.embeddingKind),
     embedding_model: firstString(raw.embedding_model, raw.embeddingModel),
-    input_revision: firstString(raw.input_revision, raw.inputRevision) || 'unknown',
+    input_revision:
+      firstString(raw.input_revision, raw.inputRevision) || 'unknown',
     status: firstString(raw.status),
     attempt_count: firstNumber(raw.attempt_count, raw.attemptCount),
     max_attempts: firstNumber(raw.max_attempts, raw.maxAttempts),
@@ -874,31 +887,51 @@ export async function authenticatedFetch(
   const sessionSignal = auditSignal();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const signals = [sessionSignal, init.signal].filter(
+    (signal): signal is AbortSignal => signal != null,
+  );
+  for (const signal of signals) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  }
   const requestInit = {
     ...init,
     headers,
-    signal: init.signal
-      ? AbortSignal.any([init.signal, sessionSignal])
-      : sessionSignal,
+    signal: controller.signal,
   };
-  let response = await fetch(input, requestInit);
+  const cleanup = () => {
+    for (const signal of signals) signal.removeEventListener('abort', abort);
+  };
+  let response: Response;
+  try {
+    response = await fetch(input, requestInit);
 
-  if (response.status === 401) {
-    const refreshedToken = await getAccessToken(true);
-    if (refreshedToken) {
-      headers.set('Authorization', `Bearer ${refreshedToken}`);
-      response = await fetch(input, requestInit);
+    if (response.status === 401) {
+      const refreshedToken = await getAccessToken(true);
+      if (refreshedToken) {
+        headers.set('Authorization', `Bearer ${refreshedToken}`);
+        response = await fetch(input, requestInit);
+      }
     }
+  } catch (error) {
+    cleanup();
+    throw error;
   }
 
-  if (generation !== auditGeneration())
+  if (generation !== auditGeneration()) {
+    controller.abort();
+    cleanup();
     throw new DOMException('Identity changed', 'AbortError');
+  }
   if (
     response.status === 401 ||
     (response.status === 403 && !policy.preserveForbidden)
   )
     denyAuditAccess();
   responseGenerations.set(response, generation);
+  responseCleanups.set(response, cleanup);
   return response;
 }
 
@@ -907,6 +940,7 @@ async function request<T>(
   init: RequestInit = {},
   signal?: AbortSignal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  policy: { preserveForbidden?: boolean } = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (
@@ -925,28 +959,36 @@ async function request<T>(
   const timeout = abortSignalWithTimeout(signal, timeoutMs);
   if (timeout.signal) requestInit.signal = timeout.signal;
 
-  let response: Response;
+  let response: Response | undefined;
   try {
     response =
       path.startsWith('/v1/') && path !== '/v1/healthz'
-        ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit)
+        ? await authenticatedFetch(`${env.apiBase}${path}`, requestInit, policy)
         : await fetch(`${env.apiBase}${path}`, requestInit);
+    if (!response.ok) {
+      throw await apiErrorFromResponse(response);
+    }
+
+    const generation = responseGenerations.get(response) ?? auditGeneration();
+    const data = (await response.json()) as T;
+    if (generation !== auditGeneration())
+      throw new DOMException('Identity changed', 'AbortError');
+    return data;
   } finally {
+    if (response) releaseAuthenticatedResponse(response);
     timeout.cleanup();
   }
-
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
-  }
-
-  const generation = responseGenerations.get(response) ?? auditGeneration();
-  const data = (await response.json()) as T;
-  if (generation !== auditGeneration())
-    throw new DOMException('Identity changed', 'AbortError');
-  return data;
 }
 
 export const api = {
+  operationsPipeline: (signal?: AbortSignal) =>
+    request<OperationsPipeline>('/v1/operations/pipeline', {}, signal, 5000),
+  operationsSources: (signal?: AbortSignal) =>
+    request<OperationsSources>('/v1/operations/sources', {}, signal, 5000),
+  proxyLive: (signal?: AbortSignal) =>
+    request<ProxyLive>('/v1/operations/proxy/live', {}, signal, 5000, {
+      preserveForbidden: true,
+    }),
   etlHealth: (signal?: AbortSignal) =>
     request<ETLHealth>('/v1/etl/health', {}, signal, 3000),
   network: (filters: import('./types').NetworkFilters, signal?: AbortSignal) =>

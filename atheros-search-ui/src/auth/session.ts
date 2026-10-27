@@ -37,7 +37,7 @@ function acceptIdentity(): void {
   const realmRoles = [...(token?.realm_access?.roles ?? [])].sort();
   const clientRoles = Object.entries(token?.resource_access ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([client, access]) => [client, [...access.roles].sort()]);
+    .map(([client, access]) => [client, [...(access.roles ?? [])].sort()]);
   setAuditIdentity(
     token?.sub
       ? JSON.stringify([token.iss, token.sub, realmRoles, clientRoles])
@@ -57,6 +57,18 @@ window.addEventListener('atheros-search.identity-changed', () =>
 );
 
 export { authError, authStatus };
+
+/** UI affordance only; the API authorizes every live read, including cache hits. */
+export function canRequestProxyLive(): boolean {
+  authSession();
+  if (!keycloak) return true;
+  const roles =
+    keycloak.tokenParsed?.resource_access?.[env.keycloakClientId]?.roles ?? [];
+  return (
+    authStatus() === 'authenticated' &&
+    roles.some((role) => role === 'operator' || role === 'admin')
+  );
+}
 
 export function denyAuditAccess(): void {
   clearAuditState();

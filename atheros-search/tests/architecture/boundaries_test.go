@@ -25,7 +25,8 @@ func TestPackageBoundaries(t *testing.T) {
 		"savedviews": {"apperror", "reporting", "db"},
 		"search":     {"apperror", "queryscope", "reportmeta", "reporting", "db", "embed", "config", "metrics"},
 		"etlhealth":  {}, "worker": {"embed"},
-		"db": {}, "auth": {}, "config": {"embed"}, "embed": {}, "health": {"db", "metrics"}, "metrics": {}, "observability": {}, "testdb": {},
+		"operations": {"etlhealth"},
+		"db":         {}, "auth": {}, "config": {"embed"}, "embed": {}, "health": {"db", "metrics"}, "metrics": {}, "observability": {}, "testdb": {},
 	}
 	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

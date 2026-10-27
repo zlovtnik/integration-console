@@ -4,7 +4,8 @@ import { mockApi, mockResult } from './fixtures';
 
 async function openFiltersIfDrawer(page: Parameters<typeof mockApi>[0]) {
   const filtersButton = page.getByRole('button', { name: 'Filters' });
-  if (await filtersButton.isVisible()) await filtersButton.click();
+  if (await page.evaluate(() => matchMedia('(max-width: 1119px)').matches))
+    await filtersButton.click();
 }
 
 async function closeFiltersIfDrawer(page: Parameters<typeof mockApi>[0]) {

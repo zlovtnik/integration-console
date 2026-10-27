@@ -77,6 +77,7 @@ type ETLHealth struct {
 	OldestEmbeddingJobAt   *time.Time        `json:"oldest_embedding_job_at,omitempty"`
 	EmbeddingDependency    string            `json:"embedding_dependency"`
 	Workers                []WorkerHeartbeat `json:"workers"`
+	SourceCoverage         []SourceCoverage  `json:"source_coverage,omitempty"`
 }
 
 type WorkerHeartbeat struct {
@@ -89,15 +90,36 @@ type WorkerHeartbeat struct {
 type HealthMonitor struct {
 	db *sql.DB
 
-	mu             sync.Mutex
-	cached         *ETLHealth
-	lastErr        error
-	refreshing     bool
-	refreshDone    chan struct{}
-	cacheTTL       time.Duration
-	refreshTimeout time.Duration
-	semantic       SemanticStatus
-	observer       func(ETLHealth)
+	mu               sync.Mutex
+	cached           *ETLHealth
+	lastErr          error
+	refreshing       bool
+	refreshDone      chan struct{}
+	cacheTTL         time.Duration
+	refreshTimeout   time.Duration
+	semantic         SemanticStatus
+	observer         func(ETLHealth)
+	coverageModel    string
+	coverageRevision string
+}
+
+// SourceCoverage counts active lexical documents and documents with a current,
+// completed, nonzero vector for the configured retrieval model and revision.
+// Absence of this optional measurement means unknown, never zero coverage.
+type SourceCoverage struct {
+	ID               string     `json:"id"`
+	Documents        int64      `json:"documents"`
+	LexicalDocuments int64      `json:"lexical_documents"`
+	Documents24h     int64      `json:"documents_24h"`
+	LastObservedAt   *time.Time `json:"last_observed_at,omitempty"`
+	Vectors          int64      `json:"vectors"`
+}
+
+// SetCoverageModel configures optional coverage before the first Snapshot.
+func (h *HealthMonitor) SetCoverageModel(model, revision string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.coverageModel, h.coverageRevision = model, revision
 }
 
 func NewHealthMonitor(db *sql.DB) *HealthMonitor {
@@ -405,7 +427,62 @@ ORDER BY worker_id
 	}
 
 	health.EmbeddingDependency = embeddingDependency(health)
+	if h.coverageModel != "" {
+		// Coverage is supplemental: failed or timed-out coverage never turns
+		// the existing ingestion snapshot into an outage or an invented zero.
+		health.SourceCoverage, _ = h.sourceCoverage(ctx)
+	}
 	return health, nil
+}
+
+func (h *HealthMonitor) sourceCoverage(ctx context.Context) ([]SourceCoverage, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT CASE WHEN document.source_kind IN ('proxy_event','proxy_blocked_host_window') THEN 'proxy' ELSE 'wireless' END AS source,
+ COUNT(*),
+ COUNT(*) FILTER (WHERE document.search_vector<>''::tsvector),
+ COUNT(*) FILTER (WHERE document.observed_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'),
+ MAX(document.observed_at),
+ COUNT(*) FILTER (WHERE EXISTS (
+   SELECT 1 FROM atheros_search.embeddings vector
+   JOIN atheros_search.embedding_jobs job ON job.document_id=vector.document_id
+     AND job.embedding_kind=vector.embedding_kind AND job.embedding_model=vector.embedding_model
+     AND job.input_revision=vector.input_revision AND job.content_sha256=vector.content_sha256
+   WHERE vector.document_id=document.document_id AND vector.embedding_model=$1
+     AND vector.embedding_kind=CASE
+       WHEN document.source_kind IN ('proxy_event','proxy_blocked_host_window') THEN 'event'
+       WHEN document.source_kind IN ('device_profile','ap_profile','identity_summary') THEN 'device'
+       WHEN document.source_kind='observation_window' THEN 'behaviour'
+       ELSE document.source_kind END
+     AND vector.input_revision=$2 AND vector.input_revision=document.input_revision
+     AND vector.content_sha256=document.normalized_sha256 AND job.status='completed'
+     AND vector.embedding OPERATOR(public.<#>) vector.embedding < 0
+ ))
+FROM atheros_search.search_documents document
+WHERE document.status='active' AND document.normalized_text<>''
+  AND document.normalized_sha256=encode(sha256(convert_to(document.normalized_text,'UTF8')),'hex')
+  AND document.source_kind IN ('proxy_event','proxy_blocked_host_window','event','device',
+    'device_profile','ap_profile','identity_summary','observation_window')
+GROUP BY 1`, h.coverageModel, h.coverageRevision)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }() // Close on scan/iteration failure; those errors are returned.
+	result := []SourceCoverage{{ID: "proxy"}, {ID: "wireless"}}
+	for rows.Next() {
+		var source SourceCoverage
+		if err := rows.Scan(&source.ID, &source.Documents, &source.LexicalDocuments, &source.Documents24h, &source.LastObservedAt, &source.Vectors); err != nil {
+			return nil, err
+		}
+		for i := range result {
+			if result[i].ID == source.ID {
+				result[i] = source
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // embeddingDependency ranks the loudest problem first: failed jobs block the

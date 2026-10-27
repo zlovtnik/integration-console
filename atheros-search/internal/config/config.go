@@ -88,6 +88,8 @@ type Config struct {
 	DQNamespace                   string
 	DQTimeout                     time.Duration
 	DQRemoteOrigin                string
+	ProxyTelemetryURL             string
+	OperationsStatsURL            string
 }
 
 func Load() (Config, error) {
@@ -151,6 +153,8 @@ func Load() (Config, error) {
 		DQNamespace:                   strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_NAMESPACE")),
 		DQTimeout:                     time.Duration(envInt("ATHSEARCH_DQ_TIMEOUT_SECONDS", 5)) * time.Second,
 		DQRemoteOrigin:                strings.TrimSpace(os.Getenv("ATHSEARCH_DQ_REMOTE_ORIGIN")),
+		ProxyTelemetryURL:             strings.TrimSpace(os.Getenv("ATHSEARCH_PROXY_TELEMETRY_URL")),
+		OperationsStatsURL:            strings.TrimSpace(os.Getenv("ATHSEARCH_OPERATIONS_STATS_URL")),
 	}
 
 	if strings.TrimSpace(os.Getenv("ATHSEARCH_WORKER_SOURCE_KINDS")) != "" && len(cfg.WorkerSourceKinds) == 0 {
@@ -158,6 +162,15 @@ func Load() (Config, error) {
 	}
 	if err := validateDQ(cfg); err != nil {
 		return cfg, err
+	}
+	for name, value := range map[string]string{"ATHSEARCH_PROXY_TELEMETRY_URL": cfg.ProxyTelemetryURL, "ATHSEARCH_OPERATIONS_STATS_URL": cfg.OperationsStatsURL} {
+		if value == "" {
+			continue
+		}
+		u, err := url.Parse(value)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+			return cfg, fmt.Errorf("%s must be a fixed HTTP(S) URL without credentials, query or fragment", name)
+		}
 	}
 	if err := validate(cfg); err != nil {
 		return cfg, err

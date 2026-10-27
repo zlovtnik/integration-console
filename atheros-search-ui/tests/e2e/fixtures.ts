@@ -1,4 +1,9 @@
 import type { Page, Route } from '@playwright/test';
+import {
+  pipelineFixture,
+  sourcesFixture,
+  proxyFixture,
+} from '../fixtures/operations';
 import type {
   ETLHealth,
   GraphFilters,
@@ -470,6 +475,15 @@ function json(route: Route, body: unknown) {
 }
 
 export async function mockApi(page: Page, options: MockApiOptions = {}) {
+  await page.route('**/v1/operations/pipeline', (route) =>
+    json(route, pipelineFixture),
+  );
+  await page.route('**/v1/operations/sources', (route) =>
+    json(route, sourcesFixture),
+  );
+  await page.route('**/v1/operations/proxy/live', (route) =>
+    json(route, proxyFixture),
+  );
   const results = options.results ?? [mockResult];
   const graph = options.graph ?? mockGraph;
   await page.route('**/v1/etl/health', (route) =>

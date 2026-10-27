@@ -24,6 +24,7 @@ import {
   setPinnedInventoryNodeIds,
 } from '~/stores/inventoryStore';
 import { setSuggestions, setSuggestLoaded } from '~/stores/suggestStore';
+import { clearOperations } from '~/stores/operationsStore';
 
 const IDENTITY_KEY = 'atheros-search.audit-identity';
 const CACHE_KEYS = [
@@ -52,6 +53,7 @@ export function clearAuditState(): void {
     }
   }
   batch(() => {
+    clearOperations();
     clearResults();
     clearAllFilters();
     resetSearchControlsFromUrlDefaults();

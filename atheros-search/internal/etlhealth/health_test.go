@@ -147,6 +147,34 @@ func TestSnapshotReadsRepointedGaugeSources(t *testing.T) {
 	require.Len(t, health.Workers, 1)
 }
 
+func TestOptionalSourceCoverageSharesCacheAndFailureStaysUnknown(t *testing.T) {
+	for _, queryFails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "empty", true: "unavailable"}[queryFails], func(t *testing.T) {
+			monitor, mock := newHealthMonitor(t)
+			monitor.SetCoverageModel("model", "revision")
+			expectSnapshotQueries(mock, liveHealthRows())
+			query := mock.ExpectQuery(`(?s)SELECT CASE WHEN document.source_kind`).WithArgs("model", "revision")
+			if queryFails {
+				query.WillReturnError(errors.New("coverage timed out"))
+			} else {
+				query.WillReturnRows(sqlmock.NewRows([]string{"source", "documents", "lexical", "recent", "observed", "vectors"}))
+			}
+			first, err := monitor.Snapshot(t.Context())
+			require.NoError(t, err, "optional coverage cannot fail the ETL snapshot")
+			second, err := monitor.Snapshot(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, first.SourceCoverage, second.SourceCoverage)
+			if queryFails {
+				require.Nil(t, first.SourceCoverage)
+			} else {
+				require.Len(t, first.SourceCoverage, 2)
+				require.Zero(t, first.SourceCoverage[0].Documents)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestSnapshotServesCachedResultWithinTTL(t *testing.T) {
 	monitor, mock := newHealthMonitor(t)
 	expectSnapshotQueries(mock, liveHealthRows())

@@ -6,6 +6,7 @@ import (
 
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/assets"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/dedup"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/operations"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/reporting"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/savedviews"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search"
@@ -68,4 +69,11 @@ type Services struct {
 	SavedViews SavedViewService
 	Dedup      DedupService
 	DQ         DQService
+	Operations OperationsService
+}
+
+type OperationsService interface {
+	Pipeline(context.Context) operations.Pipeline
+	Sources(context.Context) operations.Sources
+	ProxyLive(context.Context) operations.ProxyLive
 }

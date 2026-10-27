@@ -142,6 +142,24 @@ manifest checksum and vector readiness. Pool/search controls include:
 | `ATHSEARCH_SCHEMA_READY_TIMEOUT_MS` | `60000` | None |
 | `ATHSEARCH_SCHEMA_READY_POLL_INTERVAL_MS` | `1000` | None |
 
+## Operational reads
+
+`GET /v1/operations/pipeline` and `GET /v1/operations/sources` allow viewers,
+operators and admins. `GET /v1/operations/proxy/live` requires operator or admin.
+Authorization runs before every cached read. Measurements are global; missing
+coverage is unknown, and an idle queue is not proof of readiness.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ATHSEARCH_PROXY_TELEMETRY_URL` | empty (disabled) | Fixed private proxy `/internal/telemetry` URL; two-second timeout, shared five-second cache, stale after 15 seconds and unavailable after 60 seconds |
+| `ATHSEARCH_OPERATIONS_STATS_URL` | empty (unavailable) | Fixed Stats Reader `/public/stats` URL; shared 30-second cache, original timestamps, live freshness 180 seconds and peak freshness 360 seconds |
+
+Both URLs must use HTTP(S) without credentials, query or fragment. Redirects
+are rejected. Browser credentials and upstream errors are never forwarded.
+Pipeline/source reads reuse the 30-second ETL cache and are stale after 60
+seconds. Live rates are unavailable on the first sample, counter reset or
+process change. Telemetry failures do not affect search readiness.
+
 ## Embedding workers
 
 Workers are disabled by default in the binary:

@@ -2,6 +2,16 @@ import { lazy } from 'solid-js';
 import type { RouteDefinition } from '@solidjs/router';
 
 export const routes: RouteDefinition[] = [
+  {
+    path: '/ingestion',
+    component: lazy(() => import('~/pages/IngestionPage')),
+  },
+  { path: '/sources', component: lazy(() => import('~/pages/SourcesPage')) },
+  {
+    path: '/sources/proxy',
+    component: lazy(() => import('~/pages/SourcesPage')),
+  },
+  { path: '/evidence', component: lazy(() => import('~/pages/EvidencePage')) },
   { path: '/dq/*', component: lazy(() => import('~/pages/DQPage')) },
   {
     path: '/',

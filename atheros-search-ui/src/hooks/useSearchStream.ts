@@ -6,6 +6,7 @@ import {
   normalizeSearchMeta,
   normalizeSearchResult,
   prepareSearchRequest,
+  releaseAuthenticatedResponse,
 } from '~/api/client';
 import { env } from '~/env';
 import {
@@ -189,53 +190,60 @@ export function useSearchStream() {
       },
     );
 
-    if (!response.ok) {
-      throw await apiErrorFromResponse(response);
-    }
-    if (!response.body) {
-      throw new ApiError(response.status, 'Streaming response body was empty.');
-    }
+    try {
+      if (!response.ok) {
+        throw await apiErrorFromResponse(response);
+      }
+      if (!response.body) {
+        throw new ApiError(
+          response.status,
+          'Streaming response body was empty.',
+        );
+      }
 
-    const reader = response.body
-      .pipeThrough(new TextDecoderStream())
-      .getReader();
-    let buffer = '';
-    let completed = false;
-    let envelopeProtocol = false;
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+      let buffer = '';
+      let completed = false;
+      let envelopeProtocol = false;
 
-    while (!completed) {
-      const { value, done } = await reader.read();
-      if (done) {
-        const parsed = readStreamLine(buffer.trim());
-        if (parsed) {
+      while (!completed) {
+        const { value, done } = await reader.read();
+        if (done) {
+          const parsed = readStreamLine(buffer.trim());
+          if (parsed) {
+            const applied = applyParsed(parsed, seenKeys);
+            completed = applied.done;
+            envelopeProtocol ||= applied.envelopeProtocol;
+          }
+          break;
+        }
+
+        buffer += value;
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const parsed = readStreamLine(line.trim());
+          if (!parsed) continue;
           const applied = applyParsed(parsed, seenKeys);
           completed = applied.done;
           envelopeProtocol ||= applied.envelopeProtocol;
-        }
-        break;
-      }
-
-      buffer += value;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const parsed = readStreamLine(line.trim());
-        if (!parsed) continue;
-        const applied = applyParsed(parsed, seenKeys);
-        completed = applied.done;
-        envelopeProtocol ||= applied.envelopeProtocol;
-        if (completed) {
-          await reader.cancel().catch(() => {});
-          break;
+          if (completed) {
+            await reader.cancel().catch(() => {});
+            break;
+          }
         }
       }
+
+      return {
+        completed: completed || !envelopeProtocol,
+        envelopeProtocol,
+      };
+    } finally {
+      releaseAuthenticatedResponse(response);
     }
-
-    return {
-      completed: completed || !envelopeProtocol,
-      envelopeProtocol,
-    };
   }
 
   async function stream(

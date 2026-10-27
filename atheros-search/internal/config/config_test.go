@@ -51,6 +51,24 @@ func TestLoadOnlySupportsNomicMoE(t *testing.T) {
 	}
 }
 
+func TestOperationsUpstreamsAreOptionalFixedURLs(t *testing.T) {
+	setRequiredPostgresEnv(t)
+	for _, key := range []string{"ATHSEARCH_PROXY_TELEMETRY_URL", "ATHSEARCH_OPERATIONS_STATS_URL"} {
+		for _, value := range []string{"", "http://proxy:9098/internal/telemetry", "https://stats.example.test/public/stats"} {
+			t.Setenv(key, value)
+			_, err := Load()
+			require.NoError(t, err)
+		}
+		for _, value := range []string{"file:///private/file", "/relative", "http://user:secret@proxy/", "http://proxy/?key=secret", "http://proxy/#fragment"} {
+			t.Setenv(key, value)
+			_, err := Load()
+			require.ErrorContains(t, err, key)
+			require.NotContains(t, err.Error(), "secret")
+		}
+		t.Setenv(key, "")
+	}
+}
+
 func TestLoadReadsPostgresPasswordFromFile(t *testing.T) {
 	setRequiredPostgresEnv(t)
 	t.Setenv("ATHSEARCH_POSTGRES_DSN", "")

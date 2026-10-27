@@ -13,6 +13,7 @@ variable. Generated protobuf code remains in its existing authoritative module.
 | Graph / Solid UI | internal/reporting/graph_types.go and sibling atheros-search-ui/src/api/types.ts | Closed node/edge payloads; optional presentation-only parent/depth/role and hierarchy metadata; hierarchy root filters and explicit truncation; reporting graph tests, make db-contract, make ui-check |
 | gRPC / clients | proto/atheros/search/v1/search.proto; Search produces, generated clients consume | Preserve RPC names and field numbers; real in-memory unary/streamed client tests; make proto-check and make test |
 | ETL / clients | internal/transport/httpapi/health_handlers.go; ETL health produces, Solid UI consumes | Actual WebSocket upgrade, origin/auth, JSON text snapshots every five seconds, disconnect cleanup; make test |
+| Operations / console | internal/operations and internal/transport/httpapi/operations_handlers.go; cached ETL, private proxy telemetry and materialized snapshots produce measurements | Viewer pipeline/source reads, operator/admin live proxy reads with authorization before caches, global scope, unknown measurements, bounded allowlists and independent freshness; operations/HTTP tests and make stack-contract |
 | Proxy record context / clients | internal/search/record_context.go; Search produces, record drilldown consumes | Proxy records never anchor wireless activity, including legacy rows with MAC fields; proxy timelines remain explicitly unavailable. Embedding rows include input revision and require completed status, matching current text/checksum/revision and a nonzero vector; make db-contract |
 | Octopus / workers | sql/postgres/contracts/processors.json and canonical embedding_jobs/search_documents; Octopus prepares jobs, Search claims/completes | Event/device/behaviour/sequence kinds, document/model/checksum identity, exclusive ownership, fences, retries and recovery; make stack-contract; make db-contract |
 | Search / PostgreSQL | sql/postgres/atheros_search/manifest.yaml, octopus_core/manifest.yaml and their grants/least_privilege.sql.tmpl; canonical provisioner produces schema, feature services consume | Checksums, readiness, VECTOR(768), executable report/record-context/worker queries, isolated runtime privileges and denied DDL/Octopus access; make db-contract |
@@ -47,6 +48,7 @@ tests. Seed writes use the provisioning account; assertions query through
 canonical runtime grants. No production DDL or grants are modified.
 
 ETL embedding gauges aggregate all job kinds and models. They do not establish
-proxy source coverage, current vector coverage, or recovered attempts. Proxy
-coverage publication and timelines remain gated work in the parent plan; no
-health result should be interpreted as their implementation.
+source vector coverage or recovered attempts. Operations source coverage counts
+active retrieval documents and current, completed, nonzero vectors for the
+configured model/input revision and expected embedding kind. Missing coverage
+queries stay unknown. Proxy timelines remain unavailable.

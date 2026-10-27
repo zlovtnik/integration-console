@@ -22,6 +22,7 @@ import (
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/health"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/metrics"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/observability"
+	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/operations"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/reporting"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/savedviews"
 	"github.com/zlovtnik/ssl-proxy/services/atheros-search/internal/search"
@@ -154,6 +155,7 @@ func Run() error {
 	}
 
 	healthMon := etlhealth.NewHealthMonitor(pool.DB)
+	healthMon.SetCoverageModel(cfg.EmbeddingModel, cfg.EmbeddingInputRevision)
 	healthMon.SetSemanticStatus(&semanticStatus{preflight: preflight, lanes: lanes})
 	healthMon.SetSnapshotObserver(func(snapshot etlhealth.ETLHealth) {
 		m.SetEmbeddingJobs(snapshot.EmbeddingPending, snapshot.EmbeddingLeased, snapshot.EmbeddingCompleted, snapshot.EmbeddingFailed)
@@ -205,7 +207,7 @@ func Run() error {
 	}
 	defer grpcServer.Stop()
 	dedupService := dedup.New(dedup.Options{Enabled: cfg.DQEnabled, ManagerURL: cfg.DQManagerURL, ServiceToken: cfg.DQServiceToken, InstallationID: cfg.DQInstallationID, Namespace: cfg.DQNamespace, Timeout: cfg.DQTimeout, RemoteOrigin: cfg.DQRemoteOrigin})
-	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m, WirelessProjection: cfg.WirelessProjection}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}, Dedup: dedupService, DQ: dedupService}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
+	httpServer, err := httpapi.StartHTTP(ctx, cfg.HTTPPort, cfg.CORSAllowedOrigins, httpapi.Services{Search: svc, Reporting: &reporting.Service{Pool: pool.DB, Metrics: m, WirelessProjection: cfg.WirelessProjection}, Assets: &assets.Service{Pool: pool.DB}, SavedViews: &savedviews.Service{Pool: pool.DB}, Dedup: dedupService, DQ: dedupService, Operations: operations.New(healthMon, cfg.ProxyTelemetryURL, cfg.OperationsStatsURL)}, readiness, tokenAuth, healthMon, cfg.WSEnabled, logger)
 	if err != nil {
 		return fmt.Errorf("start http gateway: %w", err)
 	}
