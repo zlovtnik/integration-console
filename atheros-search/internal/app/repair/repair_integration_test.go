@@ -74,6 +74,57 @@ func TestDatabaseProxyRepairCLIDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestDatabaseReviewedProxyFailureRequiresCurrentJobAndQueueReserve(t *testing.T) {
+	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
+	_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs,atheros_search.embeddings,atheros_search.search_vectors_event,atheros_search.embedding_repair_receipts,atheros_search.embedding_repair_progress;
+      INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status)
+      SELECT md5(i::text)::uuid,i::text,i::text,'proxy_events','proxy_event','synthetic',
+        encode(sha256(convert_to('synthetic','UTF8')),'hex'), CASE WHEN i=2 THEN 'superseded' ELSE 'active' END
+      FROM generate_series(1,4)i;
+      INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256,status,attempt_count,last_error,updated_at)
+      SELECT document_id,document_id,'event','contract',normalized_sha256,'failed',
+        CASE WHEN source_id='3' THEN 5 ELSE 1 END,'reviewed failure','2026-01-01T00:00:00Z'::timestamptz
+      FROM atheros_search.search_documents;
+      DELETE FROM atheros_search.search_documents WHERE source_id='4';
+      INSERT INTO atheros_search.proxy_preparation_policy(singleton,pending_high_water,expires_at)
+      VALUES(TRUE,1,now()+interval '1 hour') ON CONFLICT(singleton) DO UPDATE SET pending_high_water=1,expires_at=EXCLUDED.expires_at`)
+	require.NoError(t, err)
+	scope := Scope{Kinds: []string{"proxy_event"}, Model: "contract", InputRevision: "legacy_unknown", Limit: 1,
+		CampaignID: "reviewed-failure", CreatedBefore: time.Now(), ReviewedJobID: "c4ca4238-a0b9-2382-0dcc-509a6f75849b",
+		ReviewedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), QueueReserve: 1}
+	preview, err := repairProxyPage(t.Context(), runtimeDB, scope, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, preview.ReviewedFailure)
+	_, err = repairProxyPage(t.Context(), runtimeDB, scope, true)
+	require.ErrorContains(t, err, "headroom insufficient")
+	_, err = provision.ExecContext(t.Context(), `UPDATE atheros_search.proxy_preparation_policy SET pending_high_water=2`)
+	require.NoError(t, err)
+	applied, err := repairProxyPage(t.Context(), runtimeDB, scope, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, applied.Retried)
+	repeated, err := repairProxyPage(t.Context(), runtimeDB, scope, true)
+	require.NoError(t, err)
+	require.Zero(t, repeated.Retried)
+
+	for id, name := range map[string]string{
+		"c81e728d-9d4c-2f63-6f06-7f89cc14862c": "superseded",
+		"eccbc87e-4b5c-e2fe-2830-8fd9f2a7baf3": "exhausted",
+		"a87ff679-a2f3-e71d-9181-a67b7542122c": "orphaned",
+	} {
+		scope.ReviewedJobID, scope.CampaignID = id, name
+		skipped, err := repairProxyPage(t.Context(), runtimeDB, scope, true)
+		require.NoError(t, err)
+		require.Zero(t, skipped.Retried, name)
+	}
+	var pending, receipts int
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs
+      WHERE status='pending' AND attempt_count=1 AND priority=2147483647`).Scan(&pending))
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_repair_receipts
+      WHERE previous_status='failed' AND attempt_count=1 AND previous_error='reviewed failure' AND reason='reviewed_failed_job'`).Scan(&receipts))
+	require.Equal(t, 1, pending)
+	require.Equal(t, 1, receipts)
+}
+
 func TestDatabaseProxyRepairRetriesMatchingZeroVectorsAndKeepsValidVectors(t *testing.T) {
 	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
 	_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs,atheros_search.embeddings,atheros_search.search_vectors_event,atheros_search.embedding_repair_receipts,atheros_search.embedding_repair_progress;

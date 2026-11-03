@@ -9,10 +9,21 @@ whose two vector stores are missing or disagree. Capture the returned
 `after_job_id` and pass it as `-after-job-id` for the next page. Receipts retain
 the previous state, attempts and diagnostic. Applied campaigns resume from their
 persisted cursor and reject changed scope. A fresh Octopus queue policy and
-sufficient headroom are required before a repair can enqueue work. Failed, cancelled, exhausted,
-superseded and orphaned work is not revived by this operation. Legacy
+sufficient headroom are required before a repair can enqueue work. Legacy
 reset/retry commands below accept `-limit` and only target active non-proxy
 documents; they cannot bypass scoped proxy campaign receipts and queue budgets.
+
+The Go worker recovers expired leases in its configured kind, model and input
+revision scope. For a failed job with attempts remaining, review the private
+diagnostic and confirm that the cause has been corrected. Use `proxy-status`
+with the same scope plus `-reviewed-failed-job`, the exact `updated_at` as
+`-reviewed-at`, and a positive measured `-queue-reserve`. Proceed only if
+`reviewed_failure=1` and the current capacity sample permits recovery. Apply
+with `proxy-reconcile -apply -campaign-id` and a unique campaign ID for the
+reviewed job. The retry uses the lowest worker priority, preserves the attempt
+budget, and keeps the requested queue reserve free at admission. A changed
+timestamp, exhausted attempt budget, cancelled job, stale content, superseded
+document, or missing document makes the job ineligible.
 
 Repository-level build and test entry points:
 

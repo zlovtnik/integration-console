@@ -22,6 +22,9 @@ type Scope struct {
 	InputRevision string
 	AfterJobID    string
 	Limit         int
+	ReviewedJobID string
+	ReviewedAt    time.Time
+	QueueReserve  int
 }
 
 func (s Scope) validate() error {
@@ -39,12 +42,16 @@ func (s Scope) validate() error {
 	if s.CreatedBefore.IsZero() {
 		return fmt.Errorf("scoped repair requires a frozen created-before cutoff")
 	}
+	if s.ReviewedJobID != "" && (s.ReviewedAt.IsZero() || s.QueueReserve <= 0 || s.AfterJobID != "") {
+		return fmt.Errorf("reviewed failure repair requires reviewed-at and a positive queue reserve without a cursor")
+	}
 	return nil
 }
 
 type Page struct {
 	Scanned                int
 	CompletedMissingVector int
+	ReviewedFailure        int
 	Retried                int64
 	AfterJobID             string
 }
@@ -74,6 +81,9 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
 		return page, err
 	}
 	scopeJSON, _ := json.Marshal([]any{scope.Kinds, scope.Model, scope.InputRevision, scope.CreatedBefore.UTC().Format(time.RFC3339Nano)})
+	if scope.ReviewedJobID != "" {
+		scopeJSON, _ = json.Marshal([]any{string(scopeJSON), scope.ReviewedJobID, scope.ReviewedAt.UTC(), scope.QueueReserve})
+	}
 	scopeHash := fmt.Sprintf("%x", sha256.Sum256(scopeJSON))
 	if apply {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO atheros_search.embedding_repair_progress(campaign_id,scope_sha256)
@@ -95,8 +105,14 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
 	}
 	// Bound inputs first, including healthy and terminal jobs. Durable receipts
 	// retain diagnostics; retries do not reset attempt_count or max_attempts.
+	var reviewedAt any
+	if scope.ReviewedJobID != "" {
+		reviewedAt = scope.ReviewedAt
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT job.job_id::text,
-      job.status = 'completed' AND job.attempt_count < job.max_attempts
+      CASE WHEN $8::timestamptz IS NULL THEN job.status = 'completed'
+           ELSE job.status = 'failed' AND job.updated_at = $8 END
+      AND job.attempt_count < job.max_attempts
       AND doc.status='active' AND doc.normalized_sha256=job.content_sha256 AND doc.input_revision=job.input_revision
       AND doc.normalized_sha256=encode(sha256(convert_to(doc.normalized_text,'UTF8')), 'hex')
       AND NOT EXISTS (SELECT 1 FROM atheros_search.embeddings unified
@@ -109,8 +125,10 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
       FROM atheros_search.embedding_jobs job JOIN atheros_search.search_documents doc ON doc.document_id=job.document_id
       WHERE doc.source_kind IN (SELECT jsonb_array_elements_text($1::jsonb))
         AND job.embedding_model=$2 AND job.input_revision=$3 AND ($4::uuid IS NULL OR job.job_id > $4::uuid)
-        AND job.created_at < $6
-      ORDER BY job.job_id LIMIT $5`, string(encoded), scope.Model, scope.InputRevision, after, scope.Limit, scope.CreatedBefore)
+        AND job.embedding_kind='event' AND job.created_at < $6
+        AND (NULLIF($7,'') IS NULL OR job.job_id=NULLIF($7,'')::uuid)
+      ORDER BY job.job_id LIMIT $5`, string(encoded), scope.Model, scope.InputRevision, after, scope.Limit, scope.CreatedBefore,
+		scope.ReviewedJobID, reviewedAt)
 	if err != nil {
 		return page, err
 	}
@@ -125,7 +143,11 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
 		page.Scanned++
 		page.AfterJobID = id
 		if eligible {
-			page.CompletedMissingVector++
+			if reviewedAt == nil {
+				page.CompletedMissingVector++
+			} else {
+				page.ReviewedFailure++
+			}
 			ids = append(ids, id)
 		}
 	}
@@ -150,7 +172,7 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
           WHERE doc.source_kind IN ('proxy_event','proxy_blocked_host_window') AND job.status IN ('pending','leased') LIMIT $1) bounded`, highWater).Scan(&pending); err != nil {
 			return page, err
 		}
-		if len(ids) > highWater-pending {
+		if len(ids) > 0 && len(ids) > highWater-pending-scope.QueueReserve {
 			return page, fmt.Errorf("proxy queue headroom insufficient; retry the same page after workers drain")
 		}
 		for _, id := range ids {
@@ -160,9 +182,12 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
 			}
 			result, err := tx.ExecContext(ctx, `WITH receipt AS (
               INSERT INTO atheros_search.embedding_repair_receipts(receipt_id,job_id,previous_status,attempt_count,previous_error,reason)
-              SELECT gen_random_uuid(),job.job_id,job.status,job.attempt_count,job.last_error,'completed_missing_current_vector'
+              SELECT gen_random_uuid(),job.job_id,job.status,job.attempt_count,job.last_error,
+                CASE WHEN $2::timestamptz IS NULL THEN 'completed_missing_current_vector' ELSE 'reviewed_failed_job' END
               FROM atheros_search.embedding_jobs job JOIN atheros_search.search_documents doc ON doc.document_id=job.document_id
-              WHERE job.job_id=$1 AND job.status='completed' AND job.attempt_count<job.max_attempts
+              WHERE job.job_id=$1 AND job.attempt_count<job.max_attempts
+                AND CASE WHEN $2::timestamptz IS NULL THEN job.status='completed'
+                         ELSE job.status='failed' AND job.updated_at=$2 END
                 AND doc.status='active' AND doc.normalized_sha256=job.content_sha256 AND doc.input_revision=job.input_revision
                 AND doc.normalized_sha256=encode(sha256(convert_to(doc.normalized_text,'UTF8')),'hex')
                 AND NOT EXISTS(SELECT 1 FROM atheros_search.embeddings unified
@@ -172,9 +197,12 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
                   WHERE unified.document_id=job.document_id AND unified.embedding_model=job.embedding_model
                     AND unified.input_revision=job.input_revision AND unified.embedding_kind='event'
                     AND unified.content_sha256=job.content_sha256 AND unified.embedding OPERATOR(public.<#>) unified.embedding<0)
+              FOR UPDATE OF job
               RETURNING job_id)
-              UPDATE atheros_search.embedding_jobs job SET status='pending', completed_at=NULL, next_attempt_at=clock_timestamp(), updated_at=clock_timestamp()
-              FROM receipt WHERE job.job_id=receipt.job_id`, id)
+              UPDATE atheros_search.embedding_jobs job SET status='pending', completed_at=NULL,
+                priority=CASE WHEN $2::timestamptz IS NULL THEN job.priority ELSE 2147483647 END,
+                next_attempt_at=clock_timestamp(), updated_at=clock_timestamp()
+              FROM receipt WHERE job.job_id=receipt.job_id`, id, reviewedAt)
 			if err != nil {
 				return page, err
 			}

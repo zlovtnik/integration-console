@@ -34,7 +34,15 @@ func Run() error {
 	apply := flag.Bool("apply", false, "Apply one scoped proxy-reconcile page; default is read-only")
 	campaignID := flag.String("campaign-id", "", "Durable scoped repair campaign identity (required with apply)")
 	createdBefore := flag.String("created-before", "", "Frozen job creation cutoff in RFC3339 (required for proxy operations)")
+	reviewedJob := flag.String("reviewed-failed-job", "", "Exact failed job UUID approved for one scoped retry")
+	reviewedAt := flag.String("reviewed-at", "", "Exact reviewed job updated_at in RFC3339 with fractional seconds")
+	queueReserve := flag.Int("queue-reserve", 0, "Measured proxy queue slots to keep free during a reviewed failure retry")
 	flag.Parse()
+
+	if (*reviewedJob != "" || *reviewedAt != "" || *queueReserve != 0) &&
+		*action != "proxy-status" && *action != "proxy-reconcile" {
+		return fmt.Errorf("reviewed failure options require proxy-status or proxy-reconcile")
+	}
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
@@ -73,10 +81,22 @@ func Run() error {
 		if parseErr != nil {
 			return fmt.Errorf("created-before must be a frozen RFC3339 timestamp")
 		}
-		page, scopedErr := repairProxyPage(ctx, db, Scope{Kinds: strings.Split(*sourceKinds, ","), Model: *model, InputRevision: *inputRevision, AfterJobID: *afterJobID, Limit: min(*cancelLimit, 1000), CampaignID: *campaignID, CreatedBefore: cutoff}, *action == "proxy-reconcile" && *apply && !*dryRun)
+		scope := Scope{Kinds: strings.Split(*sourceKinds, ","), Model: *model, InputRevision: *inputRevision,
+			AfterJobID: *afterJobID, Limit: min(*cancelLimit, 1000), CampaignID: *campaignID, CreatedBefore: cutoff}
+		if *reviewedJob != "" {
+			reviewed, parseErr := time.Parse(time.RFC3339Nano, *reviewedAt)
+			if parseErr != nil {
+				return fmt.Errorf("reviewed-at must be the exact RFC3339 job update timestamp")
+			}
+			scope.ReviewedJobID, scope.ReviewedAt, scope.QueueReserve = *reviewedJob, reviewed, *queueReserve
+		} else if *reviewedAt != "" || *queueReserve != 0 {
+			return fmt.Errorf("reviewed-at and queue-reserve require reviewed-failed-job")
+		}
+		page, scopedErr := repairProxyPage(ctx, db, scope, *action == "proxy-reconcile" && *apply && !*dryRun)
 		err = scopedErr
 		if err == nil {
-			logger.Info().Int("scanned", page.Scanned).Int("completed_missing_vector", page.CompletedMissingVector).Int64("retried", page.Retried).Str("after_job_id", page.AfterJobID).Msg("bounded proxy repair page")
+			logger.Info().Int("scanned", page.Scanned).Int("completed_missing_vector", page.CompletedMissingVector).
+				Int("reviewed_failure", page.ReviewedFailure).Int64("retried", page.Retried).Str("after_job_id", page.AfterJobID).Msg("bounded proxy repair page")
 		}
 	case "status":
 		err = showStatus(ctx, db, logger)
