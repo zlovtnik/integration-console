@@ -19,9 +19,10 @@ The source-reviewed [reporting workmap](../../../docs/atheros-reporting-workmap.
 defines the business questions, accuracy findings, simple controls and staged
 redesign for Inventory, network map, identity review, Search and Explain. The
 [reporting data contract](../../../docs/atheros-reporting-data-contract.md)
-documents table grains, relationship meanings and provenance. Implementation
-is tracked in [three plans](../../../plans/README.md); these are proposed changes,
-not current UI capabilities.
+documents table grains, relationship meanings and provenance. Implementation is
+tracked in the [reporting plans](../../../plans/README.md). Use the current code
+and contracts below for available capabilities; workmap items are not evidence
+that a feature has shipped.
 
 The initial inventory grain is an observed MAC identifier. Observed AP links,
 pending identity candidates and confirmed identity membership have distinct
@@ -41,18 +42,26 @@ bun run test:e2e
 
 `bun run build` runs `tsc --noEmit` before `vite build`.
 
+Playwright starts the Vite server itself and runs Chromium desktop and mobile
+projects. Install its browser runtime with `bunx playwright install chromium`
+before the first browser test. `PLAYWRIGHT_PORT` selects an alternate dev port
+when 5173 is occupied. Browser fixtures do not establish live platform health.
+
 ## API contract used by the UI
 
 The UI uses these endpoints (snake_case JSON, RFC 3339 timestamps):
 
 | Method | Path | UI usage |
 |---|---|---|
-| `POST` | `/v1/search` | Search page and streaming results |
+| `POST` | `/v1/search` | Search page |
+| `POST` | `/v1/search/stream` | NDJSON search results and completion metadata |
 | `POST` | `/v1/explain/scoped` | Record detail page: ranking factors in the caller's scope |
 | `GET` | `/v1/records/{source_key}/context` | Record detail page: record, activity rate, related devices, embedding work |
 | `GET` | `/v1/suggest/filters` | Filter autocomplete |
 | `POST` | `/v1/graph` | Network graph projection |
 | `POST` | `/v1/network-map` | Network map report |
+| `POST` | `/v1/investigation` | Device/AP investigation in the selected scope |
+| `POST` | `/v1/evidence` | Evidence page for the same anchor and scope |
 | `POST` | `/v1/inventory` | Inventory graph and dedup queue |
 | `GET` | `/v1/inventory/merge-candidates/{candidate_id}` | Merge candidate detail |
 | `POST` | `/v1/inventory/merge-candidates/{candidate_id}/decision` | Merge, not-a-match, needs-more-data |
@@ -61,9 +70,21 @@ The UI uses these endpoints (snake_case JSON, RFC 3339 timestamps):
 
 Types live in `src/api/types.ts`. The HTTP client is `src/api/client.ts`.
 
+### DQ workspace
+
+The `/dq/*` routes use runtime availability from `GET /v1/dq/context`. When
+enabled, `/dq` hosts candidate review and deeper routes load the DQ manager's
+embedded shell from `/dq-ui/embedded.html`. The authenticated host brokers
+approved `/v1/dq/*` operations through `src/dq/bridge.ts`; bearer tokens stay in
+the host and never enter the sandboxed frame. Opening the workspace does not
+admit a processor run. Inventory's dedup queue redirects to this workspace when
+the runtime context enables it.
+
 Set `VITE_DQ_BETA_ENABLED=true` to show the DQ processing panel in the dedup
-queue. It is disabled by default and never starts a run on page load or decision
-submission. An operator enters an authorized location and approved policy before
+queue's legacy review surface. This build-time flag is separate from runtime
+workspace availability. It is disabled by default and never starts a run on
+page load or decision submission. An operator enters an authorized location and
+approved policy before
 requesting candidate preparation. Admission retries reuse the same idempotency
 identity, and status polling stops at completion or an error. The panel keeps
 "decision recorded", "run completed", and "projection applied" distinct.
@@ -107,11 +128,10 @@ pending review pairs. They must not be described as confirmed asset identity.
 
 ### Search capabilities
 
-The current backend supports wireless event, device, proxy event, blocked-host
-window and Cross search. Behaviour and sequence search are retired by the Go
-API even though the current UI still offers those choices. Removing that UI/API
-mismatch is tracked in the reporting accuracy plan. Document preparation support
-does not imply a supported public search mode or populated deployment.
+The selector offers wireless event, device, proxy event, blocked-host window and
+All sources (Cross) search. Behaviour and sequence are retired public search
+modes and are not offered. Document preparation support does not imply a
+supported public search mode or populated deployment.
 
 ## Auth
 
@@ -122,6 +142,31 @@ authorization.
 
 ## Local development
 
-Point the UI at a running Atheros Search instance (`VITE_API_BASE` or the
-app env module). There is no local inventory mock fallback; the backend
-routes above are part of the contract.
+Run commands from this directory. Create `.env.local` using
+[`.env.example`](.env.example) as the configuration reference, then configure:
+
+| Setting | Purpose |
+|---|---|
+| `VITE_API_BASE` | Browser-reachable API origin; empty uses the UI origin |
+| `VITE_KEYCLOAK_URL` | Browser-reachable identity-provider origin |
+| `VITE_KEYCLOAK_REALM` | Keycloak realm used by the API issuer |
+| `VITE_KEYCLOAK_CLIENT_ID` | Public browser client with the API's expected roles/audience |
+| `VITE_APP_TITLE` | Optional application title |
+| `ATHSEARCH_DEV_API_ORIGIN` | Vite's server-side proxy target for `/dq-ui/` and `/v1/dq/`; defaults to `http://127.0.0.1:8080` |
+
+Vite serves `http://127.0.0.1:5173`. Register that origin and its `/callback`
+redirect URI in the development Keycloak client. When `VITE_API_BASE` points to
+a separate origin, configure the API's `ATHSEARCH_CORS_ALLOWED_ORIGINS` to admit
+the UI origin. Vite proxies only the DQ paths listed above; other `/v1/` calls
+need the configured API base or a same-origin reverse proxy.
+
+All three Keycloak values are needed to enable the browser login flow. Leaving
+them unset bypasses the local browser login gate and supplies no bearer token;
+it does not grant access to an authenticated API. Never put API tokens, database
+passwords or DQ service credentials into `VITE_*` values, which are bundled into
+the browser application. Restart Vite after changing environment settings.
+
+There is no runtime inventory mock fallback. A live API and its provisioned
+database are required for operator workflows; unit/browser fixtures are test
+inputs only. Production routing and image promotion follow the parent
+[GitOps guide](../../../cyber-stack/README.md).
