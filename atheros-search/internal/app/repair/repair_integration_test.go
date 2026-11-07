@@ -20,7 +20,7 @@ func TestDatabaseLegacyRetriesAreBoundedAndCannotReviveProxyJobs(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs;
  INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256,status)
- SELECT lpad(i::text,32,'0')::uuid,i::text,i::text,'synthetic',CASE WHEN i=1 THEN 'proxy_event' ELSE 'event' END,'synthetic',repeat('a',64),CASE WHEN i=4 THEN 'superseded' ELSE 'active' END FROM generate_series(1,5)i;
+ SELECT lpad(i::text,32,'0')::uuid,i::text,i::text,'synthetic',CASE WHEN i=1 THEN 'proxy_event' WHEN i=6 THEN 'proxy_flow' ELSE 'event' END,'synthetic',repeat('a',64),CASE WHEN i=4 THEN 'superseded' ELSE 'active' END FROM generate_series(1,6)i;
  INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256,status,attempt_count)
  SELECT document_id,document_id,'event','contract',normalized_sha256,'failed',CASE WHEN source_id='5' THEN 5 ELSE 1 END FROM atheros_search.search_documents;`)
 			require.NoError(t, err)
@@ -39,12 +39,14 @@ func TestDatabaseLegacyRetriesAreBoundedAndCannotReviveProxyJobs(t *testing.T) {
 			var count int
 			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs WHERE status='pending'`).Scan(&count))
 			require.Equal(t, 1, count)
-			var proxyStatus string
-			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT status FROM atheros_search.embedding_jobs WHERE job_id='00000000-0000-0000-0000-000000000001'`).Scan(&proxyStatus))
-			if operation == "retry-failed" {
-				require.Equal(t, "failed", proxyStatus)
-			} else {
-				require.Equal(t, "leased", proxyStatus)
+			for _, proxyID := range []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000006"} {
+				var proxyStatus string
+				require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT status FROM atheros_search.embedding_jobs WHERE job_id=$1`, proxyID).Scan(&proxyStatus))
+				if operation == "retry-failed" {
+					require.Equal(t, "failed", proxyStatus)
+				} else {
+					require.Equal(t, "leased", proxyStatus)
+				}
 			}
 			apply()
 			require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT count(*) FROM atheros_search.embedding_jobs WHERE status='pending'`).Scan(&count))
@@ -163,11 +165,13 @@ func TestDatabaseProxyRepairIsBoundedScopedResumableAndKeepsDiagnostics(t *testi
 	provision, runtimeDB := testdb.Provision(t), testdb.Runtime(t)
 	_, err := provision.ExecContext(t.Context(), `TRUNCATE atheros_search.search_documents,atheros_search.embedding_jobs,atheros_search.embeddings,atheros_search.search_vectors_event,atheros_search.embedding_repair_receipts,atheros_search.embedding_repair_progress;
       INSERT INTO atheros_search.search_documents(document_id,source_id,source_key,source_table,source_kind,normalized_text,normalized_sha256)
-      SELECT md5(i::text)::uuid,i::text,i::text,'proxy_events',CASE WHEN i=3 THEN 'event' ELSE 'proxy_event' END,'synthetic',encode(sha256(convert_to('synthetic','UTF8')),'hex') FROM generate_series(1,3)i;
+      SELECT md5(i::text)::uuid,i::text,i::text,CASE WHEN i=2 THEN 'proxy_flows' ELSE 'proxy_events' END,
+        CASE WHEN i=3 THEN 'event' WHEN i=2 THEN 'proxy_flow' ELSE 'proxy_event' END,
+        'synthetic',encode(sha256(convert_to('synthetic','UTF8')),'hex') FROM generate_series(1,3)i;
       INSERT INTO atheros_search.embedding_jobs(job_id,document_id,embedding_kind,embedding_model,content_sha256,status,attempt_count,last_error)
       SELECT document_id,document_id,'event','contract',normalized_sha256,'completed',1,'retained diagnostic' FROM atheros_search.search_documents;`)
 	require.NoError(t, err)
-	scope := Scope{Kinds: []string{"proxy_event", "proxy_blocked_host_window"}, Model: "contract", InputRevision: "legacy_unknown", Limit: 1, CampaignID: "contract-campaign", CreatedBefore: time.Now()}
+	scope := Scope{Kinds: []string{"proxy_event", "proxy_blocked_host_window", "proxy_flow"}, Model: "contract", InputRevision: "legacy_unknown", Limit: 1, CampaignID: "contract-campaign", CreatedBefore: time.Now()}
 	_, err = provision.ExecContext(t.Context(), `INSERT INTO atheros_search.proxy_preparation_policy(singleton,pending_high_water,expires_at)
       VALUES(TRUE,1000,now()+interval '1 hour') ON CONFLICT(singleton) DO UPDATE SET pending_high_water=1000,expires_at=EXCLUDED.expires_at`)
 	require.NoError(t, err)

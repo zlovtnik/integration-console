@@ -34,7 +34,7 @@ func textChecksum(text string) string {
 
 func embeddingKindForSource(kind string) string {
 	switch kind {
-	case "event", "proxy_event", "proxy_blocked_host_window":
+	case "event", "proxy_event", "proxy_blocked_host_window", "proxy_flow":
 		return "event"
 	case "device", "device_profile", "ap_profile", "identity_summary":
 		return "device"

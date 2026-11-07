@@ -32,7 +32,7 @@ func (s Scope) validate() error {
 		return fmt.Errorf("scoped repair requires kinds, model, input revision and limit 1..1000")
 	}
 	for _, kind := range s.Kinds {
-		if kind != "proxy_event" && kind != "proxy_blocked_host_window" {
+		if kind != "proxy_event" && kind != "proxy_blocked_host_window" && kind != "proxy_flow" {
 			return fmt.Errorf("scoped proxy repair has an unsupported kind")
 		}
 	}
@@ -169,7 +169,7 @@ func repairProxyPage(ctx context.Context, db *sql.DB, scope Scope, apply bool) (
 		var pending int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT job.job_id FROM atheros_search.embedding_jobs job
           JOIN atheros_search.search_documents doc ON doc.document_id=job.document_id
-          WHERE doc.source_kind IN ('proxy_event','proxy_blocked_host_window') AND job.status IN ('pending','leased') LIMIT $1) bounded`, highWater).Scan(&pending); err != nil {
+          WHERE doc.source_kind IN ('proxy_event','proxy_blocked_host_window','proxy_flow') AND job.status IN ('pending','leased') LIMIT $1) bounded`, highWater).Scan(&pending); err != nil {
 			return page, err
 		}
 		if len(ids) > 0 && len(ids) > highWater-pending-scope.QueueReserve {

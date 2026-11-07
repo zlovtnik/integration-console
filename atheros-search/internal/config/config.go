@@ -240,7 +240,7 @@ func validate(cfg Config) error {
 	if modern != (cfg.EmbeddingPrefixOwner == "client") {
 		return fmt.Errorf("embedding input revision and verified prefix owner must be configured together")
 	}
-	allowedKinds := map[string]bool{"event": true, "device": true, "behaviour_window": true, "frame_sequence": true, "proxy_event": true, "proxy_blocked_host_window": true, "device_profile": true, "ap_profile": true, "identity_summary": true, "observation_window": true}
+	allowedKinds := map[string]bool{"event": true, "device": true, "behaviour_window": true, "frame_sequence": true, "proxy_event": true, "proxy_blocked_host_window": true, "proxy_flow": true, "device_profile": true, "ap_profile": true, "identity_summary": true, "observation_window": true}
 	seenKinds := make(map[string]bool)
 	for _, kind := range cfg.WorkerSourceKinds {
 		if !allowedKinds[kind] || seenKinds[kind] {

@@ -284,7 +284,7 @@ WITH targets AS (
  WHERE job.status = 'leased' AND job.lease_expires_at < $1
    AND job.attempt_count < job.max_attempts
    AND document.status='active'
-   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window')
+   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window','proxy_flow')
  ORDER BY job.job_id LIMIT $2 FOR UPDATE OF job SKIP LOCKED
 )
 UPDATE atheros_search.embedding_jobs job
@@ -316,7 +316,7 @@ WITH targets AS (
  JOIN atheros_search.search_documents document USING(document_id)
  WHERE job.status = 'failed' AND job.attempt_count < job.max_attempts
    AND document.status='active'
-   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window')
+   AND document.source_kind NOT IN ('proxy_event','proxy_blocked_host_window','proxy_flow')
  ORDER BY job.job_id LIMIT $1 FOR UPDATE OF job SKIP LOCKED
 )
 UPDATE atheros_search.embedding_jobs job

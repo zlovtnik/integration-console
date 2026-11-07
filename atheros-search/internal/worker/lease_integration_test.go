@@ -77,6 +77,32 @@ func TestDatabaseClaimRejectsActualTextMutation(t *testing.T) {
 	require.NoError(t, tx.Commit())
 }
 
+func TestDatabaseProxyFlowCompletesInBothEventVectorStores(t *testing.T) {
+	provision, runtimeDB := seedJobs(t, 1)
+	_, err := provision.ExecContext(t.Context(), `UPDATE atheros_search.search_documents
+      SET source_kind='proxy_flow',source_table='proxy_flows',normalized_text='proxy flow',normalized_sha256=$1`, textChecksum("proxy flow"))
+	require.NoError(t, err)
+	_, err = provision.ExecContext(t.Context(), `UPDATE atheros_search.embedding_jobs SET content_sha256=$1`, textChecksum("proxy flow"))
+	require.NoError(t, err)
+	scope := JobScope{SourceKinds: []string{"proxy_flow"}, Model: "test-model", InputRevision: "legacy_unknown"}
+	tx, err := runtimeDB.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	jobs, cancelled, err := claimJobs(t.Context(), tx, "flow-worker", 1, time.Now().Add(time.Minute), scope)
+	require.NoError(t, err)
+	require.Zero(t, cancelled)
+	require.Len(t, jobs, 1)
+	require.NoError(t, tx.Commit())
+	pool := &Pool{db: runtimeDB}
+	require.NoError(t, pool.storeCompletion(t.Context(), jobs[0], testVector()))
+	var unified, perKind int
+	require.NoError(t, runtimeDB.QueryRowContext(t.Context(), `SELECT
+      (SELECT count(*) FROM atheros_search.embeddings WHERE document_id=$1 AND embedding_kind='event'),
+      (SELECT count(*) FROM atheros_search.search_vectors_event WHERE document_id=$1)`, jobs[0].DocumentID).Scan(&unified, &perKind))
+	require.Equal(t, 1, unified)
+	require.Equal(t, 1, perKind)
+}
+
 func TestDatabaseCompletionRejectsSupersessionAndRollsBackBothStores(t *testing.T) {
 	provision, runtimeDB := seedJobs(t, 1)
 	job := claimOne(t, runtimeDB, "worker")

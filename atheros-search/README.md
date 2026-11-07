@@ -167,7 +167,7 @@ Workers are disabled by default in the binary:
 | Variable | Default | Shared fallback | Purpose |
 |---|---:|---|---|
 | `ATHSEARCH_WORKER_ENABLED` | `false` | None | Start the worker pool |
-| `ATHSEARCH_WORKER_SOURCE_KINDS` | empty (existing shared scope) | None | Comma-separated validated source-kind allowlist applied before claims and expired recovery. Proxy-only selection: `proxy_event,proxy_blocked_host_window`. |
+| `ATHSEARCH_WORKER_SOURCE_KINDS` | empty (existing shared scope) | None | Comma-separated validated source-kind allowlist applied before claims and expired recovery. Proxy-only selection: `proxy_event,proxy_blocked_host_window,proxy_flow`. |
 | `ATHSEARCH_WORKER_COUNT` | `4` | None | Concurrent claim loops |
 | `ATHSEARCH_EMBEDDING_BATCH_SIZE` | `64` | None | Jobs claimed and embedded per batch |
 | `ATHSEARCH_LEASE_SECONDS` | `1800` | None | Claim lease duration |

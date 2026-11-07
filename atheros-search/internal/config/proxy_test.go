@@ -18,6 +18,7 @@ func TestLoadWorkerSourceKinds(t *testing.T) {
 		{value: ",,,", bad: true},
 		{value: " , , ", bad: true},
 		{value: " proxy_event, proxy_blocked_host_window ", want: []string{"proxy_event", "proxy_blocked_host_window"}},
+		{value: "proxy_flow", want: []string{"proxy_flow"}},
 		{value: ",proxy_event,", want: []string{"proxy_event"}},
 		{value: "typo", bad: true},
 		{value: "proxy_event,proxy_event", bad: true},

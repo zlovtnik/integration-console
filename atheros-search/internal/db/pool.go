@@ -220,7 +220,7 @@ SELECT
   COUNT(*) FILTER (WHERE embedding_kind = 'behaviour'),
   COUNT(*) FILTER (WHERE embedding_kind = 'sequence'),
   EXISTS (SELECT 1 FROM atheros_search.search_documents
-          WHERE status = 'active' AND source_kind IN ('event', 'proxy_event', 'proxy_blocked_host_window')),
+          WHERE status = 'active' AND source_kind IN ('event', 'proxy_event', 'proxy_blocked_host_window', 'proxy_flow')),
   EXISTS (SELECT 1 FROM atheros_search.search_documents
           WHERE status = 'active' AND source_kind = 'device')
 FROM atheros_search.embeddings

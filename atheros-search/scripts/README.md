@@ -1,7 +1,7 @@
 # Atheros Search operational commands
 
 Proxy recovery uses bounded `proxy-status` and `proxy-reconcile` pages. Supply
-`-source-kinds=proxy_event,proxy_blocked_host_window`, `-model`,
+`-source-kinds=proxy_event,proxy_blocked_host_window,proxy_flow`, `-model`,
 `-input-revision`, `-created-before` (a frozen RFC3339 cutoff), and `-limit`
 (1 through 1000). Both default to inspection;
 `proxy-reconcile` also requires `-apply` and `-campaign-id` to retry completed current-content jobs
