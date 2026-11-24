@@ -2,6 +2,8 @@ package observability
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -14,11 +16,16 @@ import (
 // InitTracing configures the process-wide trace provider. The OTLP exporter
 // follows the standard OTEL_EXPORTER_OTLP_* environment variables.
 func InitTracing(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {
-	exporter, err := otlptracegrpc.New(ctx)
-	if err != nil {
-		return nil, err
+	var provider *sdktrace.TracerProvider
+	if strings.EqualFold(os.Getenv("OTEL_SDK_DISABLED"), "true") {
+		provider = sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.NeverSample()))
+	} else {
+		exporter, err := otlptracegrpc.New(ctx)
+		if err != nil {
+			return nil, err
+		}
+		provider = NewTracerProvider(serviceName, exporter)
 	}
-	provider := NewTracerProvider(serviceName, exporter)
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},

@@ -99,6 +99,17 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	apiDigest, err := secretValue("ATHSEARCH_API_TOKEN_SHA256", "ATHSEARCH_API_TOKEN_SHA256_FILE", os.ReadFile)
+	if err != nil {
+		return Config{}, err
+	}
+	if os.Getenv("ATHSEARCH_API_TOKEN_SHA256_FILE") != "" && strings.TrimSpace(apiDigest) == "" {
+		return Config{}, errors.New("ATHSEARCH_API_TOKEN_SHA256_FILE contains an empty digest")
+	}
+	manifestDigest, err := secretValue("ATHSEARCH_SCHEMA_MANIFEST_SHA256", "ATHSEARCH_SCHEMA_MANIFEST_SHA256_FILE", os.ReadFile)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		WorkerSourceKinds:             envCSV("ATHSEARCH_WORKER_SOURCE_KINDS", nil),
 		EmbeddingInputRevision:        envString("ATHSEARCH_EMBEDDING_INPUT_REVISION", "legacy_unknown"),
@@ -109,7 +120,7 @@ func Load() (Config, error) {
 		PostgresTLSCertFile:           strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_CERT_FILE")),
 		PostgresTLSKeyFile:            strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_KEY_FILE")),
 		PostgresTLSServerName:         strings.TrimSpace(os.Getenv("ATHSEARCH_POSTGRES_TLS_SERVER_NAME")),
-		PostgresSchemaManifestSHA256:  strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_SCHEMA_MANIFEST_SHA256"))),
+		PostgresSchemaManifestSHA256:  strings.ToLower(strings.TrimSpace(manifestDigest)),
 		PostgresMaxOpenConns:          envInt("ATHSEARCH_POSTGRES_MAX_OPEN_CONNS", 32),
 		PostgresMaxIdleConns:          envInt("ATHSEARCH_POSTGRES_MAX_IDLE_CONNS", 8),
 		PostgresConnMaxLifetime:       time.Duration(envInt("ATHSEARCH_POSTGRES_CONN_MAX_LIFETIME_MS", 300000)) * time.Millisecond,
@@ -130,7 +141,7 @@ func Load() (Config, error) {
 		SearchTimeout:                 time.Duration(envInt("ATHSEARCH_SEARCH_TIMEOUT_MS", 10000)) * time.Millisecond,
 		HybridAlpha:                   envFloat("ATHSEARCH_HYBRID_ALPHA", 0.5),
 		DenseOverfetchFactor:          envInt("ATHSEARCH_DENSE_OVERFETCH_FACTOR", 8),
-		APIKeySHA256:                  strings.ToLower(strings.TrimSpace(os.Getenv("ATHSEARCH_API_TOKEN_SHA256"))),
+		APIKeySHA256:                  strings.ToLower(strings.TrimSpace(apiDigest)),
 		JWTIssuer:                     strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_ISSUER")),
 		JWTJWKSURI:                    strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_JWKS_URI")),
 		JWTAudience:                   strings.TrimSpace(os.Getenv("ATHSEARCH_JWT_AUDIENCE")),
